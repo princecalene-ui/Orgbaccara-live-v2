@@ -273,6 +273,8 @@
 
   .badge-range2{background:linear-gradient(135deg,#001a14,#00281e);border:1px solid #1a8a6a;border-left:3px solid #2ee0aa;color:#7ff0cc;font-weight:700;animation:flicker-range2 3s ease-in-out infinite;}
   @keyframes flicker-range2{0%,100%{box-shadow:0 0 8px #2ee0aa44}50%{box-shadow:0 0 18px #2ee0aa88}}
+  .badge-side3{background:linear-gradient(135deg,#001a1a,#002828);border:1px solid #1a8a8a;border-left:3px solid #2ee0e0;color:#7ff0f0;font-weight:700;animation:flicker-side3 3s ease-in-out infinite;}
+  @keyframes flicker-side3{0%,100%{box-shadow:0 0 8px #2ee0e044}50%{box-shadow:0 0 18px #2ee0e088}}
   .badge-side2{background:linear-gradient(135deg,#1a0014,#2a0020);border:1px solid #a01a8a;border-left:3px solid #e03ac0;color:#f070d8;font-weight:700;animation:flicker-side2 3s ease-in-out infinite;}
   @keyframes flicker-side2{0%,100%{box-shadow:0 0 8px #e03ac044}50%{box-shadow:0 0 18px #e03ac088}}
   .badge-side{background:linear-gradient(135deg,#1a1000,#2a1c00);border:1px solid #a67c1a;border-left:3px solid #e0a83a;color:#f0c070;font-weight:700;animation:flicker-side 3s ease-in-out infinite;}
@@ -609,6 +611,8 @@ function deterministicPredict(raw){
   let side = computeSide(r.avantDernier, r.dernierDigit);
   const sideInv = applySideDigitInverse(side, r.nextNum);
   if(sideInv.applied) side = sideInv.after;
+  const rule3 = apply3DigitRule(suit, side, r.avantDernier, r.dernierDigit, r.nextNum);
+  if(rule3.applied){ suit = rule3.suit; side = rule3.side; }
   return {nextNum:r.nextNum, suit, side};
 }
 
@@ -808,6 +812,57 @@ function applySideDigitInverse(side, nextNum){
   if(!bothImpair) return {applied:false, before:side, after:side, digit2, digit3};
   const after = side==='P1' ? 'P2' : 'P1';
   return {applied:true, before:side, after, digit2, digit3};
+}
+
+// ── Règles pour les n° de jeu à 3 chiffres (100-999), quand l'avant-dernier
+//    chiffre (2ème) est impair :
+//    (a) dernier chiffre (3ème) compris entre 0 et 5  → inversion P1<>P2
+//    (b) dernier chiffre (3ème) impair                → inversion P1<>P2
+//        (a) et (b) sont deux déclencheurs pour LA MÊME action : s'ils sont
+//        tous les deux vrais (dernier = 1,3 ou 5), on n'inverse qu'UNE fois.
+//    (c) dernier chiffre pair ET prédiction finale = P2 → ♠️<>♥️ / ♦️<>♣️
+//    (d) dernier chiffre pair ET prédiction finale = P1 → ♦️<>♥️ / ♣️<>♠️
+const SUIT_SWAP_C = {'♠️':'♥️','♥️':'♠️','♦️':'♣️','♣️':'♦️'}; // (c) — si P2
+const SUIT_SWAP_D = {'♦️':'♥️','♥️':'♦️','♣️':'♠️','♠️':'♣️'}; // (d) — si P1
+
+function apply3DigitRule(suit, side, avantDernier, dernierDigit, nextNum){
+  if(nextNum < 100 || nextNum > 999){
+    return {applied:false, suit, side, sideFlipped:false, suitSwapped:false};
+  }
+  const avantOdd = (avantDernier % 2 !== 0);
+  if(!avantOdd){
+    return {applied:false, suit, side, sideFlipped:false, suitSwapped:false};
+  }
+
+  const dernierIn0to5 = (dernierDigit>=0 && dernierDigit<=5);
+  const dernierOdd    = (dernierDigit % 2 !== 0);
+  const dernierEven   = !dernierOdd;
+
+  let newSide = side, sideFlipped = false;
+  if(dernierIn0to5 || dernierOdd){
+    newSide = (side==='P1') ? 'P2' : 'P1';
+    sideFlipped = true;
+  }
+
+  let newSuit = suit, suitSwapped = false, suitRule = null;
+  if(dernierEven){
+    if(newSide==='P2'){
+      newSuit = SUIT_SWAP_C[suit] || suit;
+      suitRule = '(c) P2 → ♠️<>♥️/♦️<>♣️';
+    } else {
+      newSuit = SUIT_SWAP_D[suit] || suit;
+      suitRule = '(d) P1 → ♦️<>♥️/♣️<>♠️';
+    }
+    suitSwapped = true;
+  }
+
+  return {
+    applied: sideFlipped || suitSwapped,
+    suit:newSuit, side:newSide,
+    sideFlipped, suitSwapped, suitRule,
+    beforeSuit:suit, beforeSide:side,
+    dernierDigit, avantDernier
+  };
 }
 
 // ══════════════════════════════════════════════════════
@@ -1350,6 +1405,18 @@ function renderResult(r){
   const rangeInvInfo = applyRangeInverse(displaySuit, r.nextNum);
   if(rangeInvInfo.applied) displaySuit = rangeInvInfo.after;
 
+  // ── P1/P2 + règles digit-based (900-1441 : 4 chiffres, 100-999 : 3 chiffres) ──
+  // Couche déterministe, appliquée AVANT ALL INVERSE et le Cerveau.
+  let side = computeSide(r.avantDernier, r.dernierDigit);
+  const sideInvInfo = applySideDigitInverse(side, r.nextNum); // 4 chiffres (1000-1441)
+  if(sideInvInfo.applied) side = sideInvInfo.after;
+
+  const rule3Info = apply3DigitRule(displaySuit, side, r.avantDernier, r.dernierDigit, r.nextNum); // 3 chiffres (100-999)
+  if(rule3Info.applied){
+    displaySuit = rule3Info.suit;
+    side = rule3Info.side;
+  }
+
   // ── Calcul ALL INVERSE (post-prédiction, si actif) ──
   let allInvInfo  = null;
   if(allInverseActive){
@@ -1366,10 +1433,6 @@ function renderResult(r){
       displaySuit = brainInfo.overrideSuit;
     }
   }
-
-  let side = computeSide(r.avantDernier, r.dernierDigit);
-  const sideInvInfo = applySideDigitInverse(side, r.nextNum);
-  if(sideInvInfo.applied) side = sideInvInfo.after;
 
   document.getElementById('res-num').textContent=`#N${r.nextNum}`;
   const red=isRed(displaySuit);
@@ -1407,6 +1470,7 @@ function renderResult(r){
     `<div class="badge badge-range2">${rangeInvInfo.applied?'🔀':'⬛'} ALGO 2 (900-1441) — #N${r.nextNum} ${rangeInvInfo.applied?`DANS LA PLAGE → INVERSION ${SUIT_EMOJI[rangeInvInfo.before]} → ${SUIT_EMOJI[rangeInvInfo.after]}`:'HORS PLAGE — INACTIF'}</div>`,
     `<div class="badge badge-side">${sideInvInfo.before==='P1'?'👤':'🏦'} ATTRIBUTION BASE — Av-dern=${r.avantDernier}(${r.avantDernier%2!==0?'IMPAIR':'PAIR'}) · Dernier=${r.dernierDigit}(${(r.dernierDigit>=1&&r.dernierDigit<=5)?'1-5':'6-0'}) → ${sideInvInfo.before}</div>`,
     `<div class="badge badge-side2">${sideInvInfo.applied?'🔁':'⬛'} INVERSION P1↔P2 (1000-1441) — ${sideInvInfo.digit2!==null?`2e chiffre=${sideInvInfo.digit2}(${sideInvInfo.digit2%2!==0?'IMPAIR':'PAIR'}) · 3e chiffre=${sideInvInfo.digit3}(${sideInvInfo.digit3%2!==0?'IMPAIR':'PAIR'})`:'HORS PLAGE'} → ${sideInvInfo.applied?`${sideInvInfo.before} → ${sideInvInfo.after}`:'INACTIF'}</div>`,
+    `<div class="badge badge-side3">${rule3Info.applied?'🎴':'⬛'} RÈGLE 3 CHIFFRES (100-999) — ${(r.nextNum>=100&&r.nextNum<=999)?`av-dern=${r.avantDernier}(${r.avantDernier%2!==0?'IMPAIR':'PAIR'}) · dernier=${r.dernierDigit}`:'HORS PLAGE'}${rule3Info.sideFlipped?` · P1↔P2 : ${rule3Info.beforeSide}→${rule3Info.side}`:''}${rule3Info.suitSwapped?` · ${rule3Info.suitRule} : ${SUIT_EMOJI[rule3Info.beforeSuit]}→${SUIT_EMOJI[rule3Info.suit]}`:''}${!rule3Info.applied?' — INACTIF':''}</div>`,
     `<div class="badge badge-selector">🎯 SÉLECTEUR — ${selectorLine}</div>`,
     `<div class="badge badge-algo">⚙ ALGO ${r.algoUsed} — BASE : ALGO ${ar.baseAlgo} · ${fibOverrideLabel} → ALGO FINAL : ALGO ${ar.algo}</div>`,
     `<div class="badge badge-parity">◈ PARITÉ — ALGO ${algoParity} · #N${r.nextNum} RÉDUIT = ${ar.reduceSteps.join(' → ')} → ${numParity}</div>`,

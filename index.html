@@ -136,6 +136,10 @@
     background:#1a0808;border:1px solid #5a1010;border-left:3px solid #cc2222;border-radius:3px;
     padding:12px 16px;font-size:.85rem;color:#e06060;margin-top:16px;display:none;
   }
+  .waiting-box{
+    background:#0f1408;border:1px solid #4a4a10;border-left:3px solid #e0c040;border-radius:3px;
+    padding:12px 16px;font-size:.85rem;color:#e0c878;margin-top:16px;display:none;
+  }
 
   #result-zone{display:none}
 
@@ -422,6 +426,7 @@
     <textarea id="game-input"
       placeholder="Ex: #N1283. ✅8(7♠️A♣️) - 6(6♦️Q♣️) #T14 🔵 #R"></textarea>
     <div class="error-box" id="error-box"></div>
+    <div class="waiting-box" id="waiting-box"></div>
     <button class="btn-calc" id="btn-calc" onclick="calculate()">⬡ CALCULER LA PRÉDICTION ⬡</button>
   </div>
 
@@ -497,6 +502,7 @@ let lastCalcResult   = null;
 let brainActive      = true;   // cerveau intelligent actif par défaut
 let telegramHistoryCache = [];  // 150 derniers jeux chargés depuis Telegram (source commune, identique sur tous les appareils)
 let globalBacktestStats  = null; // stats de fiabilité recalculées à partir de cette source commune
+let liveLastUsableGameNum = null; // dernier n° de jeu réellement TERMINÉ et déjà traité (évite de recalculer en boucle)
 
 // ══════════════════════════════════════════════════════
 //  HISTORIQUE DES PRÉDICTIONS (persisté localStorage)
@@ -622,6 +628,8 @@ function computeGlobalBacktestStats(history, windowGames){
   const results=[];
   for(let i=1;i<history.length;i++){
     const prev=history[i-1], curr=history[i];
+    const readiness = checkGameReadiness(curr.raw_text || curr.normalized);
+    if(!readiness.usable) continue; // manche encore en cours au moment du scrape : on l'ignore
     let pred;
     try{ pred=deterministicPredict(prev.normalized || prev.raw_text); }catch(e){ continue; }
     if(pred.nextNum !== curr.game_number) continue; // trou dans la numérotation du canal
@@ -1263,11 +1271,45 @@ function runCalc(raw){
 // ══════════════════════════════════════════════════════
 function showError(msg){const b=document.getElementById('error-box');b.textContent='⚠ '+msg;b.style.display='block';}
 function hideError(){document.getElementById('error-box').style.display='none';}
+function showWaiting(msg){const b=document.getElementById('waiting-box');b.textContent='⏳ '+msg;b.style.display='block';}
+function hideWaiting(){document.getElementById('waiting-box').style.display='none';}
+
+// ── Détecte si la manche affichée est réellement TERMINÉE et exploitable ──
+// Symboles Telegram : ⏰ = manche en cours, ▶ = ce côté doit encore tirer une carte.
+//  • Aucun ▶ dans le texte           → manche terminée → exploitable
+//  • ▶ situé avant la 1ère parenthèse (P1/Joueur)  → P1 tire encore → PAS exploitable
+//  • ▶ situé entre P1 et P2 (donc sur P2/Banquier) → P1 déjà final → exploitable
+function checkGameReadiness(raw){
+  if(!raw) return {usable:false, reason:'empty', detail:'Aucune donnée.'};
+  const parenIdxs=[];
+  for(let i=0;i<raw.length;i++){ if(raw[i]==='(') parenIdxs.push(i); }
+  if(parenIdxs.length<2){
+    return {usable:false, reason:'incomplete', detail:"Le jeu n'affiche pas encore les deux mains (P1/P2) — en attente."};
+  }
+  const idxP1Open=parenIdxs[0], idxP2Open=parenIdxs[1];
+  const chevronIdx=raw.indexOf('▶');
+  if(chevronIdx===-1) return {usable:true, reason:'complete'};
+  if(chevronIdx<idxP1Open){
+    return {usable:false, reason:'p1-pending', detail:'Le Joueur (P1) doit encore tirer sa 3ème carte — en attente.'};
+  }
+  if(chevronIdx<idxP2Open){
+    return {usable:true, reason:'p2-pending-ok', detail:'P1 déjà final, le Banquier (P2) tire encore — données exploitables.'};
+  }
+  return {usable:false, reason:'ambiguous', detail:'Position du symbole ▶ ambiguë — en attente de confirmation.'};
+}
 
 function calculate(){
   hideError();
+  hideWaiting();
   const raw=document.getElementById('game-input').value.trim();
   if(!raw){showError("Veuillez saisir les données du jeu précédent.");return;}
+
+  const readiness = checkGameReadiness(raw);
+  if(!readiness.usable){
+    showWaiting(readiness.detail || 'Manche en cours — en attente de fin de tirage.');
+    return;
+  }
+
   const btn=document.getElementById('btn-calc');
   btn.classList.add('loading');btn.textContent='⟳ CALCUL EN COURS…';
   setTimeout(()=>{
@@ -1567,6 +1609,8 @@ async function demarrerLive(){
     for(let i=startIdx;i<n;i++){
       const prev = telegramHistoryCache[i-1];
       const curr = telegramHistoryCache[i];
+      const readiness = checkGameReadiness(curr.raw_text || curr.normalized);
+      if(!readiness.usable){ skipped++; continue; }
       let pred;
       try{ pred = deterministicPredict(prev.normalized || prev.raw_text); }catch(e){ skipped++; continue; }
       if(pred.nextNum !== curr.game_number){ skipped++; continue; }
@@ -1622,12 +1666,22 @@ async function fetchLatestTelegramGame(silent=false){
       throw new Error(serverMsg);
     }
     if(!data || !data.normalized) throw new Error('Aucune donnée exploitable trouvée');
-    document.getElementById('game-input').value = data.normalized;
-    setLiveSource(data);
-    const isNew = liveLastMessageId !== data.message_id;
     liveLastMessageId = data.message_id;
-    setLiveStatus(`Canal synchronisé · ${isNew ? 'nouveau jeu détecté' : 'dernier jeu confirmé'} · #N${data.game_number}`);
-    if(isNew || !silent){
+    setLiveSource(data);
+
+    // ── Le message Telegram peut être édité en cours de manche (⏰/▶) : on ne
+    //    calcule que lorsque les données sont réellement finalisées et exploitables ──
+    const readiness = checkGameReadiness(data.raw_text || data.normalized);
+    if(!readiness.usable){
+      setLiveStatus(`⏳ #N${data.game_number} en cours · ${readiness.detail || 'en attente de fin de manche…'}`);
+      return;
+    }
+
+    document.getElementById('game-input').value = data.normalized;
+    const isNewUsable = liveLastUsableGameNum !== data.game_number;
+    liveLastUsableGameNum = data.game_number;
+    setLiveStatus(`Canal synchronisé · ${isNewUsable ? 'jeu terminé détecté' : 'dernier jeu (déjà traité) confirmé'} · #N${data.game_number}`);
+    if(isNewUsable || !silent){
       calculate();
     }
   }catch(err){

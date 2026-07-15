@@ -57,19 +57,6 @@
   }
   @keyframes inv-pulse{0%,100%{box-shadow:0 0 20px #cc44ff55,inset 0 0 10px #8b2aaa22}50%{box-shadow:0 0 36px #cc44ffaa,inset 0 0 20px #8b2aaa44}}
 
-  #btn-brain{border-color:#7a6028;color:#e8c060}
-  #btn-brain:hover{border-color:#ffd166;box-shadow:0 0 18px #ffd16655;}
-  #btn-brain.active{
-    background:linear-gradient(135deg,#1a1400,#2a2000);
-    border-color:#ffd166;color:#ffd166;
-    box-shadow:0 0 24px #ffd16666,inset 0 0 12px #c9a84c22;
-    animation:brain-pulse 2.2s ease-in-out infinite;
-  }
-  @keyframes brain-pulse{0%,100%{box-shadow:0 0 20px #ffd16655,inset 0 0 10px #c9a84c22}50%{box-shadow:0 0 36px #ffd166aa,inset 0 0 20px #c9a84c44}}
-  #btn-brain.active .toggle-track{background:#5a4a1a;border-color:#ffd166;}
-  #btn-brain.active .toggle-thumb{left:22px;background:#ffe699;}
-  #btn-brain.active .allinv-status{background:#2a2000;border-color:#ffd166;color:#ffe699;}
-
   /* Toggle switch intégré */
   .toggle-track{
     width:40px;height:20px;border-radius:10px;
@@ -188,7 +175,6 @@
   }
   .history-autoval.ok{border-color:var(--green-ok);color:#8fd6b3}
   .history-autoval.ko{border-color:var(--crimson);color:#e89aa3}
-  .hist-tag.hist-brain{color:#9c7cff}
   .hist-tag.hist-live{color:#ff6666;font-weight:700}
   .history-list{display:flex;flex-direction:column;gap:8px}
   .history-item{
@@ -318,15 +304,6 @@
   }
   @keyframes flicker-automilieu{0%,100%{box-shadow:0 0 8px #7aadff33}50%{box-shadow:0 0 18px #7aadff77}}
 
-  /* Badge CERVEAU INTELLIGENT */
-  .badge-brain{
-    background:linear-gradient(135deg,#1a1400,#2a2000);
-    border:1px solid #c9a84c;border-left:3px solid #ffd166;
-    color:#ffd166;font-weight:700;
-    animation:flicker-brain 2.4s ease-in-out infinite;
-  }
-  @keyframes flicker-brain{0%,100%{box-shadow:0 0 10px #ffd16655}50%{box-shadow:0 0 26px #ffd166aa}}
-
   .copy-row{display:flex;justify-content:center;margin-bottom:24px}
   .details-toggle{
     display:flex;align-items:center;gap:8px;font-size:.72rem;letter-spacing:.18em;text-transform:uppercase;
@@ -414,8 +391,7 @@
         🔴 DÉMARRER LIVE
       </button>
       <div class="demarrer-desc">
-        Charge les 150 derniers jeux du canal, recalibre le cerveau intelligent sur une base commune
-        (identique sur tous les appareils), et affiche les 15 dernières parties comme si elles avaient
+        Charge les 150 derniers jeux du canal et affiche les 15 dernières parties comme si elles avaient
         déjà été jouées.
       </div>
       <div class="demarrer-status" id="demarrer-status"></div>
@@ -445,20 +421,6 @@
         <span class="allinv-status" id="allinv-status">OFF</span>
       </button>
       <span class="auto-mode-badge" id="auto-mode-badge"></span>
-    </div>
-  </div>
-
-  <!-- BOUTON CERVEAU INTELLIGENT -->
-  <div class="allinv-wrap">
-    <div class="allinv-center">
-      <button class="btn-allinv active" id="btn-brain" onclick="toggleBrain()">
-        <div class="toggle-track"><div class="toggle-thumb"></div></div>
-        <div class="allinv-label-wrap">
-          <span class="allinv-title">🧠 CERVEAU INTELLIGENT</span>
-          <span class="allinv-rule">Analyse les 10 derniers jeux résolus · bascule la prédiction si dérive détectée (3 échecs d'affilée ou taux &lt;30%)</span>
-        </div>
-        <span class="allinv-status" id="brain-status">ON</span>
-      </button>
     </div>
   </div>
 
@@ -501,7 +463,6 @@
 let allInverseActive = false;
 let allInverseManual = false;  // true = toggled manually, false = driven by auto-milieu
 let lastCalcResult   = null;
-let brainActive      = true;   // cerveau intelligent actif par défaut
 let telegramHistoryCache = [];  // 150 derniers jeux chargés depuis Telegram (source commune, identique sur tous les appareils)
 let globalBacktestStats  = null; // stats de fiabilité recalculées à partir de cette source commune
 let liveLastUsableGameNum = null; // dernier n° de jeu réellement TERMINÉ et déjà traité (évite de recalculer en boucle)
@@ -524,19 +485,15 @@ function saveHistory(list){
 // Une seule entrée par numéro de jeu prédit : si elle existe déjà et est encore
 // en attente, on la met à jour (pas de doublon) ; si elle est déjà résolue, on n'y touche pas ;
 // sinon on la crée.
-function upsertHistoryEntry(gameNum, suitKey, side, modeTag, brainInfo){
+function upsertHistoryEntry(gameNum, suitKey, side, modeTag){
   const list = loadHistory();
   const existing = list.find(e=>e.gameNum===gameNum);
-  const brainBase = brainInfo && brainInfo.triggered ? brainInfo.baseSuit : null;
-  const brainReason = brainInfo && brainInfo.triggered ? brainInfo.reason : null;
 
   if(existing){
     if(existing.status===null){
       existing.suitKey = suitKey;
       existing.side = side;
       existing.modeTag = modeTag;
-      existing.baseSuit = brainBase;
-      existing.brainReason = brainReason;
       saveHistory(list);
       renderHistory();
     }
@@ -546,7 +503,6 @@ function upsertHistoryEntry(gameNum, suitKey, side, modeTag, brainInfo){
   list.unshift({
     id: Date.now() + '-' + Math.random().toString(36).slice(2,7),
     gameNum, suitKey, side, modeTag,
-    baseSuit: brainBase, brainReason,
     status: null, // null=en attente | 'valid' | 'invalid'
     ts: new Date().toISOString()
   });
@@ -602,7 +558,7 @@ function showAutoValidationFeedback(entry){
 }
 
 // ── Prédiction déterministe "brute" : Algo 1 + Algo 2 (range 900-1441) + inversion P1/P2 (digits)
-//    SANS ALL INVERSE (choix manuel) ni CERVEAU (pour servir de référence stable/rejouable identique partout)
+//    SANS ALL INVERSE (choix manuel), pour servir de référence stable/rejouable identique partout
 function deterministicPredict(raw){
   const r = runCalc(raw);
   let suit = r.finalSuit;
@@ -624,8 +580,8 @@ function actualOutcomeSuits(gameRecord, side){
 }
 
 // Rejoue l'algorithme sur les N derniers jeux réels du canal Telegram (identiques pour
-// tout le monde) afin de donner au cerveau intelligent une base de référence commune,
-// indépendante de l'historique propre à chaque téléphone.
+// tout le monde) afin de conserver des statistiques de fiabilité globales, indépendantes
+// de l'historique propre à chaque téléphone.
 function computeGlobalBacktestStats(history, windowGames){
   const SUITS=['♠️','♥️','♦️','♣️'];
   const perSuit={}; SUITS.forEach(s=>perSuit[s]={total:0,valid:0});
@@ -649,84 +605,6 @@ function computeGlobalBacktestStats(history, windowGames){
     if(e.status==='valid') perSuit[e.suit].valid++;
   });
   return {perSuit, sample:recent.length, results:recent};
-}
-
-// ── CERVEAU INTELLIGENT ──
-// Combine les pertes locales (ce téléphone) ET les pertes constatées sur l'historique
-// principal (150 derniers jeux Telegram, recalculé via DÉMARRER LIVE) pour décider si la
-// couleur candidate doit être remplacée. Cette double base rend la décision cohérente
-// d'un appareil à l'autre, au lieu de dépendre uniquement des clics locaux.
-function computeBrainDecision(candidateSuit){
-  const SUITS = ['♠️','♥️','♦️','♣️'];
-
-  const recentLocal = loadHistory().filter(e=>e.status!==null).slice(0,10);
-  const localPerSuit = {}; SUITS.forEach(s=>localPerSuit[s]={total:0,valid:0});
-  recentLocal.forEach(e=>{
-    if(!localPerSuit[e.suitKey]) return;
-    localPerSuit[e.suitKey].total++;
-    if(e.status==='valid') localPerSuit[e.suitKey].valid++;
-  });
-  let localConsecutiveMisses = 0;
-  for(const e of recentLocal){
-    if(e.suitKey !== candidateSuit) continue;
-    if(e.status==='invalid'){ localConsecutiveMisses++; } else { break; }
-  }
-
-  const globalPerSuit = (globalBacktestStats && globalBacktestStats.perSuit) || {};
-  let globalConsecutiveMisses = 0;
-  if(globalBacktestStats && globalBacktestStats.results){
-    for(let i=globalBacktestStats.results.length-1;i>=0;i--){
-      const e = globalBacktestStats.results[i];
-      if(e.suit !== candidateSuit) continue;
-      if(e.status==='invalid'){ globalConsecutiveMisses++; } else { break; }
-    }
-  }
-
-  function combined(suit){
-    const l = localPerSuit[suit] || {total:0,valid:0};
-    const g = globalPerSuit[suit] || {total:0,valid:0};
-    return {total:l.total+g.total, valid:l.valid+g.valid};
-  }
-  const candCombined = combined(candidateSuit);
-  const candRate = candCombined.total>0 ? candCombined.valid/candCombined.total : null;
-
-  const triggerLocal   = localConsecutiveMisses  >= 3;
-  const triggerGlobal  = globalConsecutiveMisses >= 4;
-  const triggerRate    = (candCombined.total >= 4 && candRate !== null && candRate < 0.30);
-
-  if(!triggerLocal && !triggerGlobal && !triggerRate){
-    return {triggered:false, localConsecutiveMisses, globalConsecutiveMisses, candRate};
-  }
-
-  let best=null;
-  SUITS.forEach(s=>{
-    if(s===candidateSuit) return;
-    const c = combined(s);
-    if(c.total < 3) return; // échantillon combiné trop faible
-    const rate = c.valid/c.total;
-    if(!best || rate>best.rate || (rate===best.rate && c.total>best.total)){
-      best = {suit:s, rate, total:c.total};
-    }
-  });
-
-  if(!best){
-    return {triggered:false, localConsecutiveMisses, globalConsecutiveMisses, candRate,
-      reason:'Dérive détectée mais données combinées (local+Telegram) insuffisantes pour basculer en sécurité.'};
-  }
-
-  const reasonParts = [];
-  if(triggerLocal)  reasonParts.push(`${localConsecutiveMisses} échecs locaux d'affilée sur ${SUIT_EMOJI[candidateSuit]}`);
-  if(triggerGlobal) reasonParts.push(`${globalConsecutiveMisses} échecs Telegram d'affilée sur ${SUIT_EMOJI[candidateSuit]}`);
-  if(triggerRate)   reasonParts.push(`taux combiné ${Math.round(candRate*100)}% sur ${candCombined.total} (local+Telegram)`);
-
-  return {
-    triggered:true,
-    overrideSuit: best.suit,
-    overrideRate: best.rate,
-    overrideSample: best.total,
-    reason: reasonParts.join(' + '),
-    localConsecutiveMisses, globalConsecutiveMisses, candRate
-  };
 }
 
 function renderHistory(){
@@ -762,7 +640,7 @@ function renderHistory(){
     <div class="history-item ${statusClass}">
       <span class="hist-num">#N${e.gameNum}</span>
       <span class="hist-suit" style="color:${red?'#cc4444':'var(--ivory)'}">${emoji}</span>
-      <span class="hist-label">${e.side}${e.baseSuit?` <span class="hist-tag hist-brain">🧠</span>`:''}${e.source==='live-seed'?` <span class="hist-tag hist-live">🔴 LIVE</span>`:(e.autoResolved?` <span class="hist-tag">auto</span>`:'')}</span>
+      <span class="hist-label">${e.side}${e.source==='live-seed'?` <span class="hist-tag hist-live">🔴 LIVE</span>`:(e.autoResolved?` <span class="hist-tag">auto</span>`:'')}</span>
       <div class="hist-actions">
         <button class="hist-btn valid-btn ${e.status==='valid'?'active':''}" title="Validée chez le joueur" onclick="setHistoryStatus('${e.id}','valid')">✓</button>
         <button class="hist-btn invalid-btn ${e.status==='invalid'?'active':''}" title="Non passée" onclick="setHistoryStatus('${e.id}','invalid')">✕</button>
@@ -777,6 +655,15 @@ function renderHistory(){
 const SUIT_EMOJI = {'♠️':'♠️','♥️':'♥️','♦️':'♦️','♣️':'♣️'};
 const SUIT_NAMES = {'♠️':'PIQUE','♥️':'COEUR','♦️':'CARREAU','♣️':'TRÈFLE'};
 function isRed(s){ return s==='♥️'||s==='♦️'; }
+
+// ── Parité d'HEURE basée sur la SOMME DES CHIFFRES de l'heure ──
+// Ex : 2h → 2 (PAIR) · 6h → 6 (PAIR) · 11h → 1+1=2 (PAIR) · 15h → 1+5=6 (PAIR) · 22h → 2+2=4 (PAIR)
+function heureDigitSum(h){
+  return String(Math.abs(h)).split('').reduce((a,c)=>a+parseInt(c,10),0);
+}
+function isHeurePaire(h){
+  return heureDigitSum(h) % 2 === 0;
+}
 
 // ── Attribution P1 (Joueur) / P2 (Banquier) selon les 2 derniers chiffres du n° de jeu ──
 // ── ALGORITHME 2 : inversion automatique pour les n° de jeu 900 à 1441 ──
@@ -921,7 +808,7 @@ function autoMilieuInverse(milieuDigit, nextM, firstDigit){
 // ══════════════════════════════════════════════════════
 function applyAllInverse(suit, avantDernier, nextH){
   const isPair    = (avantDernier % 2 === 0);
-  const heurePair = (nextH % 2 === 0);
+  const heurePair = isHeurePaire(nextH);
   let map, label;
 
   if(!heurePair){
@@ -947,18 +834,19 @@ function applyAllInverse(suit, avantDernier, nextH){
 }
 
 // ══════════════════════════════════════════════════════
-//  COUCHE FINALE — INVERSION HEURES PAIRES (0,2,4...22)
-//  Appliquée EN DERNIER, après ALL INVERSE et le CERVEAU.
+//  COUCHE FINALE — INVERSION HEURES PAIRES
+//  Appliquée EN DERNIER, après ALL INVERSE.
 //  Toujours active (indépendante du bouton ALL INVERSE) :
-//  ♠️↔️♣️ / ♦️↔️♥️ pour tout jeu prédit à une heure paire.
+//  ♠️↔️♣️ / ♦️↔️♥️ pour tout jeu prédit à une heure dont la SOMME DES CHIFFRES
+//  est paire (ex: 2h, 6h, 11h, 15h, 22h...).
 // ══════════════════════════════════════════════════════
 function applyHeurePaireFinale(suit, nextH){
-  const heurePaire = (nextH % 2 === 0);
+  const heurePaire = isHeurePaire(nextH);
   const map = {'♠️':'♣️','♣️':'♠️','♦️':'♥️','♥️':'♦️'};
   const result = heurePaire ? (map[suit] || suit) : suit;
   const label = heurePaire
-    ? `H=${nextH} (PAIRE) → COUCHE FINALE : ♠️↔️♣️ / ♦️↔️♥️`
-    : `H=${nextH} (IMPAIRE) → COUCHE FINALE INACTIVE`;
+    ? `H=${nextH} (somme chiffres=${heureDigitSum(nextH)}, PAIRE) → COUCHE FINALE : ♠️↔️♣️ / ♦️↔️♥️`
+    : `H=${nextH} (somme chiffres=${heureDigitSum(nextH)}, IMPAIRE) → COUCHE FINALE INACTIVE`;
   return { applied: heurePaire, result, label, heurePaire, before: suit };
 }
 
@@ -983,15 +871,6 @@ function updateAllInverseUI(){
   const status = document.getElementById('allinv-status');
   btn.classList.toggle('active', allInverseActive);
   status.textContent = allInverseActive ? 'ON' : 'OFF';
-}
-
-function toggleBrain(){
-  brainActive = !brainActive;
-  const btn    = document.getElementById('btn-brain');
-  const status = document.getElementById('brain-status');
-  btn.classList.toggle('active', brainActive);
-  status.textContent = brainActive ? 'ON' : 'OFF';
-  if(lastCalcResult) renderResult(lastCalcResult);
 }
 
 // ══════════════════════════════════════════════════════
@@ -1060,7 +939,7 @@ function signHM(h,m){
 //  SÉLECTEUR V4 / V5+
 // ══════════════════════════════════════════════════════
 function selectSystem(nextH, nextM, nextNum){
-  const hPair = (nextH % 2 === 0);
+  const hPair = isHeurePaire(nextH);
   const hImp  = !hPair;
   const groupA = [0,1,2,3,4,5,6,7,8,9,20,21,22,23,24].includes(nextH);
   const groupB = [10,11,12,13,14,15,16,17,18,19].includes(nextH);
@@ -1175,7 +1054,7 @@ function runV4(num, p1Cards, p2Cards, nextNum){
   const nextTimeTotal=nextNum-1;
   const nextH=Math.floor(nextTimeTotal/60)%24;
   const nextM=nextTimeTotal%60;
-  const hPair=nextH%2===0;
+  const hPair=isHeurePaire(nextH);
   const inRange=nextNum>=1400&&nextNum<=1441;
   const postInvActive=hPair||inRange;
   const postInvMap={'♠️':'♥️','♥️':'♠️','♣️':'♦️','♦️':'♣️'};
@@ -1249,7 +1128,7 @@ function runV5(num, p1Cards, p2Cards, nextNum){
   const nextTimeTotal=nextNum-1;
   const nextH=Math.floor(nextTimeTotal/60)%24;
   const nextM=nextTimeTotal%60;
-  const hPair=nextH%2===0;
+  const hPair=isHeurePaire(nextH);
   const inRange=nextNum>=1400&&nextNum<=1441;
   const postInvActive=hPair||inRange;
   const postInvMap={'♠️':'♥️','♥️':'♠️','♣️':'♦️','♦️':'♣️'};
@@ -1422,7 +1301,7 @@ function renderResult(r){
   if(rangeInvInfo.applied) displaySuit = rangeInvInfo.after;
 
   // ── P1/P2 + règles digit-based (900-1441 : 4 chiffres, 100-999 : 3 chiffres) ──
-  // Couche déterministe, appliquée AVANT ALL INVERSE et le Cerveau.
+  // Couche déterministe, appliquée AVANT ALL INVERSE.
   let side = computeSide(r.avantDernier, r.dernierDigit);
   const sideInvInfo = applySideDigitInverse(side, r.nextNum); // 4 chiffres (1000-1441)
   if(sideInvInfo.applied) side = sideInvInfo.after;
@@ -1440,17 +1319,7 @@ function renderResult(r){
     displaySuit = allInvInfo.result;
   }
 
-  // ── CERVEAU INTELLIGENT (dernière couche, après tout le reste) ──
-  let brainInfo = {triggered:false};
-  if(brainActive){
-    brainInfo = computeBrainDecision(displaySuit);
-    if(brainInfo.triggered){
-      brainInfo.baseSuit = displaySuit;
-      displaySuit = brainInfo.overrideSuit;
-    }
-  }
-
-  // ── COUCHE FINALE — HEURES PAIRES (tout à la fin, après ALL INVERSE et le CERVEAU) ──
+  // ── COUCHE FINALE — HEURES PAIRES (tout à la fin, après ALL INVERSE) ──
   const heurePaireInfo = applyHeurePaireFinale(displaySuit, r.nextH);
   if(heurePaireInfo.applied) displaySuit = heurePaireInfo.result;
 
@@ -1460,7 +1329,7 @@ function renderResult(r){
     `<span style="color:${red?'#cc4444':'var(--ivory)'}">${SUIT_EMOJI[displaySuit]||displaySuit}</span>`;
   document.getElementById('res-side').innerHTML=`<span class="side-tag">${side}</span>`;
 
-  upsertHistoryEntry(r.nextNum, displaySuit, side, '', brainInfo);
+  upsertHistoryEntry(r.nextNum, displaySuit, side, '');
 
   // Banner ALL INVERSE
   const banner = document.getElementById('allinv-banner');
@@ -1471,7 +1340,7 @@ function renderResult(r){
     banner.classList.remove('show');
   }
 
-  const hParite=r.nextH%2===0?'PAIR':'IMPAIR';
+  const hParite=isHeurePaire(r.nextH)?'PAIR':'IMPAIR';
   const avantDernierParite=r.avantDernier%2===0?'PAIR':'IMPAIR';
   const minTranche=r.nextM<=11?'00-11':'12-59';
   const selectorLine=`GROUPE ${[1,2,3,4,5,6,7,8,9,20,21,22,23,24,0].includes(r.nextH)?'A':'B'} · H=${r.nextH}(${hParite}) · AV-DERN=${r.avantDernier}(${avantDernierParite}) · MIN=${r.nextM}(${minTranche}) → ${r.algoUsed} + ${r.sel.invLabel}`;
@@ -1513,12 +1382,6 @@ function renderResult(r){
     allInverseActive && allInvInfo
       ? `<div class="badge badge-allinv">⟲ ALL INVERSE ON — ${allInvInfo.label} — RÉSULTAT : ${SUIT_EMOJI[allInvInfo.before]} → ${SUIT_EMOJI[allInvInfo.result]}</div>`
       : `<div class="badge badge-allinv" style="opacity:.3">⟲ ALL INVERSE OFF — INACTIF</div>`,
-    // Badge CERVEAU INTELLIGENT
-    brainActive
-      ? (brainInfo.triggered
-          ? `<div class="badge badge-brain">🧠 CERVEAU INTELLIGENT — ${brainInfo.reason} → BASCULE ${SUIT_EMOJI[brainInfo.baseSuit]} → ${SUIT_EMOJI[brainInfo.overrideSuit]} (taux récent ${Math.round(brainInfo.overrideRate*100)}% sur ${brainInfo.overrideSample})</div>`
-          : `<div class="badge badge-brain" style="opacity:.45">🧠 CERVEAU INTELLIGENT — aucune dérive détectée, prédiction conservée</div>`)
-      : `<div class="badge badge-brain" style="opacity:.3">🧠 CERVEAU INTELLIGENT OFF — INACTIF</div>`,
     // Badge COUCHE FINALE — HEURES PAIRES (toujours active, tout à la fin)
     heurePaireInfo.applied
       ? `<div class="badge badge-allinv" style="border-color:#ff88ff;background:linear-gradient(135deg,#1a0a2e,#2d1555);color:#ff88ff">⏱️ COUCHE FINALE HEURE PAIRE — ${heurePaireInfo.label} — ${SUIT_EMOJI[heurePaireInfo.before]} → ${SUIT_EMOJI[heurePaireInfo.result]}</div>`
@@ -1664,7 +1527,7 @@ function setLiveSource(payload){
 
 // ── DÉMARRER LIVE ──
 // 1) Charge les 150 derniers jeux réels du canal Telegram (source commune, identique
-//    sur tous les appareils) et recalibre le cerveau intelligent dessus.
+//    sur tous les appareils) et recalcule les statistiques globales de fiabilité.
 // 2) Rejoue les 15 dernières parties comme si elles avaient déjà été jouées : si une
 //    prédiction avait déjà été faite pour ce numéro, on la valide avec le vrai résultat ;
 //    sinon on comble rétroactivement avec la prédiction déterministe du système.
@@ -1690,7 +1553,7 @@ async function demarrerLive(){
     telegramHistoryCache = (data.games||[]).slice().sort((a,b)=>a.game_number-b.game_number);
     if(telegramHistoryCache.length < 2) throw new Error('Pas assez de jeux récupérés depuis Telegram.');
 
-    statusBox.textContent = `${telegramHistoryCache.length} jeux chargés · calibrage du cerveau intelligent…`;
+    statusBox.textContent = `${telegramHistoryCache.length} jeux chargés · calcul des statistiques globales…`;
     globalBacktestStats = computeGlobalBacktestStats(telegramHistoryCache, 50);
 
     const n = telegramHistoryCache.length;
@@ -1726,7 +1589,7 @@ async function demarrerLive(){
         list.unshift({
           id: Date.now()+'-'+Math.random().toString(36).slice(2,7),
           gameNum: curr.game_number, suitKey: pred.suit, side: pred.side, modeTag:'',
-          baseSuit:null, brainReason:null, status:st, autoResolved:true, source:'live-seed',
+          status:st, autoResolved:true, source:'live-seed',
           ts:new Date().toISOString()
         });
       }
@@ -1736,7 +1599,7 @@ async function demarrerLive(){
 
     statusBox.textContent = `✅ LIVE démarré · ${telegramHistoryCache.length} jeux Telegram analysés · `
       + `15 dernières parties : ${validCount} validées / ${invalidCount} ratées`
-      + `${skipped?` (${skipped} ignorées)`:''} · Cerveau intelligent recalibré sur base commune.`;
+      + `${skipped?` (${skipped} ignorées)`:''} · Statistiques globales recalculées.`;
   }catch(e){
     statusBox.textContent = '✕ Erreur : '+e.message;
   }finally{

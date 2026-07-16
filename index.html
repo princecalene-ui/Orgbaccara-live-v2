@@ -463,6 +463,7 @@
 let allInverseActive = false;
 let allInverseManual = false;  // true = toggled manually, false = driven by auto-milieu
 let lastCalcResult   = null;
+let rattrapageMode   = null;   // {suit:'♣️', gameNum:567} — rattrapage automatique après un échec P2 (RÈGLE COMBO)
 let telegramHistoryCache = [];  // 150 derniers jeux chargés depuis Telegram (source commune, identique sur tous les appareils)
 let globalBacktestStats  = null; // stats de fiabilité recalculées à partir de cette source commune
 let liveLastUsableGameNum = null; // dernier n° de jeu réellement TERMINÉ et déjà traité (évite de recalculer en boucle)
@@ -516,6 +517,14 @@ function setHistoryStatus(id, status){
   if(!entry) return;
   entry.status = (entry.status === status) ? null : status; // re-cliquer annule
   saveHistory(list);
+
+  // ── RATTRAPAGE (RÈGLE COMBO) : une validation manuelle affecte aussi le rattrapage ──
+  if(entry.status==='invalid' && entry.side==='P2'){
+    rattrapageMode = {suit: entry.suitKey, gameNum: entry.gameNum+1};
+  } else if(entry.status==='valid' && rattrapageMode && rattrapageMode.gameNum===entry.gameNum+1){
+    rattrapageMode = null;
+  }
+
   renderHistory();
 }
 
@@ -557,19 +566,31 @@ function showAutoValidationFeedback(entry){
   setTimeout(()=>{ box.style.display='none'; }, 8000);
 }
 
-// ── Prédiction déterministe "brute" : Algo 1 + Algo 2 (range 900-1441) + inversion P1/P2 (digits)
-//    SANS ALL INVERSE (choix manuel), pour servir de référence stable/rejouable identique partout
+// ── Prédiction déterministe "brute" : moteur commun + RÈGLE COMBO (ULTIME1/ULTIME2)
+//    SANS rattrapage ni bouton manuel, pour servir de référence stable/rejouable identique partout
 function deterministicPredict(raw){
   const r = runCalc(raw);
   let suit = r.finalSuit;
   const rangeInv = applyRangeInverse(suit, r.nextNum);
   if(rangeInv.applied) suit = rangeInv.after;
-  let side = computeSide(r.avantDernier, r.dernierDigit);
-  const sideInv = applySideDigitInverse(side, r.nextNum);
-  if(sideInv.applied) side = sideInv.after;
-  const rule3 = apply3DigitRule(suit, side, r.avantDernier, r.dernierDigit, r.nextNum);
-  if(rule3.applied){ suit = rule3.suit; side = rule3.side; }
-  return {nextNum:r.nextNum, suit, side};
+
+  let decision = applyTwoDigitInversion(r.decisionBase, r.nextNum);
+
+  if(r.autoInfo && r.autoInfo.shouldBeOn){
+    const inv = applyAllInverse(suit, r.avantDernier, r.nextH);
+    suit = inv.result;
+  }
+  if(decision.engine==='ULTIME2' && r.autoInfo && String(r.nextNum).length>=3){
+    const map = r.autoInfo.shouldBeOn ? r.autoInfo.mapOn : r.autoInfo.mapOff;
+    suit = map[suit] || suit;
+  }
+  if(decision.exception){
+    suit = decision.exception.map[suit] || suit;
+  }
+  const heurePaire = applyHeurePaireFinale(suit, r.nextH);
+  if(heurePaire.applied) suit = heurePaire.result;
+
+  return {nextNum:r.nextNum, suit, side:decision.target};
 }
 
 function actualOutcomeSuits(gameRecord, side){
@@ -665,7 +686,6 @@ function isHeurePaire(h){
   return heureDigitSum(h) % 2 === 0;
 }
 
-// ── Attribution P1 (Joueur) / P2 (Banquier) selon les 2 derniers chiffres du n° de jeu ──
 // ── ALGORITHME 2 : inversion automatique pour les n° de jeu 900 à 1441 ──
 // ♣️↔♥️ et ♠️↔♦️
 const RANGE_INV_MAP = {'♣️':'♥️','♥️':'♣️','♠️':'♦️','♦️':'♠️'};
@@ -676,131 +696,111 @@ function applyRangeInverse(suit, nextNum){
   return {applied:true, before:suit, after};
 }
 
-function computeSide(avantDernier, dernierDigit){
-  const avantImpair = (avantDernier % 2 !== 0);
-  const dernierBas  = (dernierDigit >= 1 && dernierDigit <= 5); // 1 à 5
-  // dernierDigit 0,6,7,8,9 = "haut" (6 à 0)
-  if(avantImpair){
-    return dernierBas ? 'P1' : 'P2';
-  } else {
-    return dernierBas ? 'P2' : 'P1';
+// ══════════════════════════════════════════════════════
+//  RÈGLE COMBO — MÉTHODE DE BASE "ULTIME 1/2"
+//  Décide, à partir de l'avant-dernier et du dernier chiffre du n° de jeu
+//  prédit, quelle RÈGLE (1 à 4) s'applique, quel MOTEUR (ULTIME1/ULTIME2)
+//  et quelle CIBLE (P1=Joueur / P2=Banquier) sont utilisés, ainsi que
+//  l'exception de couleur éventuelle.
+// ══════════════════════════════════════════════════════
+const MAP_EXC_A = {'♠️':'♣️','♣️':'♠️','♦️':'♥️','♥️':'♦️'};
+const MAP_EXC_B = {'♠️':'♦️','♦️':'♠️','♣️':'♥️','♥️':'♣️'};
+
+function decideRule(avantDernier, dernier){
+  const avOdd = (avantDernier % 2 !== 0);
+  const dEven = (dernier % 2 === 0);
+  const d0to5 = (dernier >= 0 && dernier <= 5);
+  const d6to9 = (dernier >= 6 && dernier <= 9);
+
+  if(avOdd && d0to5){
+    return {regle:1, engine:'ULTIME1', target:'P1', exception:null,
+      cond:`1er=${avantDernier}(IMPAIR) · 2e=${dernier}(COMPRIS ENTRE 0 ET 5)`};
   }
+  if(avOdd && d6to9){
+    const exception = dEven ? {map:MAP_EXC_A,label:'♠️↔♣️ / ♦️↔♥️',reason:`dernier=${dernier}(PAIR) & avant-dernier=${avantDernier}(IMPAIR)`} : null;
+    return {regle:2, engine:'ULTIME2', target:'P2', exception,
+      cond:`1er=${avantDernier}(IMPAIR) · 2e=${dernier}(COMPRIS ENTRE 6 ET 9)`};
+  }
+  if(!avOdd && d0to5){
+    const exception = !dEven ? {map:MAP_EXC_A,label:'♠️↔♣️ / ♦️↔♥️',reason:`dernier=${dernier}(IMPAIR) & avant-dernier=${avantDernier}(PAIR)`} : null;
+    return {regle:3, engine:'ULTIME2', target:'P2', exception,
+      cond:`1er=${avantDernier}(PAIR) · 2e=${dernier}(COMPRIS ENTRE 0 ET 5)`};
+  }
+  const exception = dEven ? {map:MAP_EXC_B,label:'♠️↔♦️ / ♣️↔♥️',reason:`dernier=${dernier}(PAIR) & avant-dernier=${avantDernier}(PAIR)`} : null;
+  return {regle:4, engine:'ULTIME1', target:'P1', exception,
+    cond:`1er=${avantDernier}(PAIR) · 2e=${dernier}(COMPRIS ENTRE 6 ET 9)`};
 }
 
-// ── Inversion P1<>P2 pour les n° de jeu 1000-1441 (4 chiffres) dont le
-//    2ème ET le 3ème chiffre (en partant de la gauche) sont impairs.
-//    Le reste (Algo 2 ♠️♦️♣️♥️) est inchangé.
-function applySideDigitInverse(side, nextNum){
-  if(nextNum < 1000 || nextNum > 1441) return {applied:false, before:side, after:side, digit2:null, digit3:null};
-  const s = String(nextNum);
-  const digit2 = parseInt(s[1],10);
-  const digit3 = parseInt(s[2],10);
-  const bothImpair = (digit2 % 2 !== 0) && (digit3 % 2 !== 0);
-  if(!bothImpair) return {applied:false, before:side, after:side, digit2, digit3};
-  const after = side==='P1' ? 'P2' : 'P1';
-  return {applied:true, before:side, after, digit2, digit3};
-}
-
-// ── Règles pour les n° de jeu à 3 chiffres (100-999), quand l'avant-dernier
-//    chiffre (2ème) est impair :
-//    (a) dernier chiffre (3ème) compris entre 0 et 5  → inversion P1<>P2
-//    (b) dernier chiffre (3ème) impair                → inversion P1<>P2
-//        (a) et (b) sont deux déclencheurs pour LA MÊME action : s'ils sont
-//        tous les deux vrais (dernier = 1,3 ou 5), on n'inverse qu'UNE fois.
-//    (c) dernier chiffre pair ET prédiction finale = P2 → ♠️<>♥️ / ♦️<>♣️
-//    (d) dernier chiffre pair ET prédiction finale = P1 → ♦️<>♥️ / ♣️<>♠️
-const SUIT_SWAP_C = {'♠️':'♥️','♥️':'♠️','♦️':'♣️','♣️':'♦️'}; // (c) — si P2
-const SUIT_SWAP_D = {'♦️':'♥️','♥️':'♦️','♣️':'♠️','♠️':'♣️'}; // (d) — si P1
-
-function apply3DigitRule(suit, side, avantDernier, dernierDigit, nextNum){
-  if(nextNum < 100 || nextNum > 999){
-    return {applied:false, suit, side, sideFlipped:false, suitSwapped:false};
+// ── Inversion 2 CHIFFRES : pour les n° de jeu 10-99, la cible P1<>P2 bascule ──
+function applyTwoDigitInversion(decision, nextNum){
+  if(nextNum >= 10 && nextNum <= 99){
+    const invertedTarget = decision.target === 'P1' ? 'P2' : 'P1';
+    return {...decision, target: invertedTarget, isTwoDigitInversion: true};
   }
-  const avantOdd = (avantDernier % 2 !== 0);
-  if(!avantOdd){
-    return {applied:false, suit, side, sideFlipped:false, suitSwapped:false};
-  }
-
-  const dernierIn0to5 = (dernierDigit>=0 && dernierDigit<=5);
-  const dernierOdd    = (dernierDigit % 2 !== 0);
-  const dernierEven   = !dernierOdd;
-
-  let newSide = side, sideFlipped = false;
-  if(dernierIn0to5 || dernierOdd){
-    newSide = (side==='P1') ? 'P2' : 'P1';
-    sideFlipped = true;
-  }
-
-  let newSuit = suit, suitSwapped = false, suitRule = null;
-  if(dernierEven){
-    if(newSide==='P2'){
-      newSuit = SUIT_SWAP_C[suit] || suit;
-      suitRule = '(c) P2 → ♠️<>♥️/♦️<>♣️';
-    } else {
-      newSuit = SUIT_SWAP_D[suit] || suit;
-      suitRule = '(d) P1 → ♦️<>♥️/♣️<>♠️';
-    }
-    suitSwapped = true;
-  }
-
-  return {
-    applied: sideFlipped || suitSwapped,
-    suit:newSuit, side:newSide,
-    sideFlipped, suitSwapped, suitRule,
-    beforeSuit:suit, beforeSide:side,
-    dernierDigit, avantDernier
-  };
+  return {...decision, isTwoDigitInversion: false};
 }
 
 // ══════════════════════════════════════════════════════
 //  AUTO MILIEU → décide si ALL INVERSE doit être ON/OFF
-//
-//  Deux branches selon la parité du 1er chiffre du N° prédit :
-//
-//  ── 1er chiffre PAIR ──
-//    MILIEU PAIR   + Min 1-5  → OFF (no inversion)
-//    MILIEU PAIR   + Min 6-0  → ON  (inversion)
-//    MILIEU IMPAIR + Min 1-5  → ON  (inversion)
-//    MILIEU IMPAIR + Min 6-0  → OFF (no inversion)
-//
-//  ── 1er chiffre IMPAIR ──
-//    MILIEU PAIR   + Min 1-5  → ON  (inversion)
-//    MILIEU PAIR   + Min 6-0  → OFF (no inversion)
-//    MILIEU IMPAIR + Min 1-5  → OFF (no inversion)
-//    MILIEU IMPAIR + Min 6-0  → ON  (inversion)
-//
-//  "Min" = unité des minutes (nextM % 10)
-//  "6-0" = tout ce qui n'est PAS 1-5 (0,6,7,8,9)
+//  Deux variantes selon le MOTEUR choisi par decideRule :
+//  ULTIME1 → autoMilieuInverseU1 (pas de notion de période)
+//  ULTIME2 → autoMilieuInverseU2 (période-aware + maps de RÉINVERSION FINALE)
 // ══════════════════════════════════════════════════════
-function autoMilieuInverse(milieuDigit, nextM, firstDigit){
+function autoMilieuInverseU1(milieuDigit, nextM, firstDigit){
   const milieuPair    = [0,2,4,6,8].includes(milieuDigit);
   const firstDigitPair = (firstDigit % 2 === 0);
   const minUnit  = nextM % 10;
   const min1to5  = (minUnit >= 1 && minUnit <= 5);
   let shouldBeOn;
-  let autoReason;
   const branchLabel = firstDigitPair ? `1er chiffre=${firstDigit}(PAIR)` : `1er chiffre=${firstDigit}(IMPAIR)`;
   const milieuLabel = milieuPair ? `MILIEU=${milieuDigit}(PAIR)` : `MILIEU=${milieuDigit}(IMPAIR)`;
   const minLabel    = min1to5 ? `MIN_UNITÉ=${minUnit}(1-5)` : `MIN_UNITÉ=${minUnit}(6-0)`;
-
   if(firstDigitPair){
-    // Branche 1er chiffre PAIR : logique INVERSÉE par rapport à branche impaire
-    if(milieuPair){
-      shouldBeOn = !min1to5;  // PAIR+1-5→OFF / PAIR+6-0→ON
+    shouldBeOn = milieuPair ? !min1to5 : min1to5;
+  } else {
+    shouldBeOn = milieuPair ? min1to5 : !min1to5;
+  }
+  const autoReason = `${branchLabel} · ${milieuLabel} · ${minLabel} → AUTO ${shouldBeOn ? 'ON' : 'OFF'}`;
+  return { shouldBeOn, autoReason, milieuPair, firstDigitPair, min1to5, minUnit, firstDigit };
+}
+
+function autoMilieuInverseU2(milieuDigit, nextM, firstDigit, nextH){
+  const periodeB = (nextH >= 10 && nextH <= 19);
+  const milieuPair     = [0,2,4,6,8].includes(milieuDigit);
+  const firstDigitPair = (firstDigit % 2 === 0);
+  const minUnit  = nextM % 10;
+  const min1to5  = (minUnit >= 1 && minUnit <= 5);
+  const periodeLabel = periodeB ? 'PÉRIODE 10h-19h' : 'PÉRIODE 00h-09h';
+  const branchLabel  = firstDigitPair ? `1er chiffre=${firstDigit}(PAIR)` : `1er chiffre=${firstDigit}(IMPAIR)`;
+  const milieuLabel  = milieuPair ? `MILIEU=${milieuDigit}(PAIR)` : `MILIEU=${milieuDigit}(IMPAIR)`;
+  const minLabel     = min1to5 ? `MIN_UNITÉ=${minUnit}(1-5)` : `MIN_UNITÉ=${minUnit}(6-0)`;
+  let shouldBeOn;
+  if(firstDigitPair){
+    shouldBeOn = milieuPair ? !min1to5 : min1to5;
+  } else {
+    shouldBeOn = milieuPair ? min1to5 : !min1to5;
+  }
+  let mapOn, mapOff, mapOnLabel, mapOffLabel;
+  if(!periodeB){
+    if(firstDigitPair){
+      mapOn  = {'♣️':'♦️','♦️':'♣️','♠️':'♥️','♥️':'♠️'}; mapOnLabel  = '♣️↔♦️ / ♠️↔♥️';
+      mapOff = {'♣️':'♥️','♥️':'♣️','♠️':'♦️','♦️':'♠️'}; mapOffLabel = '♣️↔♥️ / ♠️↔♦️';
     } else {
-      shouldBeOn = min1to5;   // IMPAIR+1-5→ON / IMPAIR+6-0→OFF
+      mapOn  = {'♣️':'♥️','♥️':'♣️','♦️':'♠️','♠️':'♦️'}; mapOnLabel  = '♣️↔♥️ / ♦️↔♠️';
+      mapOff = {'♣️':'♦️','♦️':'♣️','♠️':'♥️','♥️':'♠️'}; mapOffLabel = '♣️↔♦️ / ♠️↔♥️';
     }
   } else {
-    // Branche 1er chiffre IMPAIR : logique d'origine
-    if(milieuPair){
-      shouldBeOn = min1to5;   // PAIR+1-5→ON / PAIR+6-0→OFF
+    if(firstDigitPair){
+      mapOn  = {'♣️':'♠️','♠️':'♣️','♦️':'♥️','♥️':'♦️'}; mapOnLabel  = '♣️↔♠️ / ♦️↔♥️';
+      mapOff = {'♥️':'♦️','♦️':'♥️','♠️':'♣️','♣️':'♠️'}; mapOffLabel = '♥️↔♦️ / ♠️↔♣️';
     } else {
-      shouldBeOn = !min1to5;  // IMPAIR+1-5→OFF / IMPAIR+6-0→ON
+      mapOn  = {'♣️':'♥️','♥️':'♣️','♦️':'♠️','♠️':'♦️'}; mapOnLabel  = '♣️↔♥️ / ♦️↔♠️';
+      mapOff = {'♣️':'♦️','♦️':'♣️','♠️':'♥️','♥️':'♠️'}; mapOffLabel = '♣️↔♦️ / ♠️↔♥️';
     }
   }
-
-  autoReason = `${branchLabel} · ${milieuLabel} · ${minLabel} → AUTO ${shouldBeOn ? 'ON' : 'OFF'}`;
-  return { shouldBeOn, autoReason, milieuPair, firstDigitPair, min1to5, minUnit, firstDigit };
+  const autoReason = `${periodeLabel} · ${branchLabel} · ${milieuLabel} · ${minLabel} → AUTO ${shouldBeOn ? 'ON' : 'OFF'}`;
+  return { shouldBeOn, autoReason, milieuPair, firstDigitPair, min1to5, minUnit, firstDigit,
+           periodeB, periodeLabel, mapOn, mapOff, mapOnLabel, mapOffLabel };
 }
 
 // ══════════════════════════════════════════════════════
@@ -1202,18 +1202,23 @@ function runCalc(raw){
     } else {
       milieuRule={active:false,milieuDigit,before:finalSuit,result:finalSuit,label:`MILIEU=${milieuDigit}(IMPAIR) → INACTIF`};
     }
-
-    // AUTO MILIEU → pilote le bouton ALL INVERSE
-    // On applique la règle auto seulement si l'utilisateur n'a pas fait de toggle manuel
-    // pour CE calcul. On recalcule à chaque runCalc (reset manuel à chaque nouveau jeu).
-    const milieuDigitForAuto = parseInt(String(nextNum)[1], 10);
-    const firstDigitForAuto  = parseInt(String(nextNum)[0], 10);
-    const autoResult = autoMilieuInverse(milieuDigitForAuto, nextM, firstDigitForAuto);
-    // On stocke dans le résultat pour affichage
-    milieuRule.autoResult = autoResult;
   }
 
-  return {num,p1,p2,nextNum,nextH,nextM,avantDernier,dernierDigit,sel,algoUsed,algoResult,finalInv,finalSuit,hyperGlobal,milieuRule};
+  // ── RÈGLE COMBO (méthode de base ULTIME1/ULTIME2) : décide l'engine et la cible P1/P2 ──
+  const decisionBase = decideRule(avantDernier, dernierDigit);
+
+  // ── AUTO ALL INVERSE — formule dépendante de l'ENGINE choisi par la RÈGLE COMBO ──
+  // On applique la règle auto seulement si l'utilisateur n'a pas fait de toggle manuel
+  // pour CE calcul. On recalcule à chaque runCalc (reset manuel à chaque nouveau jeu).
+  let autoInfo = null;
+  if(milieuRule){
+    const firstDigitForAuto = parseInt(String(nextNum)[0], 10);
+    autoInfo = decisionBase.engine==='ULTIME1'
+      ? autoMilieuInverseU1(milieuRule.milieuDigit, nextM, firstDigitForAuto)
+      : autoMilieuInverseU2(milieuRule.milieuDigit, nextM, firstDigitForAuto, nextH);
+  }
+
+  return {num,p1,p2,nextNum,nextH,nextM,avantDernier,dernierDigit,sel,algoUsed,algoResult,finalInv,finalSuit,hyperGlobal,milieuRule,decisionBase,autoInfo};
 }
 
 // ══════════════════════════════════════════════════════
@@ -1271,15 +1276,24 @@ function calculate(){
       const autoVal = resolvePendingHistory(r.num, r.p1, r.p2);
       showAutoValidationFeedback(autoVal);
 
-      // ── AUTO MILIEU : pilote le bouton ALL INVERSE ──
+      // ── RATTRAPAGE (RÈGLE COMBO) : un succès annule le rattrapage en cours ;
+      //    un échec sur une cible P2 déclenche un rattrapage pour le jeu suivant ──
+      if(autoVal){
+        if(autoVal.status==='valid'){
+          rattrapageMode = null;
+        } else if(autoVal.status==='invalid' && autoVal.side==='P2'){
+          rattrapageMode = {suit: autoVal.suitKey, gameNum: r.nextNum};
+        }
+      }
+
+      // ── AUTO ALL INVERSE (engine ULTIME1/ULTIME2) : pilote le bouton ALL INVERSE ──
       // Réinitialise le flag manuel à chaque nouveau calcul
       allInverseManual = false;
       const autoBadge = document.getElementById('auto-mode-badge');
-      if(r.milieuRule && r.milieuRule.autoResult){
-        const ar = r.milieuRule.autoResult;
-        setAllInverseAuto(ar.shouldBeOn);
-        autoBadge.textContent = `⟳ AUTO — ${ar.autoReason}`;
-        autoBadge.className = `auto-mode-badge show ${ar.shouldBeOn ? 'auto-on' : 'auto-off'}`;
+      if(r.autoInfo){
+        setAllInverseAuto(r.autoInfo.shouldBeOn);
+        autoBadge.textContent = `⟳ AUTO (${r.decisionBase.engine}) — ${r.autoInfo.autoReason}`;
+        autoBadge.className = `auto-mode-badge show ${r.autoInfo.shouldBeOn ? 'auto-on' : 'auto-off'}`;
       } else {
         // Pas de milieu (N° pas à 3 chiffres) → laisser le bouton en état actuel
         autoBadge.className = 'auto-mode-badge';
@@ -1300,28 +1314,50 @@ function renderResult(r){
   const rangeInvInfo = applyRangeInverse(displaySuit, r.nextNum);
   if(rangeInvInfo.applied) displaySuit = rangeInvInfo.after;
 
-  // ── P1/P2 + règles digit-based (900-1441 : 4 chiffres, 100-999 : 3 chiffres) ──
-  // Couche déterministe, appliquée AVANT ALL INVERSE.
-  let side = computeSide(r.avantDernier, r.dernierDigit);
-  const sideInvInfo = applySideDigitInverse(side, r.nextNum); // 4 chiffres (1000-1441)
-  if(sideInvInfo.applied) side = sideInvInfo.after;
+  // ── RÈGLE COMBO (méthode de base ULTIME1/ULTIME2) : décide l'engine + la cible P1/P2 ──
+  let decision = {...r.decisionBase};
 
-  const rule3Info = apply3DigitRule(displaySuit, side, r.avantDernier, r.dernierDigit, r.nextNum); // 3 chiffres (100-999)
-  if(rule3Info.applied){
-    displaySuit = rule3Info.suit;
-    side = rule3Info.side;
+  // ── RATTRAPAGE : si une prédiction P2 a échoué, on force la reprise sur ce numéro ──
+  let rattrapageInfo = null;
+  if(rattrapageMode && rattrapageMode.gameNum === r.nextNum){
+    rattrapageInfo = {suit: rattrapageMode.suit, gameNum: rattrapageMode.gameNum};
+    decision = {...decision, target:'P2', rattrapage:true};
+    displaySuit = rattrapageMode.suit;
   }
 
-  // ── Calcul ALL INVERSE (post-prédiction, si actif) ──
-  let allInvInfo  = null;
+  // ── Inversion 2 CHIFFRES (n° 10-99) : bascule la cible P1<>P2 ──
+  decision = applyTwoDigitInversion(decision, r.nextNum);
+
+  // ── Calcul ALL INVERSE (automatique via l'engine, ou manuel via le bouton) ──
+  let allInvInfo = null;
   if(allInverseActive){
     allInvInfo = applyAllInverse(displaySuit, r.avantDernier, r.nextH);
     displaySuit = allInvInfo.result;
   }
 
-  // ── COUCHE FINALE — HEURES PAIRES (tout à la fin, après ALL INVERSE) ──
+  // ── RÉINVERSION FINALE (ULTIME2 uniquement, n° à 3 chiffres et +) ──
+  let reinvFinaleInfo = null;
+  if(decision.engine==='ULTIME2' && r.autoInfo && String(r.nextNum).length>=3){
+    const map   = allInverseActive ? r.autoInfo.mapOn : r.autoInfo.mapOff;
+    const label = allInverseActive ? r.autoInfo.mapOnLabel : r.autoInfo.mapOffLabel;
+    const before = displaySuit;
+    displaySuit = map[displaySuit] || displaySuit;
+    reinvFinaleInfo = {before, result:displaySuit, label, buttonOn:allInverseActive};
+  }
+
+  // ── EXCEPTION DE COULEUR (RÈGLE COMBO) ──
+  let exceptionInfo = null;
+  if(decision.exception){
+    const before = displaySuit;
+    displaySuit = decision.exception.map[displaySuit] || displaySuit;
+    exceptionInfo = {before, result:displaySuit, label:decision.exception.label, reason:decision.exception.reason};
+  }
+
+  // ── COUCHE FINALE — HEURES PAIRES (tout à la fin, après tout le reste) ──
   const heurePaireInfo = applyHeurePaireFinale(displaySuit, r.nextH);
   if(heurePaireInfo.applied) displaySuit = heurePaireInfo.result;
+
+  const side = decision.target; // P1 (Joueur) ou P2 (Banquier)
 
   document.getElementById('res-num').textContent=`#N${r.nextNum}`;
   const red=isRed(displaySuit);
@@ -1348,18 +1384,17 @@ function renderResult(r){
   const algoParity=ar.algoEven?`${ar.algo} (PAIR)`:`${ar.algo} (IMPAIR)`;
   const numParity=ar.numEven?`${ar.reducedDigit} (PAIR)`:`${ar.reducedDigit} (IMPAIR)`;
 
-  // Badge AUTO MILIEU
+  // Badge AUTO MILIEU (engine ULTIME1/ULTIME2)
   let autoMilieuBadge = '';
-  if(r.milieuRule && r.milieuRule.autoResult){
-    const am = r.milieuRule.autoResult;
-    autoMilieuBadge = `<div class="badge badge-automilieu">🔁 AUTO ALL INVERSE — ${am.autoReason} → BOUTON : ${am.shouldBeOn?'ON ✓':'OFF ✗'}</div>`;
+  if(r.autoInfo){
+    autoMilieuBadge = `<div class="badge badge-automilieu">🔁 AUTO ALL INVERSE (${decision.engine}) — ${r.autoInfo.autoReason} → BOUTON : ${r.autoInfo.shouldBeOn?'ON ✓':'OFF ✗'}</div>`;
   }
 
   const badges=[
     `<div class="badge badge-range2">${rangeInvInfo.applied?'🔀':'⬛'} ALGO 2 (900-1441) — #N${r.nextNum} ${rangeInvInfo.applied?`DANS LA PLAGE → INVERSION ${SUIT_EMOJI[rangeInvInfo.before]} → ${SUIT_EMOJI[rangeInvInfo.after]}`:'HORS PLAGE — INACTIF'}</div>`,
-    `<div class="badge badge-side">${sideInvInfo.before==='P1'?'👤':'🏦'} ATTRIBUTION BASE — Av-dern=${r.avantDernier}(${r.avantDernier%2!==0?'IMPAIR':'PAIR'}) · Dernier=${r.dernierDigit}(${(r.dernierDigit>=1&&r.dernierDigit<=5)?'1-5':'6-0'}) → ${sideInvInfo.before}</div>`,
-    `<div class="badge badge-side2">${sideInvInfo.applied?'🔁':'⬛'} INVERSION P1↔P2 (1000-1441) — ${sideInvInfo.digit2!==null?`2e chiffre=${sideInvInfo.digit2}(${sideInvInfo.digit2%2!==0?'IMPAIR':'PAIR'}) · 3e chiffre=${sideInvInfo.digit3}(${sideInvInfo.digit3%2!==0?'IMPAIR':'PAIR'})`:'HORS PLAGE'} → ${sideInvInfo.applied?`${sideInvInfo.before} → ${sideInvInfo.after}`:'INACTIF'}</div>`,
-    `<div class="badge badge-side3">${rule3Info.applied?'🎴':'⬛'} RÈGLE 3 CHIFFRES (100-999) — ${(r.nextNum>=100&&r.nextNum<=999)?`av-dern=${r.avantDernier}(${r.avantDernier%2!==0?'IMPAIR':'PAIR'}) · dernier=${r.dernierDigit}`:'HORS PLAGE'}${rule3Info.sideFlipped?` · P1↔P2 : ${rule3Info.beforeSide}→${rule3Info.side}`:''}${rule3Info.suitSwapped?` · ${rule3Info.suitRule} : ${SUIT_EMOJI[rule3Info.beforeSuit]}→${SUIT_EMOJI[rule3Info.suit]}`:''}${!rule3Info.applied?' — INACTIF':''}</div>`,
+    `<div class="badge badge-regle">◆ RÈGLE ${r.decisionBase.regle} — ${r.decisionBase.cond} → ${r.decisionBase.engine} PRÉDIT ${r.decisionBase.target}</div>`,
+    ...(rattrapageInfo ? [`<div class="badge badge-exception">🆘 RATTRAPAGE ACTIF — reprise forcée sur #N${rattrapageInfo.gameNum} → ${SUIT_EMOJI[rattrapageInfo.suit]} P2</div>`] : []),
+    ...(decision.isTwoDigitInversion ? [`<div class="badge badge-exception">🔄 INVERSION 2 CHIFFRES (10-99) — #N${r.nextNum} → CIBLE P1↔P2 → ${decision.target}</div>`] : []),
     `<div class="badge badge-selector">🎯 SÉLECTEUR — ${selectorLine}</div>`,
     `<div class="badge badge-algo">⚙ ALGO ${r.algoUsed} — BASE : ALGO ${ar.baseAlgo} · ${fibOverrideLabel} → ALGO FINAL : ALGO ${ar.algo}</div>`,
     `<div class="badge badge-parity">◈ PARITÉ — ALGO ${algoParity} · #N${r.nextNum} RÉDUIT = ${ar.reduceSteps.join(' → ')} → ${numParity}</div>`,
@@ -1382,6 +1417,10 @@ function renderResult(r){
     allInverseActive && allInvInfo
       ? `<div class="badge badge-allinv">⟲ ALL INVERSE ON — ${allInvInfo.label} — RÉSULTAT : ${SUIT_EMOJI[allInvInfo.before]} → ${SUIT_EMOJI[allInvInfo.result]}</div>`
       : `<div class="badge badge-allinv" style="opacity:.3">⟲ ALL INVERSE OFF — INACTIF</div>`,
+    // Badge RÉINVERSION FINALE (ULTIME2 uniquement)
+    ...(reinvFinaleInfo ? [`<div class="badge badge-reinvfinale">🔁 RÉINVERSION FINALE (ULTIME2) — bouton ${reinvFinaleInfo.buttonOn?'ON':'OFF'} · ${reinvFinaleInfo.label} — ${SUIT_EMOJI[reinvFinaleInfo.before]} → ${SUIT_EMOJI[reinvFinaleInfo.result]}</div>`] : []),
+    // Badge EXCEPTION DE COULEUR (RÈGLE COMBO)
+    ...(exceptionInfo ? [`<div class="badge badge-exception">⚠ EXCEPTION RÈGLE ${r.decisionBase.regle} — ${exceptionInfo.reason} → ${exceptionInfo.label} — ${SUIT_EMOJI[exceptionInfo.before]} → ${SUIT_EMOJI[exceptionInfo.result]}</div>`] : []),
     // Badge COUCHE FINALE — HEURES PAIRES (toujours active, tout à la fin)
     heurePaireInfo.applied
       ? `<div class="badge badge-allinv" style="border-color:#ff88ff;background:linear-gradient(135deg,#1a0a2e,#2d1555);color:#ff88ff">⏱️ COUCHE FINALE HEURE PAIRE — ${heurePaireInfo.label} — ${SUIT_EMOJI[heurePaireInfo.before]} → ${SUIT_EMOJI[heurePaireInfo.result]}</div>`
@@ -1454,16 +1493,35 @@ ${r.hyperGlobal.active?`<div class="det-row"><span class="det-label" style="colo
 ${r.milieuRule.active?`<div class="det-row"><span class="det-label" style="color:#66eeff">Règle</span><span class="det-val" style="color:#66eeff">${r.milieuRule.label}</span></div>
 <div class="det-row"><span class="det-label" style="color:#66eeff">Après MILIEU PAIR</span><span class="det-val" style="color:#66eeff">${SUIT_EMOJI[r.milieuRule.before]} → ${SUIT_EMOJI[r.milieuRule.result]}</span></div>`:''}`;
 
-    if(r.milieuRule.autoResult){
-      const am = r.milieuRule.autoResult;
+    if(r.autoInfo){
+      const am = r.autoInfo;
       detailsHTML+=`
 <hr class="det-sep">
-<div class="det-row"><span class="det-label" style="color:#aad4ff">🔁 AUTO ALL INVERSE (MILIEU+MIN)</span><span class="det-val" style="color:#aad4ff">${am.shouldBeOn?'ON ✓':'OFF ✗'}</span></div>
+<div class="det-row"><span class="det-label" style="color:#aad4ff">🔁 AUTO ALL INVERSE (${decision.engine})</span><span class="det-val" style="color:#aad4ff">${am.shouldBeOn?'ON ✓':'OFF ✗'}</span></div>
 <div class="det-row"><span class="det-label" style="color:#aad4ff">1er chiffre N°${r.nextNum}</span><span class="det-val" style="color:#aad4ff">${am.firstDigit} (${am.firstDigitPair?'PAIR':'IMPAIR'})</span></div>
 <div class="det-row"><span class="det-label" style="color:#aad4ff">MILIEU</span><span class="det-val" style="color:#aad4ff">${am.milieuPair?'PAIR':'IMPAIR'}</span></div>
 <div class="det-row"><span class="det-label" style="color:#aad4ff">Unité de MIN (${r.nextM})</span><span class="det-val" style="color:#aad4ff">${am.minUnit} → ${am.min1to5?'1-5':'6-0'}</span></div>
+${am.periodeLabel?`<div class="det-row"><span class="det-label" style="color:#aad4ff">Période (ULTIME2)</span><span class="det-val" style="color:#aad4ff">${am.periodeLabel}</span></div>`:''}
 <div class="det-row"><span class="det-label" style="color:#aad4ff">Règle AUTO</span><span class="det-val" style="color:#aad4ff">${am.autoReason}</span></div>`;
     }
+  }
+
+  // ── RÈGLE COMBO (méthode de base ULTIME1/ULTIME2) ──
+  detailsHTML+=`
+<hr class="det-sep">
+<div class="det-row"><span class="det-label" style="color:#d4bfff">◆ RÈGLE COMBO</span><span class="det-val" style="color:#d4bfff">RÈGLE ${r.decisionBase.regle} — ${r.decisionBase.cond}</span></div>
+<div class="det-row"><span class="det-label" style="color:#d4bfff">ENGINE</span><span class="det-val" style="color:#d4bfff">${r.decisionBase.engine}</span></div>
+<div class="det-row"><span class="det-label" style="color:#d4bfff">Cible de base</span><span class="det-val" style="color:#d4bfff">${r.decisionBase.target}</span></div>
+${rattrapageInfo?`<div class="det-row"><span class="det-label" style="color:#ff9999">🆘 RATTRAPAGE</span><span class="det-val" style="color:#ff9999">Reprise forcée → ${SUIT_EMOJI[rattrapageInfo.suit]} P2</span></div>`:''}
+${decision.isTwoDigitInversion?`<div class="det-row"><span class="det-label" style="color:#d4bfff">Inversion 2 chiffres (10-99)</span><span class="det-val" style="color:#d4bfff">Cible finale → ${decision.target}</span></div>`:''}
+<div class="det-row"><span class="det-label" style="color:#d4bfff">Cible finale</span><span class="det-val" style="color:#d4bfff">${decision.target}</span></div>`;
+  if(reinvFinaleInfo){
+    detailsHTML+=`
+<div class="det-row"><span class="det-label" style="color:#ffe066">🔁 RÉINVERSION FINALE (ULTIME2)</span><span class="det-val" style="color:#ffe066">${reinvFinaleInfo.label} — ${SUIT_EMOJI[reinvFinaleInfo.before]} → ${SUIT_EMOJI[reinvFinaleInfo.result]}</span></div>`;
+  }
+  if(exceptionInfo){
+    detailsHTML+=`
+<div class="det-row"><span class="det-label" style="color:#ff9999">⚠ EXCEPTION</span><span class="det-val" style="color:#ff9999">${exceptionInfo.reason} → ${exceptionInfo.label} — ${SUIT_EMOJI[exceptionInfo.before]} → ${SUIT_EMOJI[exceptionInfo.result]}</span></div>`;
   }
 
   // ALL INVERSE dans les détails

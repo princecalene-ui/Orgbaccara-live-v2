@@ -463,7 +463,7 @@
 let allInverseActive = false;
 let allInverseManual = false;  // true = toggled manually, false = driven by auto-milieu
 let lastCalcResult   = null;
-let rattrapageMode   = null;   // {suit:'♣️', gameNum:567, attempt:1, maxAttempts:2} — rattrapage +2 après un échec P2 (RÈGLE COMBO)
+let rattrapageMode   = null;   // {suit:'♣️', gameNum:567, attempt:1, maxAttempts:2, side:'P2'} — rattrapage +2 après un échec P1/P2 (RÈGLE COMBO)
 const RATTRAPAGE_MAX_ATTEMPTS = 2; // fenêtre de rattrapage : 2 jeux consécutifs max sur la même enseigne
 let telegramHistoryCache = [];  // 150 derniers jeux chargés depuis Telegram (source commune, identique sur tous les appareils)
 let globalBacktestStats  = null; // stats de fiabilité recalculées à partir de cette source commune
@@ -517,13 +517,16 @@ function upsertHistoryEntry(gameNum, suitKey, side, modeTag, rattrapageInfo){
   renderHistory();
 }
 
-// ── RATTRAPAGE +2 (RÈGLE COMBO) ──
+// ── RATTRAPAGE +2 (RÈGLE COMBO) — applicable à P1 ET P2 ──
 // Une entrée résolue en 'valid' nettoie tout rattrapage en cours.
-// Une entrée résolue en 'invalid' sur une cible P2 :
+// Une entrée résolue en 'invalid' :
 //   - si ce n'était PAS déjà une tentative de rattrapage → démarre le cycle (tentative 1/2)
-//   - si c'était la tentative 1/2 → escalade vers la tentative 2/2 sur le jeu suivant
+//       · cible P2 → l'enseigne de rattrapage est l'enseigne défaillante elle-même (inchangée)
+//       · cible P1 → l'enseigne de rattrapage est le CONTRAIRE COULEUR de l'enseigne défaillante
+//         (♣️↔♠️ / ♦️↔♥️, cf. MAP_EXC_A) — c'est la seule différence de traitement P1/P2
+//   - si c'était la tentative 1/2 → escalade vers la tentative 2/2 sur le jeu suivant,
+//     en reprenant TELLE QUELLE l'enseigne déjà utilisée pour la tentative 1 (aucun recalcul)
 //   - si c'était la tentative 2/2 (dernière chance) → on arrête, plus de rattrapage
-// Une cible P1 ne déclenche jamais de rattrapage.
 function updateRattrapageFromEntry(entry){
   if(!entry) return;
   if(entry.status==='valid'){
@@ -531,14 +534,16 @@ function updateRattrapageFromEntry(entry){
     return;
   }
   if(entry.status==='invalid'){
-    if(entry.side!=='P2') return; // pas de rattrapage pour P1
     const attempt = entry.rattrapageAttempt || 0;
     if(attempt>0 && attempt<RATTRAPAGE_MAX_ATTEMPTS){
-      rattrapageMode = {suit:entry.suitKey, gameNum:entry.gameNum+1, attempt:attempt+1, maxAttempts:RATTRAPAGE_MAX_ATTEMPTS};
+      // escalade tentative 2/2 : même enseigne de rattrapage, même cible, aucun recalcul
+      rattrapageMode = {suit:entry.suitKey, gameNum:entry.gameNum+1, attempt:attempt+1, maxAttempts:RATTRAPAGE_MAX_ATTEMPTS, side:entry.side};
     } else if(attempt>=RATTRAPAGE_MAX_ATTEMPTS){
       rattrapageMode = null; // dernière tentative ratée → on arrête le rattrapage
     } else {
-      rattrapageMode = {suit:entry.suitKey, gameNum:entry.gameNum+1, attempt:1, maxAttempts:RATTRAPAGE_MAX_ATTEMPTS};
+      // première défaillance : détermine l'enseigne de rattrapage selon la cible
+      const rattrapSuit = entry.side==='P1' ? (MAP_EXC_A[entry.suitKey] || entry.suitKey) : entry.suitKey;
+      rattrapageMode = {suit:rattrapSuit, gameNum:entry.gameNum+1, attempt:1, maxAttempts:RATTRAPAGE_MAX_ATTEMPTS, side:entry.side};
     }
   }
 }
@@ -1285,8 +1290,8 @@ function calculate(){
       showAutoValidationFeedback(autoVal);
 
       // ── RATTRAPAGE +2 (RÈGLE COMBO) : géré par updateRattrapageFromEntry ──
-      // (valid → clean · invalid P2 frais → tentative 1/2 · invalid tentative 1/2 → tentative 2/2 ·
-      //  invalid tentative 2/2 → on arrête · invalid P1 → jamais de rattrapage)
+      // (valid → clean · invalid frais (P1 ou P2) → tentative 1/2 · invalid tentative 1/2 → tentative 2/2 ·
+      //  invalid tentative 2/2 → on arrête)
       updateRattrapageFromEntry(autoVal);
 
       // ── AUTO ALL INVERSE (engine ULTIME1/ULTIME2) : pilote le bouton ALL INVERSE ──
@@ -1320,16 +1325,17 @@ function renderResult(r){
   // ── RÈGLE COMBO (méthode de base ULTIME1/ULTIME2) : décide l'engine + la cible P1/P2 ──
   let decision = {...r.decisionBase};
 
-  // ── RATTRAPAGE +2 : si une prédiction P2 a échoué, on NE RECALCULE PLUS RIEN ──
-  // La même enseigne défaillante est redonnée telle quelle, sans aucune transformation
-  // supplémentaire (pas d'inversion 2 chiffres, pas d'ALL INVERSE, pas de réinversion
-  // finale, pas d'exception de couleur).
+  // ── RATTRAPAGE +2 : si une prédiction (P1 ou P2) a échoué, on NE RECALCULE PLUS RIEN ──
+  // L'enseigne de rattrapage (déjà déterminée par updateRattrapageFromEntry, avec le
+  // "contraire couleur" appliqué une seule fois côté P1) est redonnée telle quelle, sans
+  // aucune transformation supplémentaire (pas d'inversion 2 chiffres, pas d'ALL INVERSE,
+  // pas de réinversion finale, pas d'exception de couleur).
   let rattrapageInfo = null;
   let allInvInfo = null, reinvFinaleInfo = null, exceptionInfo = null;
 
   if(rattrapageMode && rattrapageMode.gameNum === r.nextNum){
-    rattrapageInfo = {suit: rattrapageMode.suit, gameNum: rattrapageMode.gameNum, attempt: rattrapageMode.attempt, maxAttempts: rattrapageMode.maxAttempts};
-    decision = {...decision, target:'P2', rattrapage:true, isTwoDigitInversion:false};
+    rattrapageInfo = {suit: rattrapageMode.suit, gameNum: rattrapageMode.gameNum, attempt: rattrapageMode.attempt, maxAttempts: rattrapageMode.maxAttempts, side: rattrapageMode.side};
+    decision = {...decision, target: rattrapageMode.side, rattrapage:true, isTwoDigitInversion:false};
     displaySuit = rattrapageMode.suit; // valeur finale imposée, aucun recalcul après ce point
   } else {
     // ── Inversion 2 CHIFFRES (n° 10-99) : bascule la cible P1<>P2 ──
@@ -1394,7 +1400,7 @@ function renderResult(r){
   const badges=[
     `<div class="badge badge-range2">${rangeInvInfo.applied?'🔀':'⬛'} ALGO 2 (900-1441) — #N${r.nextNum} ${rangeInvInfo.applied?`DANS LA PLAGE → INVERSION ${SUIT_EMOJI[rangeInvInfo.before]} → ${SUIT_EMOJI[rangeInvInfo.after]}`:'HORS PLAGE — INACTIF'}</div>`,
     `<div class="badge badge-regle">◆ RÈGLE ${r.decisionBase.regle} — ${r.decisionBase.cond} → ${r.decisionBase.engine} PRÉDIT ${r.decisionBase.target}</div>`,
-    ...(rattrapageInfo ? [`<div class="badge badge-exception">🆘 RATTRAPAGE ${rattrapageInfo.attempt}/${rattrapageInfo.maxAttempts} — #N${rattrapageInfo.gameNum} → ${SUIT_EMOJI[rattrapageInfo.suit]} P2 redonnée telle quelle (AUCUN recalcul)${rattrapageInfo.attempt>=rattrapageInfo.maxAttempts?' — DERNIÈRE CHANCE':''}</div>`] : []),
+    ...(rattrapageInfo ? [`<div class="badge badge-exception">🆘 RATTRAPAGE ${rattrapageInfo.attempt}/${rattrapageInfo.maxAttempts} — #N${rattrapageInfo.gameNum} → ${SUIT_EMOJI[rattrapageInfo.suit]} ${rattrapageInfo.side} redonnée telle quelle (AUCUN recalcul)${rattrapageInfo.attempt>=rattrapageInfo.maxAttempts?' — DERNIÈRE CHANCE':''}</div>`] : []),
     ...(decision.isTwoDigitInversion ? [`<div class="badge badge-exception">🔄 INVERSION 2 CHIFFRES (10-99) — #N${r.nextNum} → CIBLE P1↔P2 → ${decision.target}</div>`] : []),
     `<div class="badge badge-selector">🎯 SÉLECTEUR — ${selectorLine}</div>`,
     `<div class="badge badge-algo">⚙ ALGO ${r.algoUsed} — BASE : ALGO ${ar.baseAlgo} · ${fibOverrideLabel} → ALGO FINAL : ALGO ${ar.algo}</div>`,
@@ -1509,7 +1515,7 @@ ${am.periodeLabel?`<div class="det-row"><span class="det-label" style="color:#aa
 <div class="det-row"><span class="det-label" style="color:#d4bfff">◆ RÈGLE COMBO</span><span class="det-val" style="color:#d4bfff">RÈGLE ${r.decisionBase.regle} — ${r.decisionBase.cond}</span></div>
 <div class="det-row"><span class="det-label" style="color:#d4bfff">ENGINE</span><span class="det-val" style="color:#d4bfff">${r.decisionBase.engine}</span></div>
 <div class="det-row"><span class="det-label" style="color:#d4bfff">Cible de base</span><span class="det-val" style="color:#d4bfff">${r.decisionBase.target}</span></div>
-${rattrapageInfo?`<div class="det-row"><span class="det-label" style="color:#ff9999">🆘 RATTRAPAGE</span><span class="det-val" style="color:#ff9999">Tentative ${rattrapageInfo.attempt}/${rattrapageInfo.maxAttempts} — ${SUIT_EMOJI[rattrapageInfo.suit]} P2 redonnée telle quelle, sans recalcul (ni 2 chiffres, ni ALL INVERSE, ni réinversion, ni exception)${rattrapageInfo.attempt>=rattrapageInfo.maxAttempts?' — dernière chance':''}</span></div>`:''}
+${rattrapageInfo?`<div class="det-row"><span class="det-label" style="color:#ff9999">🆘 RATTRAPAGE</span><span class="det-val" style="color:#ff9999">Tentative ${rattrapageInfo.attempt}/${rattrapageInfo.maxAttempts} — ${SUIT_EMOJI[rattrapageInfo.suit]} ${rattrapageInfo.side} redonnée telle quelle, sans recalcul (ni 2 chiffres, ni ALL INVERSE, ni réinversion, ni exception)${rattrapageInfo.attempt>=rattrapageInfo.maxAttempts?' — dernière chance':''}</span></div>`:''}
 ${decision.isTwoDigitInversion?`<div class="det-row"><span class="det-label" style="color:#d4bfff">Inversion 2 chiffres (10-99)</span><span class="det-val" style="color:#d4bfff">Cible finale → ${decision.target}</span></div>`:''}
 <div class="det-row"><span class="det-label" style="color:#d4bfff">Cible finale</span><span class="det-val" style="color:#d4bfff">${decision.target}</span></div>`;
   if(reinvFinaleInfo){

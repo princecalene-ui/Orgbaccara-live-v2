@@ -1320,40 +1320,42 @@ function renderResult(r){
   // ── RÈGLE COMBO (méthode de base ULTIME1/ULTIME2) : décide l'engine + la cible P1/P2 ──
   let decision = {...r.decisionBase};
 
-  // ── RATTRAPAGE +2 : si une prédiction P2 a échoué, on force la reprise sur ce numéro ──
+  // ── RATTRAPAGE +2 : si une prédiction P2 a échoué, on NE RECALCULE PLUS RIEN ──
+  // La même enseigne défaillante est redonnée telle quelle, sans aucune transformation
+  // supplémentaire (pas d'inversion 2 chiffres, pas d'ALL INVERSE, pas de réinversion
+  // finale, pas d'exception de couleur).
   let rattrapageInfo = null;
+  let allInvInfo = null, reinvFinaleInfo = null, exceptionInfo = null;
+
   if(rattrapageMode && rattrapageMode.gameNum === r.nextNum){
     rattrapageInfo = {suit: rattrapageMode.suit, gameNum: rattrapageMode.gameNum, attempt: rattrapageMode.attempt, maxAttempts: rattrapageMode.maxAttempts};
-    decision = {...decision, target:'P2', rattrapage:true};
-    displaySuit = rattrapageMode.suit;
-  }
+    decision = {...decision, target:'P2', rattrapage:true, isTwoDigitInversion:false};
+    displaySuit = rattrapageMode.suit; // valeur finale imposée, aucun recalcul après ce point
+  } else {
+    // ── Inversion 2 CHIFFRES (n° 10-99) : bascule la cible P1<>P2 ──
+    decision = applyTwoDigitInversion(decision, r.nextNum);
 
-  // ── Inversion 2 CHIFFRES (n° 10-99) : bascule la cible P1<>P2 ──
-  decision = applyTwoDigitInversion(decision, r.nextNum);
+    // ── Calcul ALL INVERSE (automatique via l'engine, ou manuel via le bouton) ──
+    if(allInverseActive){
+      allInvInfo = applyAllInverse(displaySuit, r.avantDernier, r.nextH);
+      displaySuit = allInvInfo.result;
+    }
 
-  // ── Calcul ALL INVERSE (automatique via l'engine, ou manuel via le bouton) ──
-  let allInvInfo = null;
-  if(allInverseActive){
-    allInvInfo = applyAllInverse(displaySuit, r.avantDernier, r.nextH);
-    displaySuit = allInvInfo.result;
-  }
+    // ── RÉINVERSION FINALE (ULTIME2 uniquement, n° à 3 chiffres et +) ──
+    if(decision.engine==='ULTIME2' && r.autoInfo && String(r.nextNum).length>=3){
+      const map   = allInverseActive ? r.autoInfo.mapOn : r.autoInfo.mapOff;
+      const label = allInverseActive ? r.autoInfo.mapOnLabel : r.autoInfo.mapOffLabel;
+      const before = displaySuit;
+      displaySuit = map[displaySuit] || displaySuit;
+      reinvFinaleInfo = {before, result:displaySuit, label, buttonOn:allInverseActive};
+    }
 
-  // ── RÉINVERSION FINALE (ULTIME2 uniquement, n° à 3 chiffres et +) ──
-  let reinvFinaleInfo = null;
-  if(decision.engine==='ULTIME2' && r.autoInfo && String(r.nextNum).length>=3){
-    const map   = allInverseActive ? r.autoInfo.mapOn : r.autoInfo.mapOff;
-    const label = allInverseActive ? r.autoInfo.mapOnLabel : r.autoInfo.mapOffLabel;
-    const before = displaySuit;
-    displaySuit = map[displaySuit] || displaySuit;
-    reinvFinaleInfo = {before, result:displaySuit, label, buttonOn:allInverseActive};
-  }
-
-  // ── EXCEPTION DE COULEUR (RÈGLE COMBO) ──
-  let exceptionInfo = null;
-  if(decision.exception){
-    const before = displaySuit;
-    displaySuit = decision.exception.map[displaySuit] || displaySuit;
-    exceptionInfo = {before, result:displaySuit, label:decision.exception.label, reason:decision.exception.reason};
+    // ── EXCEPTION DE COULEUR (RÈGLE COMBO) ──
+    if(decision.exception){
+      const before = displaySuit;
+      displaySuit = decision.exception.map[displaySuit] || displaySuit;
+      exceptionInfo = {before, result:displaySuit, label:decision.exception.label, reason:decision.exception.reason};
+    }
   }
 
   const side = decision.target; // P1 (Joueur) ou P2 (Banquier)
@@ -1392,7 +1394,7 @@ function renderResult(r){
   const badges=[
     `<div class="badge badge-range2">${rangeInvInfo.applied?'🔀':'⬛'} ALGO 2 (900-1441) — #N${r.nextNum} ${rangeInvInfo.applied?`DANS LA PLAGE → INVERSION ${SUIT_EMOJI[rangeInvInfo.before]} → ${SUIT_EMOJI[rangeInvInfo.after]}`:'HORS PLAGE — INACTIF'}</div>`,
     `<div class="badge badge-regle">◆ RÈGLE ${r.decisionBase.regle} — ${r.decisionBase.cond} → ${r.decisionBase.engine} PRÉDIT ${r.decisionBase.target}</div>`,
-    ...(rattrapageInfo ? [`<div class="badge badge-exception">🆘 RATTRAPAGE ${rattrapageInfo.attempt}/${rattrapageInfo.maxAttempts} — reprise forcée sur #N${rattrapageInfo.gameNum} → ${SUIT_EMOJI[rattrapageInfo.suit]} P2${rattrapageInfo.attempt>=rattrapageInfo.maxAttempts?' (DERNIÈRE CHANCE)':''}</div>`] : []),
+    ...(rattrapageInfo ? [`<div class="badge badge-exception">🆘 RATTRAPAGE ${rattrapageInfo.attempt}/${rattrapageInfo.maxAttempts} — #N${rattrapageInfo.gameNum} → ${SUIT_EMOJI[rattrapageInfo.suit]} P2 redonnée telle quelle (AUCUN recalcul)${rattrapageInfo.attempt>=rattrapageInfo.maxAttempts?' — DERNIÈRE CHANCE':''}</div>`] : []),
     ...(decision.isTwoDigitInversion ? [`<div class="badge badge-exception">🔄 INVERSION 2 CHIFFRES (10-99) — #N${r.nextNum} → CIBLE P1↔P2 → ${decision.target}</div>`] : []),
     `<div class="badge badge-selector">🎯 SÉLECTEUR — ${selectorLine}</div>`,
     `<div class="badge badge-algo">⚙ ALGO ${r.algoUsed} — BASE : ALGO ${ar.baseAlgo} · ${fibOverrideLabel} → ALGO FINAL : ALGO ${ar.algo}</div>`,
@@ -1507,7 +1509,7 @@ ${am.periodeLabel?`<div class="det-row"><span class="det-label" style="color:#aa
 <div class="det-row"><span class="det-label" style="color:#d4bfff">◆ RÈGLE COMBO</span><span class="det-val" style="color:#d4bfff">RÈGLE ${r.decisionBase.regle} — ${r.decisionBase.cond}</span></div>
 <div class="det-row"><span class="det-label" style="color:#d4bfff">ENGINE</span><span class="det-val" style="color:#d4bfff">${r.decisionBase.engine}</span></div>
 <div class="det-row"><span class="det-label" style="color:#d4bfff">Cible de base</span><span class="det-val" style="color:#d4bfff">${r.decisionBase.target}</span></div>
-${rattrapageInfo?`<div class="det-row"><span class="det-label" style="color:#ff9999">🆘 RATTRAPAGE</span><span class="det-val" style="color:#ff9999">Tentative ${rattrapageInfo.attempt}/${rattrapageInfo.maxAttempts} — reprise forcée → ${SUIT_EMOJI[rattrapageInfo.suit]} P2${rattrapageInfo.attempt>=rattrapageInfo.maxAttempts?' (dernière chance)':''}</span></div>`:''}
+${rattrapageInfo?`<div class="det-row"><span class="det-label" style="color:#ff9999">🆘 RATTRAPAGE</span><span class="det-val" style="color:#ff9999">Tentative ${rattrapageInfo.attempt}/${rattrapageInfo.maxAttempts} — ${SUIT_EMOJI[rattrapageInfo.suit]} P2 redonnée telle quelle, sans recalcul (ni 2 chiffres, ni ALL INVERSE, ni réinversion, ni exception)${rattrapageInfo.attempt>=rattrapageInfo.maxAttempts?' — dernière chance':''}</span></div>`:''}
 ${decision.isTwoDigitInversion?`<div class="det-row"><span class="det-label" style="color:#d4bfff">Inversion 2 chiffres (10-99)</span><span class="det-val" style="color:#d4bfff">Cible finale → ${decision.target}</span></div>`:''}
 <div class="det-row"><span class="det-label" style="color:#d4bfff">Cible finale</span><span class="det-val" style="color:#d4bfff">${decision.target}</span></div>`;
   if(reinvFinaleInfo){

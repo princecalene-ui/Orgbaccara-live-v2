@@ -463,7 +463,8 @@
 let allInverseActive = false;
 let allInverseManual = false;  // true = toggled manually, false = driven by auto-milieu
 let lastCalcResult   = null;
-let rattrapageMode   = null;   // {suit:'♣️', gameNum:567} — rattrapage automatique après un échec P2 (RÈGLE COMBO)
+let rattrapageMode   = null;   // {suit:'♣️', gameNum:567, attempt:1, maxAttempts:2} — rattrapage +2 après un échec P2 (RÈGLE COMBO)
+const RATTRAPAGE_MAX_ATTEMPTS = 2; // fenêtre de rattrapage : 2 jeux consécutifs max sur la même enseigne
 let telegramHistoryCache = [];  // 150 derniers jeux chargés depuis Telegram (source commune, identique sur tous les appareils)
 let globalBacktestStats  = null; // stats de fiabilité recalculées à partir de cette source commune
 let liveLastUsableGameNum = null; // dernier n° de jeu réellement TERMINÉ et déjà traité (évite de recalculer en boucle)
@@ -486,15 +487,19 @@ function saveHistory(list){
 // Une seule entrée par numéro de jeu prédit : si elle existe déjà et est encore
 // en attente, on la met à jour (pas de doublon) ; si elle est déjà résolue, on n'y touche pas ;
 // sinon on la crée.
-function upsertHistoryEntry(gameNum, suitKey, side, modeTag){
+function upsertHistoryEntry(gameNum, suitKey, side, modeTag, rattrapageInfo){
   const list = loadHistory();
   const existing = list.find(e=>e.gameNum===gameNum);
+  const rAttempt = rattrapageInfo ? rattrapageInfo.attempt : null;
+  const rMax     = rattrapageInfo ? rattrapageInfo.maxAttempts : null;
 
   if(existing){
     if(existing.status===null){
       existing.suitKey = suitKey;
       existing.side = side;
       existing.modeTag = modeTag;
+      existing.rattrapageAttempt = rAttempt;
+      existing.rattrapageMax = rMax;
       saveHistory(list);
       renderHistory();
     }
@@ -504,11 +509,38 @@ function upsertHistoryEntry(gameNum, suitKey, side, modeTag){
   list.unshift({
     id: Date.now() + '-' + Math.random().toString(36).slice(2,7),
     gameNum, suitKey, side, modeTag,
+    rattrapageAttempt: rAttempt, rattrapageMax: rMax,
     status: null, // null=en attente | 'valid' | 'invalid'
     ts: new Date().toISOString()
   });
   saveHistory(list);
   renderHistory();
+}
+
+// ── RATTRAPAGE +2 (RÈGLE COMBO) ──
+// Une entrée résolue en 'valid' nettoie tout rattrapage en cours.
+// Une entrée résolue en 'invalid' sur une cible P2 :
+//   - si ce n'était PAS déjà une tentative de rattrapage → démarre le cycle (tentative 1/2)
+//   - si c'était la tentative 1/2 → escalade vers la tentative 2/2 sur le jeu suivant
+//   - si c'était la tentative 2/2 (dernière chance) → on arrête, plus de rattrapage
+// Une cible P1 ne déclenche jamais de rattrapage.
+function updateRattrapageFromEntry(entry){
+  if(!entry) return;
+  if(entry.status==='valid'){
+    rattrapageMode = null;
+    return;
+  }
+  if(entry.status==='invalid'){
+    if(entry.side!=='P2') return; // pas de rattrapage pour P1
+    const attempt = entry.rattrapageAttempt || 0;
+    if(attempt>0 && attempt<RATTRAPAGE_MAX_ATTEMPTS){
+      rattrapageMode = {suit:entry.suitKey, gameNum:entry.gameNum+1, attempt:attempt+1, maxAttempts:RATTRAPAGE_MAX_ATTEMPTS};
+    } else if(attempt>=RATTRAPAGE_MAX_ATTEMPTS){
+      rattrapageMode = null; // dernière tentative ratée → on arrête le rattrapage
+    } else {
+      rattrapageMode = {suit:entry.suitKey, gameNum:entry.gameNum+1, attempt:1, maxAttempts:RATTRAPAGE_MAX_ATTEMPTS};
+    }
+  }
 }
 
 function setHistoryStatus(id, status){
@@ -518,12 +550,7 @@ function setHistoryStatus(id, status){
   entry.status = (entry.status === status) ? null : status; // re-cliquer annule
   saveHistory(list);
 
-  // ── RATTRAPAGE (RÈGLE COMBO) : une validation manuelle affecte aussi le rattrapage ──
-  if(entry.status==='invalid' && entry.side==='P2'){
-    rattrapageMode = {suit: entry.suitKey, gameNum: entry.gameNum+1};
-  } else if(entry.status==='valid' && rattrapageMode && rattrapageMode.gameNum===entry.gameNum+1){
-    rattrapageMode = null;
-  }
+  updateRattrapageFromEntry(entry);
 
   renderHistory();
 }
@@ -659,7 +686,7 @@ function renderHistory(){
     <div class="history-item ${statusClass}">
       <span class="hist-num">#N${e.gameNum}</span>
       <span class="hist-suit" style="color:${red?'#cc4444':'var(--ivory)'}">${emoji}</span>
-      <span class="hist-label">${e.side}${e.source==='live-seed'?` <span class="hist-tag hist-live">🔴 LIVE</span>`:(e.autoResolved?` <span class="hist-tag">auto</span>`:'')}</span>
+      <span class="hist-label">${e.side}${e.rattrapageAttempt?` <span class="hist-tag hist-live">🆘 ${e.rattrapageAttempt}/${e.rattrapageMax}</span>`:''}${e.source==='live-seed'?` <span class="hist-tag hist-live">🔴 LIVE</span>`:(e.autoResolved?` <span class="hist-tag">auto</span>`:'')}</span>
       <div class="hist-actions">
         <button class="hist-btn valid-btn ${e.status==='valid'?'active':''}" title="Validée chez le joueur" onclick="setHistoryStatus('${e.id}','valid')">✓</button>
         <button class="hist-btn invalid-btn ${e.status==='invalid'?'active':''}" title="Non passée" onclick="setHistoryStatus('${e.id}','invalid')">✕</button>
@@ -1257,15 +1284,10 @@ function calculate(){
       const autoVal = resolvePendingHistory(r.num, r.p1, r.p2);
       showAutoValidationFeedback(autoVal);
 
-      // ── RATTRAPAGE (RÈGLE COMBO) : un succès annule le rattrapage en cours ;
-      //    un échec sur une cible P2 déclenche un rattrapage pour le jeu suivant ──
-      if(autoVal){
-        if(autoVal.status==='valid'){
-          rattrapageMode = null;
-        } else if(autoVal.status==='invalid' && autoVal.side==='P2'){
-          rattrapageMode = {suit: autoVal.suitKey, gameNum: r.nextNum};
-        }
-      }
+      // ── RATTRAPAGE +2 (RÈGLE COMBO) : géré par updateRattrapageFromEntry ──
+      // (valid → clean · invalid P2 frais → tentative 1/2 · invalid tentative 1/2 → tentative 2/2 ·
+      //  invalid tentative 2/2 → on arrête · invalid P1 → jamais de rattrapage)
+      updateRattrapageFromEntry(autoVal);
 
       // ── AUTO ALL INVERSE (engine ULTIME1/ULTIME2) : pilote le bouton ALL INVERSE ──
       // Réinitialise le flag manuel à chaque nouveau calcul
@@ -1298,10 +1320,10 @@ function renderResult(r){
   // ── RÈGLE COMBO (méthode de base ULTIME1/ULTIME2) : décide l'engine + la cible P1/P2 ──
   let decision = {...r.decisionBase};
 
-  // ── RATTRAPAGE : si une prédiction P2 a échoué, on force la reprise sur ce numéro ──
+  // ── RATTRAPAGE +2 : si une prédiction P2 a échoué, on force la reprise sur ce numéro ──
   let rattrapageInfo = null;
   if(rattrapageMode && rattrapageMode.gameNum === r.nextNum){
-    rattrapageInfo = {suit: rattrapageMode.suit, gameNum: rattrapageMode.gameNum};
+    rattrapageInfo = {suit: rattrapageMode.suit, gameNum: rattrapageMode.gameNum, attempt: rattrapageMode.attempt, maxAttempts: rattrapageMode.maxAttempts};
     decision = {...decision, target:'P2', rattrapage:true};
     displaySuit = rattrapageMode.suit;
   }
@@ -1342,7 +1364,7 @@ function renderResult(r){
     `<span style="color:${red?'#cc4444':'var(--ivory)'}">${SUIT_EMOJI[displaySuit]||displaySuit}</span>`;
   document.getElementById('res-side').innerHTML=`<span class="side-tag">${side}</span>`;
 
-  upsertHistoryEntry(r.nextNum, displaySuit, side, '');
+  upsertHistoryEntry(r.nextNum, displaySuit, side, '', rattrapageInfo);
 
   // Banner ALL INVERSE
   const banner = document.getElementById('allinv-banner');
@@ -1370,7 +1392,7 @@ function renderResult(r){
   const badges=[
     `<div class="badge badge-range2">${rangeInvInfo.applied?'🔀':'⬛'} ALGO 2 (900-1441) — #N${r.nextNum} ${rangeInvInfo.applied?`DANS LA PLAGE → INVERSION ${SUIT_EMOJI[rangeInvInfo.before]} → ${SUIT_EMOJI[rangeInvInfo.after]}`:'HORS PLAGE — INACTIF'}</div>`,
     `<div class="badge badge-regle">◆ RÈGLE ${r.decisionBase.regle} — ${r.decisionBase.cond} → ${r.decisionBase.engine} PRÉDIT ${r.decisionBase.target}</div>`,
-    ...(rattrapageInfo ? [`<div class="badge badge-exception">🆘 RATTRAPAGE ACTIF — reprise forcée sur #N${rattrapageInfo.gameNum} → ${SUIT_EMOJI[rattrapageInfo.suit]} P2</div>`] : []),
+    ...(rattrapageInfo ? [`<div class="badge badge-exception">🆘 RATTRAPAGE ${rattrapageInfo.attempt}/${rattrapageInfo.maxAttempts} — reprise forcée sur #N${rattrapageInfo.gameNum} → ${SUIT_EMOJI[rattrapageInfo.suit]} P2${rattrapageInfo.attempt>=rattrapageInfo.maxAttempts?' (DERNIÈRE CHANCE)':''}</div>`] : []),
     ...(decision.isTwoDigitInversion ? [`<div class="badge badge-exception">🔄 INVERSION 2 CHIFFRES (10-99) — #N${r.nextNum} → CIBLE P1↔P2 → ${decision.target}</div>`] : []),
     `<div class="badge badge-selector">🎯 SÉLECTEUR — ${selectorLine}</div>`,
     `<div class="badge badge-algo">⚙ ALGO ${r.algoUsed} — BASE : ALGO ${ar.baseAlgo} · ${fibOverrideLabel} → ALGO FINAL : ALGO ${ar.algo}</div>`,
@@ -1485,7 +1507,7 @@ ${am.periodeLabel?`<div class="det-row"><span class="det-label" style="color:#aa
 <div class="det-row"><span class="det-label" style="color:#d4bfff">◆ RÈGLE COMBO</span><span class="det-val" style="color:#d4bfff">RÈGLE ${r.decisionBase.regle} — ${r.decisionBase.cond}</span></div>
 <div class="det-row"><span class="det-label" style="color:#d4bfff">ENGINE</span><span class="det-val" style="color:#d4bfff">${r.decisionBase.engine}</span></div>
 <div class="det-row"><span class="det-label" style="color:#d4bfff">Cible de base</span><span class="det-val" style="color:#d4bfff">${r.decisionBase.target}</span></div>
-${rattrapageInfo?`<div class="det-row"><span class="det-label" style="color:#ff9999">🆘 RATTRAPAGE</span><span class="det-val" style="color:#ff9999">Reprise forcée → ${SUIT_EMOJI[rattrapageInfo.suit]} P2</span></div>`:''}
+${rattrapageInfo?`<div class="det-row"><span class="det-label" style="color:#ff9999">🆘 RATTRAPAGE</span><span class="det-val" style="color:#ff9999">Tentative ${rattrapageInfo.attempt}/${rattrapageInfo.maxAttempts} — reprise forcée → ${SUIT_EMOJI[rattrapageInfo.suit]} P2${rattrapageInfo.attempt>=rattrapageInfo.maxAttempts?' (dernière chance)':''}</span></div>`:''}
 ${decision.isTwoDigitInversion?`<div class="det-row"><span class="det-label" style="color:#d4bfff">Inversion 2 chiffres (10-99)</span><span class="det-val" style="color:#d4bfff">Cible finale → ${decision.target}</span></div>`:''}
 <div class="det-row"><span class="det-label" style="color:#d4bfff">Cible finale</span><span class="det-val" style="color:#d4bfff">${decision.target}</span></div>`;
   if(reinvFinaleInfo){

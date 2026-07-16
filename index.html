@@ -587,8 +587,6 @@ function deterministicPredict(raw){
   if(decision.exception){
     suit = decision.exception.map[suit] || suit;
   }
-  const heurePaire = applyHeurePaireFinale(suit, r.nextH);
-  if(heurePaire.applied) suit = heurePaire.result;
 
   return {nextNum:r.nextNum, suit, side:decision.target};
 }
@@ -831,23 +829,6 @@ function applyAllInverse(suit, avantDernier, nextH){
 
   const result = map[suit] || suit;
   return { result, label, isPair, heurePair, before: suit };
-}
-
-// ══════════════════════════════════════════════════════
-//  COUCHE FINALE — INVERSION HEURES PAIRES
-//  Appliquée EN DERNIER, après ALL INVERSE.
-//  Toujours active (indépendante du bouton ALL INVERSE) :
-//  ♠️↔️♣️ / ♦️↔️♥️ pour tout jeu prédit à une heure dont la SOMME DES CHIFFRES
-//  est paire (ex: 2h, 6h, 11h, 15h, 22h...).
-// ══════════════════════════════════════════════════════
-function applyHeurePaireFinale(suit, nextH){
-  const heurePaire = isHeurePaire(nextH);
-  const map = {'♠️':'♣️','♣️':'♠️','♦️':'♥️','♥️':'♦️'};
-  const result = heurePaire ? (map[suit] || suit) : suit;
-  const label = heurePaire
-    ? `H=${nextH} (somme chiffres=${heureDigitSum(nextH)}, PAIRE) → COUCHE FINALE : ♠️↔️♣️ / ♦️↔️♥️`
-    : `H=${nextH} (somme chiffres=${heureDigitSum(nextH)}, IMPAIRE) → COUCHE FINALE INACTIVE`;
-  return { applied: heurePaire, result, label, heurePaire, before: suit };
 }
 
 // ══════════════════════════════════════════════════════
@@ -1353,10 +1334,6 @@ function renderResult(r){
     exceptionInfo = {before, result:displaySuit, label:decision.exception.label, reason:decision.exception.reason};
   }
 
-  // ── COUCHE FINALE — HEURES PAIRES (tout à la fin, après tout le reste) ──
-  const heurePaireInfo = applyHeurePaireFinale(displaySuit, r.nextH);
-  if(heurePaireInfo.applied) displaySuit = heurePaireInfo.result;
-
   const side = decision.target; // P1 (Joueur) ou P2 (Banquier)
 
   document.getElementById('res-num').textContent=`#N${r.nextNum}`;
@@ -1420,11 +1397,7 @@ function renderResult(r){
     // Badge RÉINVERSION FINALE (ULTIME2 uniquement)
     ...(reinvFinaleInfo ? [`<div class="badge badge-reinvfinale">🔁 RÉINVERSION FINALE (ULTIME2) — bouton ${reinvFinaleInfo.buttonOn?'ON':'OFF'} · ${reinvFinaleInfo.label} — ${SUIT_EMOJI[reinvFinaleInfo.before]} → ${SUIT_EMOJI[reinvFinaleInfo.result]}</div>`] : []),
     // Badge EXCEPTION DE COULEUR (RÈGLE COMBO)
-    ...(exceptionInfo ? [`<div class="badge badge-exception">⚠ EXCEPTION RÈGLE ${r.decisionBase.regle} — ${exceptionInfo.reason} → ${exceptionInfo.label} — ${SUIT_EMOJI[exceptionInfo.before]} → ${SUIT_EMOJI[exceptionInfo.result]}</div>`] : []),
-    // Badge COUCHE FINALE — HEURES PAIRES (toujours active, tout à la fin)
-    heurePaireInfo.applied
-      ? `<div class="badge badge-allinv" style="border-color:#ff88ff;background:linear-gradient(135deg,#1a0a2e,#2d1555);color:#ff88ff">⏱️ COUCHE FINALE HEURE PAIRE — ${heurePaireInfo.label} — ${SUIT_EMOJI[heurePaireInfo.before]} → ${SUIT_EMOJI[heurePaireInfo.result]}</div>`
-      : `<div class="badge badge-allinv" style="opacity:.35">⏱️ COUCHE FINALE HEURE PAIRE — ${heurePaireInfo.label}</div>`
+    ...(exceptionInfo ? [`<div class="badge badge-exception">⚠ EXCEPTION RÈGLE ${r.decisionBase.regle} — ${exceptionInfo.reason} → ${exceptionInfo.label} — ${SUIT_EMOJI[exceptionInfo.before]} → ${SUIT_EMOJI[exceptionInfo.result]}</div>`] : [])
   ];
   document.getElementById('badge-zone').innerHTML=badges.join('');
 
@@ -1535,10 +1508,6 @@ ${decision.isTwoDigitInversion?`<div class="det-row"><span class="det-label" sty
   }
 
   detailsHTML+=`
-<hr class="det-sep">
-<div class="det-row"><span class="det-label" style="color:#ff88ff">⏱️ COUCHE FINALE — HEURE PAIRE</span><span class="det-val" style="color:#ff88ff">${heurePaireInfo.applied?'ACTIF':'INACTIF'}</span></div>
-<div class="det-row"><span class="det-label" style="color:#ff88ff">Règle</span><span class="det-val" style="color:#ff88ff">${heurePaireInfo.label}</span></div>
-${heurePaireInfo.applied?`<div class="det-row"><span class="det-label" style="color:#ff88ff">Transformation</span><span class="det-val" style="color:#ff88ff">${SUIT_EMOJI[heurePaireInfo.before]} → ${SUIT_EMOJI[heurePaireInfo.result]}</span></div>`:''}
 <hr class="det-sep">
 <div class="det-row"><span class="det-label">RÉSULTAT FINAL${allInverseActive?' (MODE INVERSÉE)':''}</span><span class="det-val det-result">#N${r.nextNum} — ${SUIT_EMOJI[displaySuit]} ${SUIT_NAMES[displaySuit]}</span></div>`;
 

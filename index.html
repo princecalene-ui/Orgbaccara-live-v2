@@ -522,8 +522,8 @@ function upsertHistoryEntry(gameNum, suitKey, side, modeTag, rattrapageInfo){
 // Une entrée résolue en 'invalid' :
 //   - si ce n'était PAS déjà une tentative de rattrapage → démarre le cycle (tentative 1/2)
 //       · cible P2 → l'enseigne de rattrapage est l'enseigne défaillante elle-même (inchangée)
-//       · cible P1 → l'enseigne de rattrapage est le CONTRAIRE COULEUR de l'enseigne défaillante
-//         (♣️↔♠️ / ♦️↔♥️, cf. MAP_EXC_A) — c'est la seule différence de traitement P1/P2
+//       · cible P1 → l'enseigne de rattrapage dépend de la PARITÉ de l'avant-dernier chiffre
+//         du n° de jeu qui a échoué : PAIR → MAP_P1_RATTRAP_PAIR · IMPAIR → MAP_P1_RATTRAP_IMPAIR
 //   - si c'était la tentative 1/2 → escalade vers la tentative 2/2 sur le jeu suivant,
 //     en reprenant TELLE QUELLE l'enseigne déjà utilisée pour la tentative 1 (aucun recalcul)
 //   - si c'était la tentative 2/2 (dernière chance) → on arrête, plus de rattrapage
@@ -542,7 +542,15 @@ function updateRattrapageFromEntry(entry){
       rattrapageMode = null; // dernière tentative ratée → on arrête le rattrapage
     } else {
       // première défaillance : détermine l'enseigne de rattrapage selon la cible
-      const rattrapSuit = entry.side==='P1' ? (MAP_EXC_A[entry.suitKey] || entry.suitKey) : entry.suitKey;
+      let rattrapSuit;
+      if(entry.side==='P1'){
+        // Parité de l'avant-dernier chiffre du n° de jeu QUI A ÉCHOUÉ (entry.gameNum)
+        const avD = avantDernierDigitOf(entry.gameNum);
+        const map = (avD % 2 !== 0) ? MAP_P1_RATTRAP_IMPAIR : MAP_P1_RATTRAP_PAIR;
+        rattrapSuit = map[entry.suitKey] || entry.suitKey;
+      } else {
+        rattrapSuit = entry.suitKey; // P2 : enseigne défaillante redonnée telle quelle
+      }
       rattrapageMode = {suit:rattrapSuit, gameNum:entry.gameNum+1, attempt:1, maxAttempts:RATTRAPAGE_MAX_ATTEMPTS, side:entry.side};
     }
   }
@@ -735,6 +743,17 @@ function applyRangeInverse(suit, nextNum){
 // ══════════════════════════════════════════════════════
 const MAP_EXC_A = {'♠️':'♣️','♣️':'♠️','♦️':'♥️','♥️':'♦️'};
 const MAP_EXC_B = {'♠️':'♦️','♦️':'♠️','♣️':'♥️','♥️':'♣️'};
+
+// ── RATTRAPAGE P1 — mapping "contraire couleur" selon la parité de l'AVANT-DERNIER
+//    chiffre du numéro de jeu QUI A ÉCHOUÉ (pas celui du rattrapage) ──
+// AVANT-DERNIER PAIR   → ♣️→♠️ · ♠️→♣️ · ♦️→♠️ · ♥️→♣️
+// AVANT-DERNIER IMPAIR → ♠️→♠️ · ♣️→♣️ · ♥️→♠️ · ♦️→♣️
+const MAP_P1_RATTRAP_PAIR   = {'♣️':'♠️','♠️':'♣️','♦️':'♠️','♥️':'♣️'};
+const MAP_P1_RATTRAP_IMPAIR = {'♠️':'♠️','♣️':'♣️','♥️':'♠️','♦️':'♣️'};
+function avantDernierDigitOf(gameNum){
+  const s=String(gameNum);
+  return s.length>=2 ? parseInt(s[s.length-2],10) : parseInt(s[0],10);
+}
 
 function decideRule(avantDernier, dernier){
   const avOdd = (avantDernier % 2 !== 0);

@@ -492,6 +492,8 @@ function upsertHistoryEntry(gameNum, suitKey, side, modeTag, rattrapageInfo){
   const existing = list.find(e=>e.gameNum===gameNum);
   const rAttempt = rattrapageInfo ? rattrapageInfo.attempt : null;
   const rMax     = rattrapageInfo ? rattrapageInfo.maxAttempts : null;
+  const rParity  = rattrapageInfo ? rattrapageInfo.mapParity : null;
+  const rChained = rattrapageInfo ? !!rattrapageInfo.chained : false;
 
   if(existing){
     if(existing.status===null){
@@ -500,6 +502,8 @@ function upsertHistoryEntry(gameNum, suitKey, side, modeTag, rattrapageInfo){
       existing.modeTag = modeTag;
       existing.rattrapageAttempt = rAttempt;
       existing.rattrapageMax = rMax;
+      existing.rattrapageMapParity = rParity;
+      existing.rattrapageChained = rChained;
       saveHistory(list);
       renderHistory();
     }
@@ -509,7 +513,7 @@ function upsertHistoryEntry(gameNum, suitKey, side, modeTag, rattrapageInfo){
   list.unshift({
     id: Date.now() + '-' + Math.random().toString(36).slice(2,7),
     gameNum, suitKey, side, modeTag,
-    rattrapageAttempt: rAttempt, rattrapageMax: rMax,
+    rattrapageAttempt: rAttempt, rattrapageMax: rMax, rattrapageMapParity: rParity, rattrapageChained: rChained,
     status: null, // null=en attente | 'valid' | 'invalid'
     ts: new Date().toISOString()
   });
@@ -527,8 +531,13 @@ function upsertHistoryEntry(gameNum, suitKey, side, modeTag, rattrapageInfo){
 //         P1 → PAIR: MAP_RATTRAP_P1_PAIR · IMPAIR: MAP_RATTRAP_P1_IMPAIR
 //         P2 → PAIR: MAP_RATTRAP_P2_PAIR · IMPAIR: MAP_RATTRAP_P2_IMPAIR
 //         (ces deux jeux de maps sont inversés l'un par rapport à l'autre)
-//   - si c'était la tentative 1/2 → escalade vers la tentative 2/2 sur le jeu suivant,
-//     en reprenant TELLE QUELLE l'enseigne déjà utilisée pour la tentative 1 (aucun recalcul)
+//   - si c'était la tentative 1/2 → escalade vers la tentative 2/2 sur le jeu suivant :
+//       · P1 : la tentative 2 DÉPEND de la tentative 1 → on réapplique la MÊME map
+//         (même parité mémorisée depuis la 1ère défaillance) à l'enseigne de la
+//         tentative 1, qui devient la nouvelle enseigne "principale" de rattrapage.
+//         Aucun recalcul du moteur — seule cette transformation chaînée est appliquée.
+//       · P2 : comportement inchangé — l'enseigne de la tentative 1 est reprise
+//         TELLE QUELLE pour la tentative 2 (aucune transformation supplémentaire).
 //   - si c'était la tentative 2/2 (dernière chance) → on arrête, plus de rattrapage
 function updateRattrapageFromEntry(entry){
   if(!entry) return;
@@ -539,8 +548,17 @@ function updateRattrapageFromEntry(entry){
   if(entry.status==='invalid'){
     const attempt = entry.rattrapageAttempt || 0;
     if(attempt>0 && attempt<RATTRAPAGE_MAX_ATTEMPTS){
-      // escalade tentative 2/2 : même enseigne de rattrapage, même cible, aucun recalcul
-      rattrapageMode = {suit:entry.suitKey, gameNum:entry.gameNum+1, attempt:attempt+1, maxAttempts:RATTRAPAGE_MAX_ATTEMPTS, side:entry.side};
+      // escalade tentative 2/2
+      let nextSuit;
+      if(entry.side==='P1' && entry.rattrapageMapParity){
+        // P1 : chaînage — on réapplique la même map (même parité) à l'enseigne de la tentative 1
+        const map = entry.rattrapageMapParity==='pair' ? MAP_RATTRAP_P1_PAIR : MAP_RATTRAP_P1_IMPAIR;
+        nextSuit = map[entry.suitKey] || entry.suitKey;
+      } else {
+        // P2 : enseigne de la tentative 1 redonnée telle quelle
+        nextSuit = entry.suitKey;
+      }
+      rattrapageMode = {suit:nextSuit, gameNum:entry.gameNum+1, attempt:attempt+1, maxAttempts:RATTRAPAGE_MAX_ATTEMPTS, side:entry.side, mapParity:entry.rattrapageMapParity, chained:(entry.side==='P1')};
     } else if(attempt>=RATTRAPAGE_MAX_ATTEMPTS){
       rattrapageMode = null; // dernière tentative ratée → on arrête le rattrapage
     } else {
@@ -549,11 +567,12 @@ function updateRattrapageFromEntry(entry){
       // selon que la prédiction défaillante ciblait P1 ou P2
       const avD = avantDernierDigitOf(entry.gameNum);
       const isPairAvD = (avD % 2 === 0);
+      const mapParity = isPairAvD ? 'pair' : 'impair';
       const map = entry.side === 'P2'
         ? (isPairAvD ? MAP_RATTRAP_P2_PAIR : MAP_RATTRAP_P2_IMPAIR)
         : (isPairAvD ? MAP_RATTRAP_P1_PAIR : MAP_RATTRAP_P1_IMPAIR);
       const rattrapSuit = map[entry.suitKey] || entry.suitKey;
-      rattrapageMode = {suit:rattrapSuit, gameNum:entry.gameNum+1, attempt:1, maxAttempts:RATTRAPAGE_MAX_ATTEMPTS, side:entry.side};
+      rattrapageMode = {suit:rattrapSuit, gameNum:entry.gameNum+1, attempt:1, maxAttempts:RATTRAPAGE_MAX_ATTEMPTS, side:entry.side, mapParity, chained:false};
     }
   }
 }
@@ -1360,7 +1379,7 @@ function renderResult(r){
   let allInvInfo = null, reinvFinaleInfo = null, exceptionInfo = null;
 
   if(rattrapageMode && rattrapageMode.gameNum === r.nextNum){
-    rattrapageInfo = {suit: rattrapageMode.suit, gameNum: rattrapageMode.gameNum, attempt: rattrapageMode.attempt, maxAttempts: rattrapageMode.maxAttempts, side: rattrapageMode.side};
+    rattrapageInfo = {suit: rattrapageMode.suit, gameNum: rattrapageMode.gameNum, attempt: rattrapageMode.attempt, maxAttempts: rattrapageMode.maxAttempts, side: rattrapageMode.side, mapParity: rattrapageMode.mapParity, chained: rattrapageMode.chained};
     decision = {...decision, target: rattrapageMode.side, rattrapage:true, isTwoDigitInversion:false};
     displaySuit = rattrapageMode.suit; // valeur finale imposée, aucun recalcul après ce point
   } else {
@@ -1426,7 +1445,7 @@ function renderResult(r){
   const badges=[
     `<div class="badge badge-range2">${rangeInvInfo.applied?'🔀':'⬛'} ALGO 2 (900-1441) — #N${r.nextNum} ${rangeInvInfo.applied?`DANS LA PLAGE → INVERSION ${SUIT_EMOJI[rangeInvInfo.before]} → ${SUIT_EMOJI[rangeInvInfo.after]}`:'HORS PLAGE — INACTIF'}</div>`,
     `<div class="badge badge-regle">◆ RÈGLE ${r.decisionBase.regle} — ${r.decisionBase.cond} → ${r.decisionBase.engine} PRÉDIT ${r.decisionBase.target}</div>`,
-    ...(rattrapageInfo ? [`<div class="badge badge-exception">🆘 RATTRAPAGE ${rattrapageInfo.attempt}/${rattrapageInfo.maxAttempts} — #N${rattrapageInfo.gameNum} → ${SUIT_EMOJI[rattrapageInfo.suit]} ${rattrapageInfo.side} redonnée telle quelle (AUCUN recalcul)${rattrapageInfo.attempt>=rattrapageInfo.maxAttempts?' — DERNIÈRE CHANCE':''}</div>`] : []),
+    ...(rattrapageInfo ? [`<div class="badge badge-exception">🆘 RATTRAPAGE ${rattrapageInfo.attempt}/${rattrapageInfo.maxAttempts} — #N${rattrapageInfo.gameNum} → ${SUIT_EMOJI[rattrapageInfo.suit]} ${rattrapageInfo.side} ${rattrapageInfo.chained&&rattrapageInfo.attempt>1?'(transformation chaînée depuis la tentative précédente)':'redonnée telle quelle (AUCUN recalcul)'}${rattrapageInfo.attempt>=rattrapageInfo.maxAttempts?' — DERNIÈRE CHANCE':''}</div>`] : []),
     ...(decision.isTwoDigitInversion ? [`<div class="badge badge-exception">🔄 INVERSION 2 CHIFFRES (10-99) — #N${r.nextNum} → CIBLE P1↔P2 → ${decision.target}</div>`] : []),
     `<div class="badge badge-selector">🎯 SÉLECTEUR — ${selectorLine}</div>`,
     `<div class="badge badge-algo">⚙ ALGO ${r.algoUsed} — BASE : ALGO ${ar.baseAlgo} · ${fibOverrideLabel} → ALGO FINAL : ALGO ${ar.algo}</div>`,
@@ -1541,7 +1560,7 @@ ${am.periodeLabel?`<div class="det-row"><span class="det-label" style="color:#aa
 <div class="det-row"><span class="det-label" style="color:#d4bfff">◆ RÈGLE COMBO</span><span class="det-val" style="color:#d4bfff">RÈGLE ${r.decisionBase.regle} — ${r.decisionBase.cond}</span></div>
 <div class="det-row"><span class="det-label" style="color:#d4bfff">ENGINE</span><span class="det-val" style="color:#d4bfff">${r.decisionBase.engine}</span></div>
 <div class="det-row"><span class="det-label" style="color:#d4bfff">Cible de base</span><span class="det-val" style="color:#d4bfff">${r.decisionBase.target}</span></div>
-${rattrapageInfo?`<div class="det-row"><span class="det-label" style="color:#ff9999">🆘 RATTRAPAGE</span><span class="det-val" style="color:#ff9999">Tentative ${rattrapageInfo.attempt}/${rattrapageInfo.maxAttempts} — ${SUIT_EMOJI[rattrapageInfo.suit]} ${rattrapageInfo.side} redonnée telle quelle, sans recalcul (ni 2 chiffres, ni ALL INVERSE, ni réinversion, ni exception)${rattrapageInfo.attempt>=rattrapageInfo.maxAttempts?' — dernière chance':''}</span></div>`:''}
+${rattrapageInfo?`<div class="det-row"><span class="det-label" style="color:#ff9999">🆘 RATTRAPAGE</span><span class="det-val" style="color:#ff9999">Tentative ${rattrapageInfo.attempt}/${rattrapageInfo.maxAttempts} — ${SUIT_EMOJI[rattrapageInfo.suit]} ${rattrapageInfo.side} ${rattrapageInfo.chained&&rattrapageInfo.attempt>1?'issue d\u2019une transformation chaînée sur la tentative précédente (même règle de parité que la 1ère défaillance)':'redonnée telle quelle'}, sans recalcul du moteur (ni 2 chiffres, ni ALL INVERSE, ni réinversion, ni exception)${rattrapageInfo.attempt>=rattrapageInfo.maxAttempts?' — dernière chance':''}</span></div>`:''}
 ${decision.isTwoDigitInversion?`<div class="det-row"><span class="det-label" style="color:#d4bfff">Inversion 2 chiffres (10-99)</span><span class="det-val" style="color:#d4bfff">Cible finale → ${decision.target}</span></div>`:''}
 <div class="det-row"><span class="det-label" style="color:#d4bfff">Cible finale</span><span class="det-val" style="color:#d4bfff">${decision.target}</span></div>`;
   if(reinvFinaleInfo){

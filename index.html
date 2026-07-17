@@ -517,13 +517,13 @@ function upsertHistoryEntry(gameNum, suitKey, side, modeTag, rattrapageInfo){
   renderHistory();
 }
 
-// ── RATTRAPAGE +2 (RÈGLE COMBO) — applicable à P1 ET P2 ──
+// ── RATTRAPAGE +2 (RÈGLE COMBO, MÊME MODÈLE POUR P1 ET P2) ──
 // Une entrée résolue en 'valid' nettoie tout rattrapage en cours.
 // Une entrée résolue en 'invalid' :
 //   - si ce n'était PAS déjà une tentative de rattrapage → démarre le cycle (tentative 1/2)
-//       · cible P2 → l'enseigne de rattrapage est l'enseigne défaillante elle-même (inchangée)
-//       · cible P1 → l'enseigne de rattrapage dépend de la PARITÉ de l'avant-dernier chiffre
-//         du n° de jeu qui a échoué : PAIR → MAP_P1_RATTRAP_PAIR · IMPAIR → MAP_P1_RATTRAP_IMPAIR
+//       · l'enseigne de rattrapage = "contraire couleur" de l'enseigne défaillante,
+//         selon la PARITÉ de l'avant-dernier chiffre du n° de jeu qui a échoué :
+//         PAIR → MAP_RATTRAP_PAIR · IMPAIR → MAP_RATTRAP_IMPAIR (même règle pour P1 et P2)
 //   - si c'était la tentative 1/2 → escalade vers la tentative 2/2 sur le jeu suivant,
 //     en reprenant TELLE QUELLE l'enseigne déjà utilisée pour la tentative 1 (aucun recalcul)
 //   - si c'était la tentative 2/2 (dernière chance) → on arrête, plus de rattrapage
@@ -541,16 +541,11 @@ function updateRattrapageFromEntry(entry){
     } else if(attempt>=RATTRAPAGE_MAX_ATTEMPTS){
       rattrapageMode = null; // dernière tentative ratée → on arrête le rattrapage
     } else {
-      // première défaillance : détermine l'enseigne de rattrapage selon la cible
-      let rattrapSuit;
-      if(entry.side==='P1'){
-        // Parité de l'avant-dernier chiffre du n° de jeu QUI A ÉCHOUÉ (entry.gameNum)
-        const avD = avantDernierDigitOf(entry.gameNum);
-        const map = (avD % 2 !== 0) ? MAP_P1_RATTRAP_IMPAIR : MAP_P1_RATTRAP_PAIR;
-        rattrapSuit = map[entry.suitKey] || entry.suitKey;
-      } else {
-        rattrapSuit = entry.suitKey; // P2 : enseigne défaillante redonnée telle quelle
-      }
+      // première défaillance (P1 OU P2, même modèle) : "contraire couleur" selon la
+      // parité de l'avant-dernier chiffre du n° de jeu QUI A ÉCHOUÉ (entry.gameNum)
+      const avD = avantDernierDigitOf(entry.gameNum);
+      const map = (avD % 2 === 0) ? MAP_RATTRAP_PAIR : MAP_RATTRAP_IMPAIR;
+      const rattrapSuit = map[entry.suitKey] || entry.suitKey;
       rattrapageMode = {suit:rattrapSuit, gameNum:entry.gameNum+1, attempt:1, maxAttempts:RATTRAPAGE_MAX_ATTEMPTS, side:entry.side};
     }
   }
@@ -744,12 +739,12 @@ function applyRangeInverse(suit, nextNum){
 const MAP_EXC_A = {'♠️':'♣️','♣️':'♠️','♦️':'♥️','♥️':'♦️'};
 const MAP_EXC_B = {'♠️':'♦️','♦️':'♠️','♣️':'♥️','♥️':'♣️'};
 
-// ── RATTRAPAGE P1 — mapping "contraire couleur" selon la parité de l'AVANT-DERNIER
-//    chiffre du numéro de jeu QUI A ÉCHOUÉ (pas celui du rattrapage) ──
-// AVANT-DERNIER PAIR   → ♣️→♠️ · ♠️→♣️ · ♦️→♠️ · ♥️→♣️
-// AVANT-DERNIER IMPAIR → ♠️→♠️ · ♣️→♣️ · ♥️→♠️ · ♦️→♣️
-const MAP_P1_RATTRAP_PAIR   = {'♣️':'♠️','♠️':'♣️','♦️':'♠️','♥️':'♣️'};
-const MAP_P1_RATTRAP_IMPAIR = {'♠️':'♠️','♣️':'♣️','♥️':'♠️','♦️':'♣️'};
+// ── RATTRAPAGE (P1 ET P2, MÊME MODÈLE) — mapping "contraire couleur" selon la parité
+//    de l'AVANT-DERNIER chiffre du numéro de jeu QUI A ÉCHOUÉ (pas celui du rattrapage) ──
+// AVANT-DERNIER PAIR   → ♠️→♥️ · ♣️→♦️ · ♥️→♣️ · ♦️→♠️
+// AVANT-DERNIER IMPAIR → ♠️→♣️ · ♣️→♠️ · ♥️→♠️ · ♦️→♣️
+const MAP_RATTRAP_PAIR   = {'♠️':'♥️','♣️':'♦️','♥️':'♣️','♦️':'♠️'};
+const MAP_RATTRAP_IMPAIR = {'♠️':'♣️','♣️':'♠️','♥️':'♠️','♦️':'♣️'};
 function avantDernierDigitOf(gameNum){
   const s=String(gameNum);
   return s.length>=2 ? parseInt(s[s.length-2],10) : parseInt(s[0],10);
@@ -1346,9 +1341,9 @@ function renderResult(r){
 
   // ── RATTRAPAGE +2 : si une prédiction (P1 ou P2) a échoué, on NE RECALCULE PLUS RIEN ──
   // L'enseigne de rattrapage (déjà déterminée par updateRattrapageFromEntry, avec le
-  // "contraire couleur" appliqué une seule fois côté P1) est redonnée telle quelle, sans
-  // aucune transformation supplémentaire (pas d'inversion 2 chiffres, pas d'ALL INVERSE,
-  // pas de réinversion finale, pas d'exception de couleur).
+  // "contraire couleur" appliqué une seule fois, MÊME MODÈLE pour P1 et P2) est redonnée
+  // telle quelle, sans aucune transformation supplémentaire (pas d'inversion 2 chiffres,
+  // pas d'ALL INVERSE, pas de réinversion finale, pas d'exception de couleur).
   let rattrapageInfo = null;
   let allInvInfo = null, reinvFinaleInfo = null, exceptionInfo = null;
 

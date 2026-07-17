@@ -772,11 +772,11 @@ function decideRule(avantDernier, dernier){
   }
   if(!avOdd && d0to5){
     const exception = !dEven ? {map:MAP_EXC_A,label:'♠️↔♣️ / ♦️↔♥️',reason:`dernier=${dernier}(IMPAIR) & avant-dernier=${avantDernier}(PAIR)`} : null;
-    return {regle:3, engine:'ULTIME2', target:'P2', exception,
+    return {regle:3, engine:'ULTIME1', target:'P1', exception,
       cond:`1er=${avantDernier}(PAIR) · 2e=${dernier}(COMPRIS ENTRE 0 ET 5)`};
   }
   const exception = dEven ? {map:MAP_EXC_B,label:'♠️↔♦️ / ♣️↔♥️',reason:`dernier=${dernier}(PAIR) & avant-dernier=${avantDernier}(PAIR)`} : null;
-  return {regle:4, engine:'ULTIME1', target:'P1', exception,
+  return {regle:4, engine:'ULTIME1', target:'P2', exception,
     cond:`1er=${avantDernier}(PAIR) · 2e=${dernier}(COMPRIS ENTRE 6 ET 9)`};
 }
 

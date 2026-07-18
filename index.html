@@ -385,7 +385,6 @@
       <button class="btn-auto" id="btn-live-auto" onclick="toggleLiveAutoRefresh()">AUTO REFRESH OFF</button>
     </div>
     <div class="live-source" id="live-source"><small>Dernière donnée chargée</small>Aucune donnée récupérée pour le moment.</div>
-    <div class="live-source" id="shape-pattern-panel" style="display:none"></div>
 
     <div class="demarrer-wrap">
       <button class="btn-demarrer" id="btn-demarrer-live" onclick="demarrerLive()">
@@ -660,19 +659,6 @@ function actualOutcomeSuits(gameRecord, side){
   return new Set(cards.map(c=>c.suit));
 }
 
-// ── FORME DE MAIN — nombre de cartes tirées par Joueur (P1) et Banquier (P2)
-//    pour un jeu déjà terminé, ex : "2-2", "2-3", "3-2", "3-3" ──
-function gameShape(gameRecord){
-  try{
-    const parsed = parseGame(gameRecord.normalized || gameRecord.raw_text);
-    return `${parsed.p1.length}-${parsed.p2.length}`;
-  }catch(e){ return null; }
-}
-const SHAPE_LABELS = {
-  '2-2':'2 cartes / 2 cartes', '2-3':'2 cartes / 3 cartes',
-  '3-2':'3 cartes / 2 cartes', '3-3':'3 cartes / 3 cartes'
-};
-
 // Rejoue l'algorithme sur les N derniers jeux réels du canal Telegram (identiques pour
 // tout le monde) afin de conserver des statistiques de fiabilité globales, indépendantes
 // de l'historique propre à chaque téléphone.
@@ -691,8 +677,7 @@ function computeGlobalBacktestStats(history, windowGames){
     try{ actualSuits=actualOutcomeSuits(curr, pred.side); }catch(e){ continue; }
     if(!actualSuits) continue;
     const status = actualSuits.has(pred.suit) ? 'valid' : 'invalid';
-    const shape = gameShape(curr);
-    results.push({gameNum:curr.game_number, suit:pred.suit, side:pred.side, status, shape});
+    results.push({gameNum:curr.game_number, suit:pred.suit, side:pred.side, status});
   }
   const recent = results.slice(-windowGames);
   recent.forEach(e=>{
@@ -700,45 +685,6 @@ function computeGlobalBacktestStats(history, windowGames){
     if(e.status==='valid') perSuit[e.suit].valid++;
   });
   return {perSuit, sample:recent.length, results:recent};
-}
-
-// ── STATS PAR FORME DE MAIN — purement descriptif/informatif : ne modifie PAS la
-//    prédiction. Réutilise les résultats déjà calculés par computeGlobalBacktestStats
-//    (même fenêtre des N derniers jeux) et les regroupe par forme "P1cartes-P2cartes". ──
-function computeShapePatternStats(backtestResults){
-  const perShape={};
-  backtestResults.forEach(e=>{
-    if(!e.shape) return;
-    if(!perShape[e.shape]) perShape[e.shape]={total:0,valid:0};
-    perShape[e.shape].total++;
-    if(e.status==='valid') perShape[e.shape].valid++;
-  });
-  return perShape;
-}
-
-function renderShapePatternStats(perShape, sample){
-  const box = document.getElementById('shape-pattern-panel');
-  if(!box) return;
-  const shapes = ['2-2','2-3','3-2','3-3'];
-  const known = shapes.filter(s=>perShape[s] && perShape[s].total>0);
-  const extra = Object.keys(perShape).filter(s=>!shapes.includes(s) && perShape[s].total>0);
-  const all = [...known, ...extra];
-  if(all.length===0){
-    box.innerHTML = '';
-    box.style.display='none';
-    return;
-  }
-  const rows = all.map(s=>{
-    const st = perShape[s];
-    const rate = st.total>0 ? Math.round(st.valid/st.total*100) : 0;
-    const label = SHAPE_LABELS[s] || s;
-    return `<div class="det-row"><span class="det-label">${label} (${s})</span><span class="det-val">${st.valid}/${st.total} — <b style="color:${rate>=55?'#8fd6b3':(rate<=45?'#e89aa3':'#d7ecff')}">${rate}%</b></span></div>`;
-  }).join('');
-  box.style.display='block';
-  box.innerHTML = `
-    <small style="display:block;color:#7ea6cc;margin-bottom:6px;letter-spacing:.1em;text-transform:uppercase">Fiabilité par forme de main — ${sample} derniers jeux exploitables</small>
-    ${rows}
-    <div style="margin-top:8px;font-size:.68rem;color:#5a7590;line-height:1.5">⚠ Purement informatif — échantillon limité, ne pilote pas la prédiction. Une forme de main (nb de cartes tirées) dépend des règles de tirage du baccarat, pas d'un pattern exploitable ; les écarts observés ici reflètent surtout la variance statistique.</div>`;
 }
 
 function renderHistory(){
@@ -1687,12 +1633,13 @@ function setLiveSource(payload){
 // 2) Rejoue les 15 dernières parties comme si elles avaient déjà été jouées : si une
 //    prédiction avait déjà été faite pour ce numéro, on la valide avec le vrai résultat ;
 //    sinon on comble rétroactivement avec la prédiction déterministe du système.
-async function demarrerLive(silent=false){
+async function demarrerLive(){
   const btn = document.getElementById('btn-demarrer-live');
   const statusBox = document.getElementById('demarrer-status');
   const origText = btn.textContent;
-  if(!silent){ btn.disabled = true; btn.textContent = '⏳ CHARGEMENT DES 150 DERNIERS JEUX…'; }
-  statusBox.textContent = silent ? '🔄 Rafraîchissement automatique (fin de jeu détectée)…' : 'Connexion au canal Telegram…';
+  btn.disabled = true;
+  btn.textContent = '⏳ CHARGEMENT DES 150 DERNIERS JEUX…';
+  statusBox.textContent = 'Connexion au canal Telegram…';
 
   try{
     const res = await fetch('/api/history?limit=150');
@@ -1709,10 +1656,7 @@ async function demarrerLive(silent=false){
     if(telegramHistoryCache.length < 2) throw new Error('Pas assez de jeux récupérés depuis Telegram.');
 
     statusBox.textContent = `${telegramHistoryCache.length} jeux chargés · calcul des statistiques globales…`;
-    const BACKTEST_WINDOW = 100; // ~100 derniers jeux, rafraîchis à chaque fin de manche
-    globalBacktestStats = computeGlobalBacktestStats(telegramHistoryCache, BACKTEST_WINDOW);
-    const shapeStats = computeShapePatternStats(globalBacktestStats.results);
-    renderShapePatternStats(shapeStats, globalBacktestStats.sample);
+    globalBacktestStats = computeGlobalBacktestStats(telegramHistoryCache, 50);
 
     const n = telegramHistoryCache.length;
     const startIdx = Math.max(1, n-15);
@@ -1755,13 +1699,14 @@ async function demarrerLive(silent=false){
     saveHistory(list);
     renderHistory();
 
-    statusBox.textContent = `✅ LIVE ${silent?'rafraîchi':'démarré'} · ${telegramHistoryCache.length} jeux Telegram analysés · `
+    statusBox.textContent = `✅ LIVE démarré · ${telegramHistoryCache.length} jeux Telegram analysés · `
       + `15 dernières parties : ${validCount} validées / ${invalidCount} ratées`
-      + `${skipped?` (${skipped} ignorées)`:''} · Stats sur ${globalBacktestStats.sample} jeux.`;
+      + `${skipped?` (${skipped} ignorées)`:''} · Statistiques globales recalculées.`;
   }catch(e){
     statusBox.textContent = '✕ Erreur : '+e.message;
   }finally{
-    if(!silent){ btn.disabled = false; btn.textContent = origText; }
+    btn.disabled = false;
+    btn.textContent = origText;
   }
 }
 
@@ -1795,12 +1740,6 @@ async function fetchLatestTelegramGame(silent=false){
     setLiveStatus(`Canal synchronisé · ${isNewUsable ? 'jeu terminé détecté' : 'dernier jeu (déjà traité) confirmé'} · #N${data.game_number}`);
     if(isNewUsable || !silent){
       calculate();
-    }
-    // ── À chaque jeu réellement terminé (nouveau numéro exploitable), on rafraîchit
-    //    automatiquement les 150 derniers jeux + les stats globales (fiabilité par
-    //    enseigne et par forme de main) — sans bloquer/désactiver le bouton manuel. ──
-    if(isNewUsable){
-      demarrerLive(true);
     }
   }catch(err){
     setLiveStatus(`Erreur de synchronisation Telegram : ${err.message}`);

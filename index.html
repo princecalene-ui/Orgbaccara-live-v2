@@ -453,10 +453,11 @@ function isRed(s){ return s==='♥️'||s==='♦️'; }
 // n° différente de la parité de la dernière révélation connue).
 const ALGO2_MAP = {'♣️':'♦️','♦️':'♣️','♠️':'♥️','♥️':'♠️'};
 
-// ── RÈGLE COMBO — décide, à partir de l'avant-dernier et du dernier chiffre du n° de
-//    jeu prédit, quelle RÈGLE (1 à 4) s'applique, quelle CIBLE (P1=Joueur / P2=Banquier)
-//    est utilisée, ainsi que l'exception de couleur éventuelle. (Logique brute, basée
-//    uniquement sur la parité des chiffres du numéro — aucune dépendance à l'heure.)
+// ── RÈGLE COMBO — TOUT EST PRÉDIT AU NOM DE P1 (le mode P2 a été retiré). Cette
+//    fonction décide seulement, à partir de l'avant-dernier et du dernier chiffre du
+//    n° de jeu prédit, quelle RÈGLE (1 à 4) s'applique et l'exception de couleur
+//    éventuelle. La CIBLE est toujours 'P1'. (Logique brute, basée uniquement sur la
+//    parité des chiffres du numéro — aucune dépendance à l'heure.)
 // ══════════════════════════════════════════════════════
 const MAP_EXC_A = {'♠️':'♣️','♣️':'♠️','♦️':'♥️','♥️':'♦️'};
 const MAP_EXC_B = {'♠️':'♦️','♦️':'♠️','♣️':'♥️','♥️':'♣️'};
@@ -473,7 +474,7 @@ function decideRule(avantDernier, dernier){
   }
   if(avOdd && d6to9){
     const exception = dEven ? {map:MAP_EXC_A,label:'♠️↔♣️ / ♦️↔♥️',reason:`dernier=${dernier}(PAIR) & avant-dernier=${avantDernier}(IMPAIR)`} : null;
-    return {regle:2, target:'P2', exception,
+    return {regle:2, target:'P1', exception,
       cond:`1er=${avantDernier}(IMPAIR) · 2e=${dernier}(COMPRIS ENTRE 6 ET 9)`};
   }
   if(!avOdd && d0to5){
@@ -482,17 +483,16 @@ function decideRule(avantDernier, dernier){
       cond:`1er=${avantDernier}(PAIR) · 2e=${dernier}(COMPRIS ENTRE 0 ET 5)`};
   }
   const exception = dEven ? {map:MAP_EXC_B,label:'♠️↔♦️ / ♣️↔♥️',reason:`dernier=${dernier}(PAIR) & avant-dernier=${avantDernier}(PAIR)`} : null;
-  return {regle:4, target:'P2', exception,
+  return {regle:4, target:'P1', exception,
     cond:`1er=${avantDernier}(PAIR) · 2e=${dernier}(COMPRIS ENTRE 6 ET 9)`};
 }
 
-// ── Inversion 2 CHIFFRES : pour les n° de jeu 10-99, la cible P1<>P2 bascule ──
+// ── Ancienne inversion 2 CHIFFRES (n° 10-99) : DÉSACTIVÉE ──
+// Elle basculait la cible P1<>P2 ; comme il n'existe plus de mode P2, elle ne fait
+// plus rien désormais (la cible reste toujours P1). Conservée en no-op pour éviter
+// de casser les appels existants.
 function applyTwoDigitInversion(decision, nextNum){
-  if(nextNum >= 10 && nextNum <= 99){
-    const invertedTarget = decision.target === 'P1' ? 'P2' : 'P1';
-    return {...decision, target: invertedTarget, isTwoDigitInversion: true};
-  }
-  return {...decision, isTwoDigitInversion: false};
+  return {...decision, target:'P1', isTwoDigitInversion:false};
 }
 
 // ══════════════════════════════════════════════════════
@@ -847,8 +847,8 @@ function checkGameReadiness(raw){
 //  2) Route le moteur (ALGO1 = base brute / ALGO2 = base brute inversée)
 //     selon que la parité du PROCHAIN n° correspond ou non à la parité de la
 //     dernière révélation connue.
-//  3) Applique la RÈGLE COMBO (cible P1/P2 selon la parité des chiffres du n°)
-//     — calcul brut, aucune dépendance à l'heure, aucun rattrapage.
+//  3) Applique la RÈGLE COMBO (calcul brut, aucune dépendance à l'heure, aucun
+//     rattrapage). La cible est TOUJOURS P1 (le mode P2 a été retiré).
 // ══════════════════════════════════════════════════════
 function runCalc(raw){
   const {num,p1,p2}=parseGame(raw);
@@ -960,7 +960,6 @@ function renderResult(r){
     `<div class="badge badge-parity">◈ PARITÉ — ALGO ${algoParity} · #N${r.nextNum} RÉDUIT = ${r.base.reduceSteps.join(' → ')} → ${numParity}</div>`,
     `<div class="badge badge-transform">⚡ RÈGLE MOTEUR — ${r.base.rule}</div>`,
     `<div class="badge badge-regle">◆ RÈGLE COMBO ${r.decision.regle} — ${r.decision.cond} → CIBLE ${r.decision.target}</div>`,
-    ...(r.decision.isTwoDigitInversion ? [`<div class="badge badge-exception">🔄 INVERSION 2 CHIFFRES (10-99) → CIBLE ${r.decision.target}</div>`] : []),
     ...(r.exceptionInfo ? [`<div class="badge badge-exception">⚠ EXCEPTION — ${r.exceptionInfo.reason} → ${r.exceptionInfo.label}</div>`] : [])
   ];
   document.getElementById('badge-zone').innerHTML = badges.join('');
@@ -979,7 +978,6 @@ function renderResult(r){
 ${r.algoUsed==='ALGO2'?`<div class="det-row"><span class="det-label" style="color:#ffe066">Inversion ALGO2</span><span class="det-val" style="color:#ffe066">${SUIT_EMOJI[r.base.transformed]} → ${SUIT_EMOJI[r.engineSuit]}</span></div>`:''}
 <hr class="det-sep">
 <div class="det-row"><span class="det-label" style="color:#d4bfff">◆ RÈGLE COMBO</span><span class="det-val" style="color:#d4bfff">RÈGLE ${r.decision.regle} — ${r.decision.cond}</span></div>
-${r.decision.isTwoDigitInversion?`<div class="det-row"><span class="det-label" style="color:#d4bfff">Inversion 2 chiffres (10-99)</span><span class="det-val" style="color:#d4bfff">Cible finale → ${r.decision.target}</span></div>`:''}
 <div class="det-row"><span class="det-label" style="color:#d4bfff">Cible finale</span><span class="det-val" style="color:#d4bfff">${r.decision.target}</span></div>
 ${r.exceptionInfo?`<div class="det-row"><span class="det-label" style="color:#ff9999">⚠ EXCEPTION</span><span class="det-val" style="color:#ff9999">${r.exceptionInfo.reason} → ${r.exceptionInfo.label} — ${SUIT_EMOJI[r.exceptionInfo.before]} → ${SUIT_EMOJI[r.exceptionInfo.result]}</span></div>`:''}
 <hr class="det-sep">

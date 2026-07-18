@@ -425,6 +425,19 @@
     </div>
   </div>
 
+  <div class="allinv-wrap">
+    <div class="allinv-center">
+      <button class="btn-allinv" id="btn-total-p1" onclick="toggleTotalP1Option()" style="border-color:#3a5a9a">
+        <div class="toggle-track" id="total-p1-track"><div class="toggle-thumb"></div></div>
+        <div class="allinv-label-wrap">
+          <span class="allinv-title" style="color:#7aadff">Σ OPTION TOTAL P1 PAIRE</span>
+          <span class="allinv-rule">Compare enseigne vs parité du total P1 sur les 100 derniers jeux, choisit le mode le plus fiable</span>
+        </div>
+        <span class="allinv-status" id="total-p1-status">NON</span>
+      </button>
+    </div>
+  </div>
+
   <div id="result-zone">
     <div class="result-card">
       <div class="next-game-num" id="res-num"></div>
@@ -469,6 +482,24 @@ const RATTRAPAGE_MAX_ATTEMPTS = 2; // fenêtre de rattrapage : 2 jeux consécuti
 let telegramHistoryCache = [];  // 150 derniers jeux chargés depuis Telegram (source commune, identique sur tous les appareils)
 let globalBacktestStats  = null; // stats de fiabilité recalculées à partir de cette source commune
 let liveLastUsableGameNum = null; // dernier n° de jeu réellement TERMINÉ et déjà traité (évite de recalculer en boucle)
+let optionTotalP1Enabled = false; // OPTION "TOTAL INDIVIDUEL P1 PAIRE" : active la comparaison des 2 modes
+let liveFetchInFlight = false;    // évite le chevauchement de requêtes avec un refresh très rapide (1.5s)
+let lastRenderMode = 'suit';      // mode actif du dernier rendu ('suit' ou 'parity'), utilisé par copyPrediction()
+let lastRenderParityPredPair = null;
+
+// Compte les pertes consécutives les plus récentes dans l'historique (tous modes confondus),
+// en ignorant les entrées encore en attente. Purement informatif : aucun algorithme ne peut
+// garantir d'empêcher une série de pertes sur des tirages indépendants.
+function computeConsecutiveLossStreak(){
+  const list = loadHistory().slice().sort((a,b)=>b.gameNum-a.gameNum);
+  let streak=0;
+  for(const e of list){
+    if(e.status===null) continue;
+    if(e.status==='invalid'){ streak++; }
+    else break;
+  }
+  return streak;
+}
 
 // ══════════════════════════════════════════════════════
 //  HISTORIQUE DES PRÉDICTIONS (persisté localStorage)
@@ -488,13 +519,15 @@ function saveHistory(list){
 // Une seule entrée par numéro de jeu prédit : si elle existe déjà et est encore
 // en attente, on la met à jour (pas de doublon) ; si elle est déjà résolue, on n'y touche pas ;
 // sinon on la crée.
-function upsertHistoryEntry(gameNum, suitKey, side, modeTag, rattrapageInfo){
+// predMode: 'suit' (défaut, comportement historique) ou 'parity' (mode TOTAL P1 PAIRE)
+function upsertHistoryEntry(gameNum, suitKey, side, modeTag, rattrapageInfo, predMode, parityPredPair){
   const list = loadHistory();
   const existing = list.find(e=>e.gameNum===gameNum);
   const rAttempt = rattrapageInfo ? rattrapageInfo.attempt : null;
   const rMax     = rattrapageInfo ? rattrapageInfo.maxAttempts : null;
   const rParity  = rattrapageInfo ? rattrapageInfo.mapParity : null;
   const rChained = rattrapageInfo ? !!rattrapageInfo.chained : false;
+  const mode     = predMode || 'suit';
 
   if(existing){
     if(existing.status===null){
@@ -505,6 +538,8 @@ function upsertHistoryEntry(gameNum, suitKey, side, modeTag, rattrapageInfo){
       existing.rattrapageMax = rMax;
       existing.rattrapageMapParity = rParity;
       existing.rattrapageChained = rChained;
+      existing.predMode = mode;
+      existing.parityPredPair = (parityPredPair===undefined) ? null : parityPredPair;
       saveHistory(list);
       renderHistory();
     }
@@ -515,6 +550,7 @@ function upsertHistoryEntry(gameNum, suitKey, side, modeTag, rattrapageInfo){
     id: Date.now() + '-' + Math.random().toString(36).slice(2,7),
     gameNum, suitKey, side, modeTag,
     rattrapageAttempt: rAttempt, rattrapageMax: rMax, rattrapageMapParity: rParity, rattrapageChained: rChained,
+    predMode: mode, parityPredPair: (parityPredPair===undefined) ? null : parityPredPair,
     status: null, // null=en attente | 'valid' | 'invalid'
     ts: new Date().toISOString()
   });
@@ -542,6 +578,7 @@ function upsertHistoryEntry(gameNum, suitKey, side, modeTag, rattrapageInfo){
 //   - si c'était la tentative 2/2 (dernière chance) → on arrête, plus de rattrapage
 function updateRattrapageFromEntry(entry){
   if(!entry) return;
+  if(entry.predMode==='parity') return; // pas de mécanisme de rattrapage couleur en mode TOTAL P1 PARITÉ (2 états seulement)
   if(entry.status==='valid'){
     rattrapageMode = null;
     return;
@@ -597,12 +634,24 @@ function clearHistory(){
 }
 
 // ── Résout automatiquement la prédiction en attente pour ce numéro de jeu ──
-// en comparant la couleur prédite aux cartes réellement sorties dans la bonne
-// parenthèse : 1ère (Joueur/P1) ou 2ème (Banquier/P2) selon l'attribution faite.
+// Mode 'suit' (défaut) : compare la couleur prédite aux cartes réellement sorties.
+// Mode 'parity' : compare la parité prédite du TOTAL INDIVIDUEL P1 au total réel de la main P1.
 function resolvePendingHistory(gameNum, p1Cards, p2Cards){
   const list = loadHistory();
   const entry = list.find(e=>e.gameNum===gameNum && e.status===null);
   if(!entry) return null;
+
+  if(entry.predMode==='parity'){
+    if(!p1Cards || !p1Cards.length) return null;
+    const actualPair = isTotalPair(handTotal(p1Cards));
+    entry.status = (actualPair === entry.parityPredPair) ? 'valid' : 'invalid';
+    entry.autoResolved = true;
+    entry.actualParityPair = actualPair;
+    saveHistory(list);
+    renderHistory();
+    return entry;
+  }
+
   const cards = entry.side==='P2' ? p2Cards : p1Cards;
   if(!cards || !cards.length) return null;
   const actualSuits = new Set(cards.map(c=>c.suit));
@@ -619,10 +668,18 @@ function showAutoValidationFeedback(entry){
   if(!box) return;
   if(!entry){ box.textContent=''; box.style.display='none'; return; }
   const ok = entry.status==='valid';
-  const sideLabel = entry.side==='P2' ? '2ème parenthèse (Banquier/P2)' : '1ère parenthèse (Joueur/P1)';
-  box.textContent = ok
-    ? `✓ Auto-validé : #N${entry.gameNum} ${SUIT_EMOJI[entry.suitKey]} ${entry.side} trouvée dans la ${sideLabel} — prédiction réussie.`
-    : `✕ Auto-validé : #N${entry.gameNum} ${SUIT_EMOJI[entry.suitKey]} ${entry.side} absente de la ${sideLabel} — prédiction échouée.`;
+  if(entry.predMode==='parity'){
+    const predLabel = entry.parityPredPair ? 'PAIRE (OUI)' : 'IMPAIR (NON)';
+    const actualLabel = entry.actualParityPair ? 'PAIRE' : 'IMPAIR';
+    box.textContent = ok
+      ? `✓ Auto-validé : #N${entry.gameNum} TOTAL P1 prédit ${predLabel} — total réel ${actualLabel} — prédiction réussie.`
+      : `✕ Auto-validé : #N${entry.gameNum} TOTAL P1 prédit ${predLabel} — total réel ${actualLabel} — prédiction échouée.`;
+  } else {
+    const sideLabel = entry.side==='P2' ? '2ème parenthèse (Banquier/P2)' : '1ère parenthèse (Joueur/P1)';
+    box.textContent = ok
+      ? `✓ Auto-validé : #N${entry.gameNum} ${SUIT_EMOJI[entry.suitKey]} ${entry.side} trouvée dans la ${sideLabel} — prédiction réussie.`
+      : `✕ Auto-validé : #N${entry.gameNum} ${SUIT_EMOJI[entry.suitKey]} ${entry.side} absente de la ${sideLabel} — prédiction échouée.`;
+  }
   box.className = 'history-autoval show ' + (ok ? 'ok' : 'ko');
   box.style.display = 'block';
   setTimeout(()=>{ box.style.display='none'; }, 8000);
@@ -650,7 +707,7 @@ function deterministicPredict(raw){
     suit = decision.exception.map[suit] || suit;
   }
 
-  return {nextNum:r.nextNum, suit, side:decision.target};
+  return {nextNum:r.nextNum, suit, side:decision.target, parityPredPair:predictP1TotalParity(r)};
 }
 
 function actualOutcomeSuits(gameRecord, side){
@@ -675,7 +732,10 @@ const SHAPE_LABELS = {
 
 // Rejoue l'algorithme sur les N derniers jeux réels du canal Telegram (identiques pour
 // tout le monde) afin de conserver des statistiques de fiabilité globales, indépendantes
-// de l'historique propre à chaque téléphone.
+// de l'historique propre à chaque téléphone. Calcule EN PARALLÈLE la fiabilité historique
+// du mode ENSEIGNE (couleur) et du mode TOTAL INDIVIDUEL P1 PARITÉ sur la même fenêtre —
+// ces deux pourcentages sont des TAUX DE RÉUSSITE PASSÉS (backtest), pas des probabilités
+// de succès futur.
 function computeGlobalBacktestStats(history, windowGames){
   const SUITS=['♠️','♥️','♦️','♣️'];
   const perSuit={}; SUITS.forEach(s=>perSuit[s]={total:0,valid:0});
@@ -692,14 +752,25 @@ function computeGlobalBacktestStats(history, windowGames){
     if(!actualSuits) continue;
     const status = actualSuits.has(pred.suit) ? 'valid' : 'invalid';
     const shape = gameShape(curr);
-    results.push({gameNum:curr.game_number, suit:pred.suit, side:pred.side, status, shape});
+    let parityStatus=null, actualParityPair=null;
+    try{ actualParityPair = actualP1TotalParity(curr); }catch(e){ actualParityPair=null; }
+    if(actualParityPair!==null){
+      parityStatus = (actualParityPair===pred.parityPredPair) ? 'valid' : 'invalid';
+    }
+    results.push({gameNum:curr.game_number, suit:pred.suit, side:pred.side, status, shape, parityPredPair:pred.parityPredPair, actualParityPair, parityStatus});
   }
   const recent = results.slice(-windowGames);
+  const parityAgg={total:0,valid:0};
   recent.forEach(e=>{
     perSuit[e.suit].total++;
     if(e.status==='valid') perSuit[e.suit].valid++;
+    if(e.parityStatus){
+      parityAgg.total++;
+      if(e.parityStatus==='valid') parityAgg.valid++;
+    }
   });
-  return {perSuit, sample:recent.length, results:recent};
+  const suitAgg = {total:recent.length, valid:recent.filter(e=>e.status==='valid').length};
+  return {perSuit, sample:recent.length, results:recent, suitAgg, parityAgg};
 }
 
 // ── STATS PAR FORME DE MAIN — purement descriptif/informatif : ne modifie PAS la
@@ -768,13 +839,17 @@ function renderHistory(){
 
   listBox.innerHTML = list.map(e=>{
     const statusClass = e.status==='valid' ? 'status-valid' : (e.status==='invalid' ? 'status-invalid' : '');
-    const emoji = SUIT_EMOJI[e.suitKey] || '';
-    const red = isRed(e.suitKey);
+    const isParity = e.predMode==='parity';
+    const emoji = isParity ? (e.parityPredPair?'🟦':'🟥') : (SUIT_EMOJI[e.suitKey] || '');
+    const red = isParity ? false : isRed(e.suitKey);
+    const labelText = isParity
+      ? `Σ P1 ${e.parityPredPair?'PAIRE (OUI)':'IMPAIR (NON)'}`
+      : e.side;
     return `
     <div class="history-item ${statusClass}">
       <span class="hist-num">#N${e.gameNum}</span>
       <span class="hist-suit" style="color:${red?'#cc4444':'var(--ivory)'}">${emoji}</span>
-      <span class="hist-label">${e.side}${e.rattrapageAttempt?` <span class="hist-tag hist-live">🆘 ${e.rattrapageAttempt}/${e.rattrapageMax}</span>`:''}${e.source==='live-seed'?` <span class="hist-tag hist-live">🔴 LIVE</span>`:(e.autoResolved?` <span class="hist-tag">auto</span>`:'')}</span>
+      <span class="hist-label">${labelText}${e.rattrapageAttempt?` <span class="hist-tag hist-live">🆘 ${e.rattrapageAttempt}/${e.rattrapageMax}</span>`:''}${e.source==='live-seed'?` <span class="hist-tag hist-live">🔴 LIVE</span>`:(e.autoResolved?` <span class="hist-tag">auto</span>`:'')}</span>
       <div class="hist-actions">
         <button class="hist-btn valid-btn ${e.status==='valid'?'active':''}" title="Validée chez le joueur" onclick="setHistoryStatus('${e.id}','valid')">✓</button>
         <button class="hist-btn invalid-btn ${e.status==='invalid'?'active':''}" title="Non passée" onclick="setHistoryStatus('${e.id}','invalid')">✕</button>
@@ -986,6 +1061,19 @@ function updateAllInverseUI(){
 }
 
 // ══════════════════════════════════════════════════════
+//  TOGGLE OPTION TOTAL P1 PAIRE
+// ══════════════════════════════════════════════════════
+function toggleTotalP1Option(){
+  optionTotalP1Enabled = !optionTotalP1Enabled;
+  const btn = document.getElementById('btn-total-p1');
+  const status = document.getElementById('total-p1-status');
+  btn.classList.toggle('active', optionTotalP1Enabled);
+  btn.style.borderColor = optionTotalP1Enabled ? '#7aadff' : '#3a5a9a';
+  status.textContent = optionTotalP1Enabled ? 'OUI' : 'NON';
+  if(lastCalcResult) renderResult(lastCalcResult);
+}
+
+// ══════════════════════════════════════════════════════
 //  UTILITAIRES
 // ══════════════════════════════════════════════════════
 function normSuit(raw){
@@ -1001,6 +1089,33 @@ function cardValue(v){
   if(map[v]!==undefined) return map[v];
   const n=parseInt(v,10);
   return isNaN(n)?null:n;
+}
+// ── VALEUR RÉELLE BACCARAT (différente de cardValue ci-dessus, qui sert au seed Fibonacci) ──
+// A=1 · 2-9=valeur faciale · 10/J/Q/K=0 · le total d'une main = somme mod 10
+function baccaratPointValue(v){
+  if(v==='A') return 1;
+  if(v==='10'||v==='J'||v==='Q'||v==='K') return 0;
+  const n=parseInt(v,10);
+  return isNaN(n)?0:n;
+}
+function handTotal(cards){
+  const sum=(cards||[]).reduce((a,c)=>a+baccaratPointValue(c.val),0);
+  return sum % 10;
+}
+function isTotalPair(total){ return total % 2 === 0; }
+// ── Prédiction (heuristique) de la parité du TOTAL INDIVIDUEL P1 du prochain jeu ──
+// Basée sur les mêmes signaux numériques que le reste du système (avant-dernier + dernier
+// chiffre du n° de jeu prédit). Comme pour tout le reste de cet outil, il s'agit d'une
+// transformation déterministe sur le numéro/heure du jeu — PAS d'un calcul physique lié
+// aux cartes réellement mélangées dans le sabot.
+function predictP1TotalParity(r){
+  const sumAD = r.avantDernier + r.dernierDigit;
+  return sumAD % 2 === 0; // true => PAIR prédit (OUI) · false => IMPAIR prédit (NON)
+}
+function actualP1TotalParity(gameRecord){
+  const parsed = parseGame(gameRecord.normalized || gameRecord.raw_text);
+  if(!parsed.p1 || !parsed.p1.length) return null;
+  return isTotalPair(handTotal(parsed.p1));
 }
 function parseGame(raw){
   const s=raw.trim();
@@ -1465,13 +1580,40 @@ function renderResult(r){
 
   const side = decision.target; // P1 (Joueur) ou P2 (Banquier)
 
-  document.getElementById('res-num').textContent=`#N${r.nextNum}`;
-  const red=isRed(displaySuit);
-  document.getElementById('res-suit-emoji').innerHTML=
-    `<span style="color:${red?'#cc4444':'var(--ivory)'}">${SUIT_EMOJI[displaySuit]||displaySuit}</span>`;
-  document.getElementById('res-side').innerHTML=`<span class="side-tag">${side}</span>`;
+  // ── SÉLECTION DE MODE (OPTION TOTAL P1 PARITÉ) ──
+  // Compare le taux de réussite HISTORIQUE (backtest sur ~100 derniers jeux) du mode
+  // ENSEIGNE vs du mode TOTAL INDIVIDUEL P1 PARITÉ, et affiche/utilise celui qui a le
+  // mieux performé RÉCEMMENT. C'est un taux de réussite PASSÉ, pas une probabilité de
+  // succès garantie pour le prochain jeu — les cartes d'un sabot mélangé restent
+  // imprévisibles ; ceci reste un indicateur statistique rétrospectif.
+  const parityPredPair = predictP1TotalParity(r);
+  let activeMode = 'suit';
+  let modeConfidence = null;
+  if(optionTotalP1Enabled && globalBacktestStats && globalBacktestStats.suitAgg && globalBacktestStats.parityAgg){
+    const suitAgg = globalBacktestStats.suitAgg, parityAgg = globalBacktestStats.parityAgg;
+    const suitPct = suitAgg.total>0 ? Math.round(suitAgg.valid/suitAgg.total*100) : null;
+    const parityPct = parityAgg.total>0 ? Math.round(parityAgg.valid/parityAgg.total*100) : null;
+    modeConfidence = {suitPct, suitSample:suitAgg.total, parityPct, paritySample:parityAgg.total};
+    if(suitPct!==null && parityPct!==null && parityPct>suitPct) activeMode='parity';
+  }
+  lastRenderMode = activeMode;
+  lastRenderParityPredPair = parityPredPair;
 
-  upsertHistoryEntry(r.nextNum, displaySuit, side, '', rattrapageInfo);
+  document.getElementById('res-num').textContent=`#N${r.nextNum}`;
+  if(activeMode==='parity'){
+    document.getElementById('res-suit-emoji').innerHTML = `<span style="color:#7aadff;font-size:.55em">Σ</span>`;
+    document.getElementById('res-side').innerHTML = `<span class="side-tag" style="border-color:#7aadff;color:#7aadff">P1 TOTAL ${parityPredPair?'PAIRE (OUI)':'IMPAIR (NON)'}</span>`;
+    upsertHistoryEntry(r.nextNum, null, 'P1', '', null, 'parity', parityPredPair);
+  } else {
+    const red=isRed(displaySuit);
+    document.getElementById('res-suit-emoji').innerHTML=
+      `<span style="color:${red?'#cc4444':'var(--ivory)'}">${SUIT_EMOJI[displaySuit]||displaySuit}</span>`;
+    document.getElementById('res-side').innerHTML=`<span class="side-tag">${side}</span>`;
+    upsertHistoryEntry(r.nextNum, displaySuit, side, '', rattrapageInfo, 'suit', null);
+  }
+
+  // Streak de pertes consécutives — purement informatif, aucune garantie possible
+  const lossStreak = computeConsecutiveLossStreak();
 
   // Banner ALL INVERSE
   const banner = document.getElementById('allinv-banner');
@@ -1497,6 +1639,8 @@ function renderResult(r){
   }
 
   const badges=[
+    ...(modeConfidence ? [`<div class="badge" style="background:linear-gradient(135deg,#0a0f1a,#101828);border:1px solid #3a5a9a;border-left:3px solid #7aadff;color:#aad4ff">Σ MODE SÉLECTIONNÉ : ${activeMode==='parity'?'TOTAL P1 PARITÉ':'ENSEIGNE'} — historique ${modeConfidence.suitSample?`ENSEIGNE ${modeConfidence.suitPct}% (${modeConfidence.suitSample}j)`:'ENSEIGNE n/d'} vs ${modeConfidence.paritySample?`PARITÉ ${modeConfidence.parityPct}% (${modeConfidence.paritySample}j)`:'PARITÉ n/d'} — taux passé, pas une garantie</div>`] : []),
+    ...(lossStreak>=2 ? [`<div class="badge" style="background:linear-gradient(135deg,#1a0808,#2a0a0a);border:1px solid #8b1e35;border-left:3px solid #cc4444;color:#f0a0a0">⚠ ${lossStreak} PERTES CONSÉCUTIVES — variance normale sur des tirages indépendants, aucun système ne peut garantir l'arrêt d'une série</div>`] : []),
     `<div class="badge badge-range2">${rangeInvInfo.applied?'🔀':'⬛'} ALGO 2 (900-1441) — #N${r.nextNum} ${rangeInvInfo.applied?`DANS LA PLAGE → INVERSION ${SUIT_EMOJI[rangeInvInfo.before]} → ${SUIT_EMOJI[rangeInvInfo.after]}`:'HORS PLAGE — INACTIF'}</div>`,
     `<div class="badge badge-regle">◆ RÈGLE ${r.decisionBase.regle} — ${r.decisionBase.cond} → ${r.decisionBase.engine} PRÉDIT ${r.decisionBase.target}</div>`,
     ...(rattrapageInfo ? [`<div class="badge badge-exception">🆘 RATTRAPAGE ${rattrapageInfo.attempt}/${rattrapageInfo.maxAttempts} — #N${rattrapageInfo.gameNum} → ${SUIT_EMOJI[rattrapageInfo.suit]} ${rattrapageInfo.side} ${rattrapageInfo.chained&&rattrapageInfo.attempt>1?'(transformation chaînée depuis la tentative précédente)':'redonnée telle quelle (AUCUN recalcul)'}${rattrapageInfo.attempt>=rattrapageInfo.maxAttempts?' — DERNIÈRE CHANCE':''}</div>`] : []),
@@ -1651,9 +1795,16 @@ ${decision.isTwoDigitInversion?`<div class="det-row"><span class="det-label" sty
 
 function copyPrediction(){
   const num=document.getElementById('res-num').textContent;
-  const side=document.getElementById('res-side').textContent;
-  const emoji=document.getElementById('res-suit-emoji').textContent;
-  navigator.clipboard.writeText(`${num}${emoji}${side}`).then(()=>{
+  let text;
+  if(lastRenderMode==='parity'){
+    // Format mode parité — jamais de % dans le texte copié
+    text = `${num} P1 TOTAL ${lastRenderParityPredPair?'PAIRE (OUI)':'IMPAIR (NON)'}`;
+  } else {
+    const side=document.getElementById('res-side').textContent;
+    const emoji=document.getElementById('res-suit-emoji').textContent;
+    text = `${num}${emoji}${side}`;
+  }
+  navigator.clipboard.writeText(text).then(()=>{
     const btn=document.getElementById('btn-copy');
     btn.textContent='✓ COPIÉ';btn.classList.add('copied');
     setTimeout(()=>{btn.textContent='⧉ COPIER LA PRÉDICTION';btn.classList.remove('copied');},1800);
@@ -1686,149 +1837,4 @@ function setLiveSource(payload){
 //    sur tous les appareils) et recalcule les statistiques globales de fiabilité.
 // 2) Rejoue les 15 dernières parties comme si elles avaient déjà été jouées : si une
 //    prédiction avait déjà été faite pour ce numéro, on la valide avec le vrai résultat ;
-//    sinon on comble rétroactivement avec la prédiction déterministe du système.
-async function demarrerLive(silent=false){
-  const btn = document.getElementById('btn-demarrer-live');
-  const statusBox = document.getElementById('demarrer-status');
-  const origText = btn.textContent;
-  if(!silent){ btn.disabled = true; btn.textContent = '⏳ CHARGEMENT DES 150 DERNIERS JEUX…'; }
-  statusBox.textContent = silent ? '🔄 Rafraîchissement automatique (fin de jeu détectée)…' : 'Connexion au canal Telegram…';
-
-  try{
-    const res = await fetch('/api/history?limit=150');
-    let data = null;
-    try{ data = await res.json(); }catch(parseErr){ /* réponse non-JSON */ }
-    if(!res.ok){
-      const serverMsg = data && data.error ? data.error : `HTTP ${res.status}`;
-      throw new Error(serverMsg);
-    }
-    if(!data) throw new Error('Réponse serveur vide ou illisible');
-    if(data.error) throw new Error(data.error);
-
-    telegramHistoryCache = (data.games||[]).slice().sort((a,b)=>a.game_number-b.game_number);
-    if(telegramHistoryCache.length < 2) throw new Error('Pas assez de jeux récupérés depuis Telegram.');
-
-    statusBox.textContent = `${telegramHistoryCache.length} jeux chargés · calcul des statistiques globales…`;
-    const BACKTEST_WINDOW = 100; // ~100 derniers jeux, rafraîchis à chaque fin de manche
-    globalBacktestStats = computeGlobalBacktestStats(telegramHistoryCache, BACKTEST_WINDOW);
-    const shapeStats = computeShapePatternStats(globalBacktestStats.results);
-    renderShapePatternStats(shapeStats, globalBacktestStats.sample);
-
-    const n = telegramHistoryCache.length;
-    const startIdx = Math.max(1, n-15);
-    let validCount=0, invalidCount=0, skipped=0;
-    const list = loadHistory();
-
-    for(let i=startIdx;i<n;i++){
-      const prev = telegramHistoryCache[i-1];
-      const curr = telegramHistoryCache[i];
-      const readiness = checkGameReadiness(curr.raw_text || curr.normalized);
-      if(!readiness.usable){ skipped++; continue; }
-      let pred;
-      try{ pred = deterministicPredict(prev.normalized || prev.raw_text); }catch(e){ skipped++; continue; }
-      if(pred.nextNum !== curr.game_number){ skipped++; continue; }
-
-      let entry = list.find(e=>e.gameNum===curr.game_number);
-      if(entry){
-        if(entry.status===null){
-          let actualSuits;
-          try{ actualSuits = actualOutcomeSuits(curr, entry.side||pred.side); }catch(e){ skipped++; continue; }
-          if(!actualSuits){ skipped++; continue; }
-          entry.status = actualSuits.has(entry.suitKey) ? 'valid' : 'invalid';
-          entry.autoResolved = true;
-          entry.status==='valid' ? validCount++ : invalidCount++;
-        }
-      } else {
-        let actualSuits;
-        try{ actualSuits = actualOutcomeSuits(curr, pred.side); }catch(e){ skipped++; continue; }
-        if(!actualSuits){ skipped++; continue; }
-        const st = actualSuits.has(pred.suit) ? 'valid' : 'invalid';
-        st==='valid' ? validCount++ : invalidCount++;
-        list.unshift({
-          id: Date.now()+'-'+Math.random().toString(36).slice(2,7),
-          gameNum: curr.game_number, suitKey: pred.suit, side: pred.side, modeTag:'',
-          status:st, autoResolved:true, source:'live-seed',
-          ts:new Date().toISOString()
-        });
-      }
-    }
-    saveHistory(list);
-    renderHistory();
-
-    statusBox.textContent = `✅ LIVE ${silent?'rafraîchi':'démarré'} · ${telegramHistoryCache.length} jeux Telegram analysés · `
-      + `15 dernières parties : ${validCount} validées / ${invalidCount} ratées`
-      + `${skipped?` (${skipped} ignorées)`:''} · Stats sur ${globalBacktestStats.sample} jeux.`;
-  }catch(e){
-    statusBox.textContent = '✕ Erreur : '+e.message;
-  }finally{
-    if(!silent){ btn.disabled = false; btn.textContent = origText; }
-  }
-}
-
-async function fetchLatestTelegramGame(silent=false){
-  const btn = document.getElementById('btn-live-fetch');
-  try{
-    if(btn && !silent){ btn.classList.add('loading'); btn.textContent='⟳ SYNCHRO…'; }
-    setLiveStatus('Connexion au canal Telegram en cours…');
-    const res = await fetch('/api/latest-game');
-    let data = null;
-    try{ data = await res.json(); }catch(parseErr){ /* réponse non-JSON (page d'erreur du serveur/proxy) */ }
-    if(!res.ok){
-      const serverMsg = data && data.error ? data.error : `HTTP ${res.status}`;
-      throw new Error(serverMsg);
-    }
-    if(!data || !data.normalized) throw new Error('Aucune donnée exploitable trouvée');
-    liveLastMessageId = data.message_id;
-    setLiveSource(data);
-
-    // ── Le message Telegram peut être édité en cours de manche (⏰/▶) : on ne
-    //    calcule que lorsque les données sont réellement finalisées et exploitables ──
-    const readiness = checkGameReadiness(data.raw_text || data.normalized);
-    if(!readiness.usable){
-      setLiveStatus(`⏳ #N${data.game_number} en cours · ${readiness.detail || 'en attente de fin de manche…'}`);
-      return;
-    }
-
-    document.getElementById('game-input').value = data.normalized;
-    const isNewUsable = liveLastUsableGameNum !== data.game_number;
-    liveLastUsableGameNum = data.game_number;
-    setLiveStatus(`Canal synchronisé · ${isNewUsable ? 'jeu terminé détecté' : 'dernier jeu (déjà traité) confirmé'} · #N${data.game_number}`);
-    if(isNewUsable || !silent){
-      calculate();
-    }
-    // ── À chaque jeu réellement terminé (nouveau numéro exploitable), on rafraîchit
-    //    automatiquement les 150 derniers jeux + les stats globales (fiabilité par
-    //    enseigne et par forme de main) — sans bloquer/désactiver le bouton manuel. ──
-    if(isNewUsable){
-      demarrerLive(true);
-    }
-  }catch(err){
-    setLiveStatus(`Erreur de synchronisation Telegram : ${err.message}`);
-  }finally{
-    if(btn && !silent){ btn.classList.remove('loading'); btn.textContent='⟳ Synchroniser le dernier jeu'; }
-  }
-}
-
-function toggleLiveAutoRefresh(){
-  const btn = document.getElementById('btn-live-auto');
-  if(liveAutoTimer){
-    clearInterval(liveAutoTimer);
-    liveAutoTimer = null;
-    btn.textContent = 'AUTO REFRESH OFF';
-    setLiveStatus('Auto-refresh désactivé.');
-    return;
-  }
-  liveAutoTimer = setInterval(()=>fetchLatestTelegramGame(true), 20000);
-  btn.textContent = 'AUTO REFRESH ON';
-  setLiveStatus('Auto-refresh activé : vérification toutes les 20 secondes.');
-  fetchLatestTelegramGame(true);
-}
-
-window.addEventListener('load', ()=>{
-  fetchLatestTelegramGame(true);
-  renderHistory();
-});
-
-</script>
-</body>
-</html>
+//    sinon on comble rétroactivem

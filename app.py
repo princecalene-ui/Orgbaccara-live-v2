@@ -5,15 +5,7 @@ import re
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
-
-# Canaux Telegram, dans l'ordre de priorité. Le premier qui répond avec des
-# données exploitables est utilisé ; en cas d'échec (timeout, blocage HTTP,
-# aucun message trouvé), on bascule automatiquement sur le suivant.
-CHANNELS = [
-    {'name': 'statistika_baccara', 'url': 'https://t.me/s/statistika_baccara'},
-    {'name': 'sport_rooom', 'url': 'https://t.me/s/sport_rooom'},
-]
-CHANNEL_URL = CHANNELS[0]['url']  # conservé pour compat historique, non utilisé pour le fetch
+CHANNEL_URL = 'https://t.me/s/statistika_baccara'
 USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36'
 REQUEST_HEADERS = {
     'User-Agent': USER_AGENT,
@@ -61,8 +53,8 @@ def normalize_message_text(text: str) -> str:
     return text
 
 
-def fetch_latest_game_from(channel_url):
-    res = _get(channel_url)
+def fetch_latest_game():
+    res = _get(CHANNEL_URL)
     soup = BeautifulSoup(res.text, 'html.parser')
     messages = soup.select('.tgme_widget_message_wrap')
     if not messages:
@@ -93,29 +85,14 @@ def fetch_latest_game_from(channel_url):
     msg_wrap_id = target.get('data-post') or (link_el.get('href') if link_el else '')
 
     return {
-        'channel_url': channel_url,
+        'channel_url': CHANNEL_URL,
         'game_number': int(game_match.group(1)),
         'raw_text': raw_text,
         'normalized': normalized,
         'published_at': date_el.get('datetime') if date_el else None,
-        'source_url': link_el.get('href') if link_el else channel_url,
+        'source_url': link_el.get('href') if link_el else CHANNEL_URL,
         'message_id': msg_wrap_id,
     }
-
-
-def fetch_latest_game():
-    """Essaie chaque canal dans l'ordre de CHANNELS. Bascule sur le suivant
-    si le canal courant échoue (timeout, blocage, pas de message)."""
-    errors = []
-    for channel in CHANNELS:
-        try:
-            result = fetch_latest_game_from(channel['url'])
-            result['channel_name'] = channel['name']
-            return result
-        except Exception as e:
-            errors.append(f"{channel['name']}: {e}")
-            continue
-    raise RuntimeError('Tous les canaux ont échoué — ' + ' | '.join(errors))
 
 
 @app.get('/api/latest-game')
@@ -126,7 +103,7 @@ def api_latest_game():
         return jsonify({'error': str(e)}), 500
 
 
-def fetch_history_from(channel_url, limit=150):
+def fetch_history(limit=150):
     """Récupère jusqu'à `limit` jeux passés en paginant sur t.me/s/<canal>?before=<id>."""
     games = []
     seen_ids = set()
@@ -135,7 +112,7 @@ def fetch_history_from(channel_url, limit=150):
 
     while len(games) < limit and pages_guard < 30:
         pages_guard += 1
-        url = channel_url if before is None else f'{channel_url}?before={before}'
+        url = CHANNEL_URL if before is None else f'{CHANNEL_URL}?before={before}'
         res = _get(url)
         soup = BeautifulSoup(res.text, 'html.parser')
         messages = soup.select('.tgme_widget_message_wrap')
@@ -192,32 +169,13 @@ def fetch_history_from(channel_url, limit=150):
     return games
 
 
-def fetch_history(limit=150):
-    """Essaie chaque canal dans l'ordre de CHANNELS pour l'historique. Bascule
-    sur le suivant si le canal courant échoue ou ne renvoie aucun jeu.
-    L'historique complet vient toujours d'un seul et même canal (pas de mélange)
-    pour garder une numérotation de jeux cohérente."""
-    errors = []
-    for channel in CHANNELS:
-        try:
-            games = fetch_history_from(channel['url'], limit)
-            if not games:
-                errors.append(f"{channel['name']}: aucun jeu récupéré")
-                continue
-            return games, channel['name']
-        except Exception as e:
-            errors.append(f"{channel['name']}: {e}")
-            continue
-    raise RuntimeError('Tous les canaux ont échoué — ' + ' | '.join(errors))
-
-
 @app.get('/api/history')
 def api_history():
     limit = request.args.get('limit', default=150, type=int)
     limit = max(1, min(limit, 200))
     try:
-        games, channel_name = fetch_history(limit)
-        return jsonify({'games': games, 'count': len(games), 'channel_name': channel_name})
+        games = fetch_history(limit)
+        return jsonify({'games': games, 'count': len(games)})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

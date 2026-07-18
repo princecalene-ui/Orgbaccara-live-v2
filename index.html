@@ -428,6 +428,19 @@ let lastCalcResult = null;
 let telegramHistoryCache = [];   // 150 derniers jeux chargés depuis Telegram (source commune)
 let globalBacktestStats  = null; // stats de fiabilité recalculées à partir de cette source commune
 let liveLastUsableGameNum = null; // dernier n° de jeu réellement TERMINÉ et déjà traité
+let rattrapageMode = null; // {suit, gameNum, attempt, maxAttempts} — rattrapage +2 après une perte P1
+const RATTRAPAGE_MAX_ATTEMPTS = 2; // fenêtre de rattrapage : 2 jeux consécutifs max sur la même enseigne
+
+// ── RATTRAPAGE — mapping "contraire couleur" selon la parité de l'AVANT-DERNIER chiffre
+//    du numéro de jeu prédit QUI A ÉCHOUÉ (tout est ciblé P1 dans ce système) ──
+// AVANT-DERNIER PAIR   → ♠️→♥️ · ♣️→♦️ · ♥️→♣️ · ♦️→♠️
+// AVANT-DERNIER IMPAIR → ♠️→♣️ · ♣️→♠️ · ♥️→♠️ · ♦️→♣️
+const MAP_RATTRAP_PAIR   = {'♠️':'♥️','♣️':'♦️','♥️':'♣️','♦️':'♠️'};
+const MAP_RATTRAP_IMPAIR = {'♠️':'♣️','♣️':'♠️','♥️':'♠️','♦️':'♣️'};
+function avantDernierDigitOf(gameNum){
+  const s=String(gameNum);
+  return s.length>=2 ? parseInt(s[s.length-2],10) : parseInt(s[0],10);
+}
 
 // ── RÉGIME DE RELAIS "RÉVÉLATION" ──
 // Une RÉVÉLATION = un jeu au format 3-3 (3 cartes P1 ET 3 cartes P2).
@@ -542,14 +555,18 @@ function saveHistory(list){
 // Une seule entrée par numéro de jeu prédit : si elle existe déjà et est encore
 // en attente, on la met à jour (pas de doublon) ; si elle est déjà résolue, on n'y touche pas ;
 // sinon on la crée.
-function upsertHistoryEntry(gameNum, suitKey, side, algoTag){
+function upsertHistoryEntry(gameNum, suitKey, side, algoTag, rattrapageInfo){
   const list = loadHistory();
   const existing = list.find(e=>e.gameNum===gameNum);
+  const rAttempt = rattrapageInfo ? rattrapageInfo.attempt : null;
+  const rMax     = rattrapageInfo ? rattrapageInfo.maxAttempts : null;
   if(existing){
     if(existing.status===null){
       existing.suitKey = suitKey;
       existing.side = side;
       existing.algoTag = algoTag;
+      existing.rattrapageAttempt = rAttempt;
+      existing.rattrapageMax = rMax;
       saveHistory(list);
       renderHistory();
     }
@@ -558,11 +575,45 @@ function upsertHistoryEntry(gameNum, suitKey, side, algoTag){
   list.unshift({
     id: Date.now() + '-' + Math.random().toString(36).slice(2,7),
     gameNum, suitKey, side, algoTag,
+    rattrapageAttempt: rAttempt, rattrapageMax: rMax,
     status: null, // null=en attente | 'valid' | 'invalid'
     ts: new Date().toISOString()
   });
   saveHistory(list);
   renderHistory();
+}
+
+// ── RATTRAPAGE +2 ──
+// Une entrée résolue en 'valid' nettoie tout rattrapage en cours.
+// Une entrée résolue en 'invalid' :
+//   - si ce n'était PAS déjà une tentative de rattrapage → démarre le cycle (tentative 1/2)
+//     avec l'enseigne "contraire couleur" (selon la parité de l'avant-dernier chiffre du
+//     n° de jeu qui a échoué)
+//   - si c'était la tentative 1/2 → escalade vers la tentative 2/2 sur le jeu suivant, en
+//     reprenant TELLE QUELLE l'enseigne déjà utilisée pour la tentative 1 (aucun recalcul)
+//   - si c'était la tentative 2/2 (dernière chance) → on arrête, plus de rattrapage
+function updateRattrapageFromEntry(entry){
+  if(!entry) return;
+  if(entry.status==='valid'){
+    rattrapageMode = null;
+    return;
+  }
+  if(entry.status==='invalid'){
+    const attempt = entry.rattrapageAttempt || 0;
+    if(attempt>0 && attempt<RATTRAPAGE_MAX_ATTEMPTS){
+      // escalade tentative 2/2 : même enseigne, redonnée telle quelle, aucun recalcul
+      rattrapageMode = {suit:entry.suitKey, gameNum:entry.gameNum+1, attempt:attempt+1, maxAttempts:RATTRAPAGE_MAX_ATTEMPTS};
+    } else if(attempt>=RATTRAPAGE_MAX_ATTEMPTS){
+      rattrapageMode = null; // dernière tentative ratée → on arrête le rattrapage
+    } else {
+      // première défaillance : "contraire couleur" selon la parité de l'avant-dernier
+      // chiffre du n° de jeu QUI A ÉCHOUÉ (entry.gameNum)
+      const avD = avantDernierDigitOf(entry.gameNum);
+      const map = (avD % 2 === 0) ? MAP_RATTRAP_PAIR : MAP_RATTRAP_IMPAIR;
+      const rattrapSuit = map[entry.suitKey] || entry.suitKey;
+      rattrapageMode = {suit:rattrapSuit, gameNum:entry.gameNum+1, attempt:1, maxAttempts:RATTRAPAGE_MAX_ATTEMPTS};
+    }
+  }
 }
 
 function setHistoryStatus(id, status){
@@ -684,7 +735,7 @@ function renderHistory(){
     <div class="history-item ${statusClass}">
       <span class="hist-num">#N${e.gameNum}</span>
       <span class="hist-suit" style="color:${red?'#cc4444':'var(--ivory)'}">${emoji}</span>
-      <span class="hist-label">${e.side}${e.algoTag?` <span class="hist-tag">${e.algoTag}</span>`:''}${e.source==='live-seed'?` <span class="hist-tag hist-live">🔴 LIVE</span>`:(e.autoResolved?` <span class="hist-tag">auto</span>`:'')}</span>
+      <span class="hist-label">${e.side}${e.algoTag?` <span class="hist-tag">${e.algoTag}</span>`:''}${e.rattrapageAttempt?` <span class="hist-tag hist-live">🆘 ${e.rattrapageAttempt}/${e.rattrapageMax}</span>`:''}${e.source==='live-seed'?` <span class="hist-tag hist-live">🔴 LIVE</span>`:(e.autoResolved?` <span class="hist-tag">auto</span>`:'')}</span>
       <div class="hist-actions">
         <button class="hist-btn valid-btn ${e.status==='valid'?'active':''}" title="Validée chez le joueur" onclick="setHistoryStatus('${e.id}','valid')">✓</button>
         <button class="hist-btn invalid-btn ${e.status==='invalid'?'active':''}" title="Non passée" onclick="setHistoryStatus('${e.id}','invalid')">✕</button>
@@ -926,6 +977,9 @@ function calculate(){
       const autoVal = resolvePendingHistory(r.num, r.p1, r.p2);
       showAutoValidationFeedback(autoVal);
 
+      // ── RATTRAPAGE +2 : géré à partir du résultat de l'auto-validation ──
+      updateRattrapageFromEntry(autoVal);
+
       updateRegimeDisplay();
       renderResult(r);
       document.getElementById('game-input').value='';
@@ -935,8 +989,17 @@ function calculate(){
 }
 
 function renderResult(r){
-  const finalSuit = r.finalSuit;
+  let finalSuit = r.finalSuit;
   const side = r.target;
+
+  // ── RATTRAPAGE +2 : si une prédiction précédente a échoué, on NE RECALCULE PLUS RIEN ──
+  // L'enseigne de rattrapage (déjà déterminée par updateRattrapageFromEntry) est redonnée
+  // telle quelle pour CE numéro de jeu, sans passer par le moteur/la règle combo/l'exception.
+  let rattrapageInfo = null;
+  if(rattrapageMode && rattrapageMode.gameNum === r.nextNum){
+    rattrapageInfo = {suit: rattrapageMode.suit, gameNum: rattrapageMode.gameNum, attempt: rattrapageMode.attempt, maxAttempts: rattrapageMode.maxAttempts};
+    finalSuit = rattrapageMode.suit;
+  }
 
   document.getElementById('res-num').textContent=`#N${r.nextNum}`;
   const red=isRed(finalSuit);
@@ -944,7 +1007,7 @@ function renderResult(r){
     `<span style="color:${red?'#cc4444':'var(--ivory)'}">${SUIT_EMOJI[finalSuit]||finalSuit}</span>`;
   document.getElementById('res-side').innerHTML=`<span class="side-tag">${side}</span>`;
 
-  upsertHistoryEntry(r.nextNum, finalSuit, side, r.algoUsed);
+  upsertHistoryEntry(r.nextNum, finalSuit, side, r.algoUsed, rattrapageInfo);
 
   const fibOverrideLabel=r.base.fibMod===0?'ALGO NORMAL CONSERVÉ':r.base.fibMod===1?'FIB FORCE ALGO 1':r.base.fibMod===2?'FIB FORCE ALGO 2':'FIB INVERSE ALGO';
   const algoParity=r.base.algoEven?`${r.base.algo} (PAIR)`:`${r.base.algo} (IMPAIR)`;
@@ -955,6 +1018,7 @@ function renderResult(r){
     : `🃏 Format #N${r.num} : ${r.format} — pas de révélation, régime inchangé (réf. ${r.regimeSnapshot.source})`;
 
   const badges=[
+    ...(rattrapageInfo ? [`<div class="badge badge-exception">🆘 RATTRAPAGE ${rattrapageInfo.attempt}/${rattrapageInfo.maxAttempts} — #N${rattrapageInfo.gameNum} → ${SUIT_EMOJI[rattrapageInfo.suit]} P1 redonnée telle quelle (AUCUN recalcul du moteur)${rattrapageInfo.attempt>=rattrapageInfo.maxAttempts?' — DERNIÈRE CHANCE':''}</div>`] : []),
     `<div class="badge ${r.isRevelationGame?'badge-revelation':'badge-selector'}">${formatLabel}</div>`,
     `<div class="badge badge-algo">⚙️ MOTEUR ROUTÉ — #N${r.nextNum} est ${r.nextParity} · parité révélation=${r.regimeSnapshot.revelationParity} → <b>${r.algoUsed}</b>${r.algoUsed==='ALGO2'?' (inversion ♣↔♦/♠↔♥ appliquée)':''}</div>`,
     `<div class="badge badge-parity">◈ PARITÉ — ALGO ${algoParity} · #N${r.nextNum} RÉDUIT = ${r.base.reduceSteps.join(' → ')} → ${numParity}</div>`,
@@ -981,6 +1045,8 @@ ${r.algoUsed==='ALGO2'?`<div class="det-row"><span class="det-label" style="colo
 <div class="det-row"><span class="det-label" style="color:#d4bfff">Cible finale</span><span class="det-val" style="color:#d4bfff">${r.decision.target}</span></div>
 ${r.exceptionInfo?`<div class="det-row"><span class="det-label" style="color:#ff9999">⚠ EXCEPTION</span><span class="det-val" style="color:#ff9999">${r.exceptionInfo.reason} → ${r.exceptionInfo.label} — ${SUIT_EMOJI[r.exceptionInfo.before]} → ${SUIT_EMOJI[r.exceptionInfo.result]}</span></div>`:''}
 <hr class="det-sep">
+${rattrapageInfo?`<div class="det-row"><span class="det-label" style="color:#ff9999">🆘 RATTRAPAGE</span><span class="det-val" style="color:#ff9999">Tentative ${rattrapageInfo.attempt}/${rattrapageInfo.maxAttempts} — ${SUIT_EMOJI[rattrapageInfo.suit]} redonnée telle quelle, sans recalcul du moteur ni de la règle combo${rattrapageInfo.attempt>=rattrapageInfo.maxAttempts?' — dernière chance':''}</span></div>
+<hr class="det-sep">`:''}
 <div class="det-row"><span class="det-label">RÉSULTAT FINAL [${r.algoUsed}]</span><span class="det-val det-result">#N${r.nextNum} — ${SUIT_EMOJI[finalSuit]} ${SUIT_NAMES[finalSuit]} · ${side}</span></div>`;
 
   document.getElementById('details-body').innerHTML=detailsHTML;

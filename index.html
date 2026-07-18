@@ -34,6 +34,31 @@
   .author{font-size:.7rem;color:var(--gold-dim);margin-top:4px;letter-spacing:.2em}
   main{max-width:680px;margin:0 auto;padding:28px 16px 60px}
 
+  /* ─── REGIME / RÉVÉLATION CARD ─── */
+  .regime-card{
+    background:linear-gradient(135deg,#161000,#1e1600);border:1px solid #7a6028;border-top:2px solid var(--gold);
+    border-radius:4px;padding:18px 20px 16px;margin-bottom:22px;position:relative;
+  }
+  .regime-card::before{
+    content:'◆ RÉGIME ACTIF (RELAIS RÉVÉLATION) ◆';font-family:'Cinzel',serif;font-size:.6rem;letter-spacing:.22em;
+    color:var(--gold);position:absolute;top:-.55em;left:20px;background:#1a1400;padding:0 8px;
+  }
+  .regime-row{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:.8rem;padding:5px 0;}
+  .regime-label{color:var(--ivory-dim);letter-spacing:.05em}
+  .regime-val{color:var(--gold);font-weight:700;text-align:right}
+  .regime-manual{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+  .regime-manual input{
+    flex:1;min-width:120px;background:#0d0a0a;border:1px solid #2e1c1c;border-radius:3px;color:var(--ivory);
+    font-family:'Courier Prime',monospace;font-size:.85rem;padding:8px 10px;outline:none;
+  }
+  .btn-mini{
+    background:transparent;border:1px solid var(--gold-dim);color:var(--gold);font-size:.68rem;letter-spacing:.12em;
+    text-transform:uppercase;padding:7px 12px;border-radius:2px;cursor:pointer;white-space:nowrap;
+  }
+  .btn-mini:hover{background:var(--gold-dim);color:var(--black)}
+  .btn-mini.reset{border-color:#8b2a2a;color:#e08080}
+  .btn-mini.reset:hover{background:#8b2a2a;color:#fff}
+
   /* ─── INPUT ─── */
   .input-card{
     background:var(--card-bg);border:1px solid var(--border);border-top:2px solid var(--bordeaux);
@@ -159,25 +184,17 @@
     animation:pulse-glow 2.5s ease-in-out infinite;
   }
   @keyframes pulse-glow{0%,100%{filter:drop-shadow(0 0 20px #c9a84c55)}50%{filter:drop-shadow(0 0 40px #c9a84caa)}}
+  .prediction-suit-label{
+    text-align:center;font-family:'Cinzel',serif;font-size:clamp(1.4rem,6vw,2.2rem);font-weight:900;
+    color:var(--gold);letter-spacing:.18em;margin-bottom:6px;
+  }
   .prediction-side{
-    text-align:center;font-family:'Cinzel',serif;font-size:clamp(1.8rem,8vw,3rem);font-weight:900;
+    text-align:center;font-family:'Cinzel',serif;font-size:clamp(1.2rem,5vw,1.8rem);font-weight:900;
     color:var(--gold);letter-spacing:.15em;margin-bottom:12px;
   }
   .prediction-side .side-tag{
     display:inline-block;padding:2px 16px;border:2px solid var(--gold);border-radius:4px;
   }
-
-  /* Badge ALL INVERSE actif sous la prédiction */
-  .allinv-active-banner{
-    display:none;
-    text-align:center;margin:0 auto 20px;padding:8px 18px;
-    background:linear-gradient(135deg,#1a0a2e,#2d1555);
-    border:1px solid #cc44ff;border-radius:3px;
-    font-family:'Cinzel',serif;font-size:.65rem;letter-spacing:.2em;
-    color:#ff88ff;animation:inv-pulse 2s ease-in-out infinite;
-    max-width:420px;
-  }
-  .allinv-active-banner.show{display:block;}
 
   .copy-row{display:flex;justify-content:center;margin-bottom:24px}
   .btn-copy{
@@ -199,52 +216,22 @@
   .badge-row{display:flex;flex-direction:column;gap:8px;margin-bottom:20px}
   .badge{border-radius:3px;padding:9px 14px;font-size:.72rem;letter-spacing:.12em;text-transform:uppercase;text-align:center}
 
-  .badge-range2{background:linear-gradient(135deg,#001a14,#00281e);border:1px solid #1a8a6a;border-left:3px solid #2ee0aa;color:#7ff0cc;font-weight:700;animation:flicker-range2 3s ease-in-out infinite;}
-  @keyframes flicker-range2{0%,100%{box-shadow:0 0 8px #2ee0aa44}50%{box-shadow:0 0 18px #2ee0aa88}}
-  .badge-side3{background:linear-gradient(135deg,#001a1a,#002828);border:1px solid #1a8a8a;border-left:3px solid #2ee0e0;color:#7ff0f0;font-weight:700;animation:flicker-side3 3s ease-in-out infinite;}
-  @keyframes flicker-side3{0%,100%{box-shadow:0 0 8px #2ee0e044}50%{box-shadow:0 0 18px #2ee0e088}}
-  .badge-side2{background:linear-gradient(135deg,#1a0014,#2a0020);border:1px solid #a01a8a;border-left:3px solid #e03ac0;color:#f070d8;font-weight:700;animation:flicker-side2 3s ease-in-out infinite;}
-  @keyframes flicker-side2{0%,100%{box-shadow:0 0 8px #e03ac044}50%{box-shadow:0 0 18px #e03ac088}}
-  .badge-side{background:linear-gradient(135deg,#1a1000,#2a1c00);border:1px solid #a67c1a;border-left:3px solid #e0a83a;color:#f0c070;font-weight:700;animation:flicker-side 3s ease-in-out infinite;}
-  @keyframes flicker-side{0%,100%{box-shadow:0 0 10px #e0a83a44}50%{box-shadow:0 0 22px #e0a83a88}}
+  .badge-revelation{background:linear-gradient(135deg,#1a1400,#2a2200);border:1px solid #d4af00;border-left:3px solid #ffe066;color:#ffe066;font-weight:700;animation:flicker-gold 3s ease-in-out infinite;}
+  @keyframes flicker-gold{0%,100%{box-shadow:0 0 8px #e0bf5944}50%{box-shadow:0 0 18px #e0bf5988}}
+  .badge-engine{background:linear-gradient(135deg,#001a0a,#002a12);border:1px solid #1a8a4a;border-left:3px solid #33dd77;color:#77ffaa;font-weight:700;animation:flicker-green 3s ease-in-out infinite;}
   .badge-selector{background:linear-gradient(135deg,#0a1a0a,#122012);border:1px solid #2a6a2a;border-left:3px solid #4caf50;color:#80e080;animation:flicker-green 3s ease-in-out infinite;}
   @keyframes flicker-green{0%,100%{box-shadow:0 0 8px #4caf5044}50%{box-shadow:0 0 18px #4caf5088}}
   .badge-algo{background:linear-gradient(135deg,#120f00,#261f05);border:1px solid #8a6c18;border-left:3px solid #e0bf59;color:#f1d57a;animation:flicker-gold 3s ease-in-out infinite;}
-  @keyframes flicker-gold{0%,100%{box-shadow:0 0 8px #e0bf5944}50%{box-shadow:0 0 18px #e0bf5988}}
   .badge-parity{background:linear-gradient(135deg,#001a2a,#00152a);border:1px solid #2a5a8b;border-left:3px solid var(--blue);color:var(--blue);animation:flicker-blue 3s ease-in-out infinite;}
   @keyframes flicker-blue{0%,100%{box-shadow:0 0 8px #4a8fc944}50%{box-shadow:0 0 18px #4a8fc988}}
-  .badge-postinv{background:linear-gradient(135deg,#1a0d00,#2a1500);border:1px solid #8b5a00;border-left:3px solid #e8a020;color:#e8c060;animation:flicker-orange 3s ease-in-out infinite;}
-  @keyframes flicker-orange{0%,100%{box-shadow:0 0 8px #e8a02044}50%{box-shadow:0 0 18px #e8a02088}}
   .badge-transform{background:linear-gradient(135deg,#140c24,#1e1335);border:1px solid #5f46c2;border-left:3px solid #9c7cff;color:#b49bff;animation:flicker-violet 3s ease-in-out infinite;}
   @keyframes flicker-violet{0%,100%{box-shadow:0 0 8px #9c7cff44}50%{box-shadow:0 0 18px #9c7cff88}}
-  .badge-tranche{background:linear-gradient(135deg,#001a18,#002a22);border:1px solid #1a7a6a;border-left:3px solid #2a9d8f;color:#4ecdc4;animation:flicker-teal 3s ease-in-out infinite;}
-  @keyframes flicker-teal{0%,100%{box-shadow:0 0 8px #2a9d8f44}50%{box-shadow:0 0 18px #2a9d8f88}}
-  .badge-reinv{background:linear-gradient(135deg,#0b1c2e,#12283f);border:1px solid #0d2a55;border-left:3px solid #2c6dd6;color:#a0c8ff;animation:flicker-reinv 3s ease-in-out infinite;}
-  @keyframes flicker-reinv{0%,100%{box-shadow:0 0 8px #2c6dd644}50%{box-shadow:0 0 18px #2c6dd688}}
   .badge-milieu{background:linear-gradient(135deg,#001828,#002035);border:1px solid #006699;border-left:3px solid #00ccff;color:#66eeff;animation:flicker-cyan 3s ease-in-out infinite;font-weight:700;}
   @keyframes flicker-cyan{0%,100%{box-shadow:0 0 10px #00ccff44}50%{box-shadow:0 0 22px #00ccff99}}
   .badge-hyper{background:linear-gradient(135deg,#1a001a,#2d002d);border:1px solid #aa00aa;border-left:3px solid #ff44ff;color:#ffaaff;animation:flicker-hyper 3s ease-in-out infinite;font-weight:700;}
   @keyframes flicker-hyper{0%,100%{box-shadow:0 0 10px #ff44ff55}50%{box-shadow:0 0 24px #ff44ffaa}}
   .badge-finalinv{background:linear-gradient(135deg,#1a0a1a,#2a0f2a);border:1px solid #8b2a8b;border-left:3px solid #dd44dd;color:#ff99ff;animation:flicker-pink 3s ease-in-out infinite;}
   @keyframes flicker-pink{0%,100%{box-shadow:0 0 8px #dd44dd44}50%{box-shadow:0 0 18px #dd44dd88}}
-
-  /* Badge ALL INVERSE dans la liste */
-  .badge-allinv{
-    background:linear-gradient(135deg,#1a0a2e,#2d1555);
-    border:1px solid #cc44ff;border-left:3px solid #ff88ff;
-    color:#ff88ff;font-weight:700;
-    animation:flicker-allinv 2s ease-in-out infinite;
-  }
-  @keyframes flicker-allinv{0%,100%{box-shadow:0 0 12px #cc44ff66}50%{box-shadow:0 0 28px #cc44ffcc}}
-
-  /* Badge AUTO-MILIEU (détail règle auto) */
-  .badge-automilieu{
-    background:linear-gradient(135deg,#0a0f1a,#101828);
-    border:1px solid #3a5a9a;border-left:3px solid #7aadff;
-    color:#aad4ff;font-size:.68rem;letter-spacing:.1em;
-    animation:flicker-automilieu 3s ease-in-out infinite;
-  }
-  @keyframes flicker-automilieu{0%,100%{box-shadow:0 0 8px #7aadff33}50%{box-shadow:0 0 18px #7aadff77}}
 
   .copy-row{display:flex;justify-content:center;margin-bottom:24px}
   .details-toggle{
@@ -297,34 +284,6 @@
   .live-source{margin-top:12px;padding:10px 12px;background:#0a0f14;border:1px solid #1a2735;border-radius:3px;font-family:'Courier Prime',monospace;font-size:.8rem;line-height:1.5;color:#d7ecff;word-break:break-word}
   .live-source small{display:block;color:#7ea6cc;margin-bottom:6px;font-family:'Rajdhani',sans-serif;letter-spacing:.12em;text-transform:uppercase}
 
-  /* ─── RÉGIME / RÉVÉLATION ─── */
-  .regime-card{
-    background:linear-gradient(135deg,#161000,#1e1600);border:1px solid #7a6028;border-top:2px solid var(--gold);
-    border-radius:4px;padding:18px 20px 16px;margin-bottom:22px;position:relative;
-  }
-  .regime-card::before{
-    content:'◆ RÉGIME ACTIF (RELAIS RÉVÉLATION) ◆';font-family:'Cinzel',serif;font-size:.6rem;letter-spacing:.22em;
-    color:var(--gold);position:absolute;top:-.55em;left:20px;background:#1a1400;padding:0 8px;
-  }
-  .regime-row{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:.8rem;padding:5px 0;}
-  .regime-label{color:var(--ivory-dim);letter-spacing:.05em}
-  .regime-val{color:var(--gold);font-weight:700;text-align:right}
-  .regime-manual{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
-  .regime-manual input{
-    flex:1;min-width:120px;background:#0d0a0a;border:1px solid #2e1c1c;border-radius:3px;color:var(--ivory);
-    font-family:'Courier Prime',monospace;font-size:.85rem;padding:8px 10px;outline:none;
-  }
-  .btn-mini{
-    background:transparent;border:1px solid var(--gold-dim);color:var(--gold);font-size:.68rem;letter-spacing:.12em;
-    text-transform:uppercase;padding:7px 12px;border-radius:2px;cursor:pointer;white-space:nowrap;
-  }
-  .btn-mini:hover{background:var(--gold-dim);color:var(--black)}
-  .btn-mini.reset{border-color:#8b2a2a;color:#e08080}
-  .btn-mini.reset:hover{background:#8b2a2a;color:#fff}
-  .badge-revelation{background:linear-gradient(135deg,#1a1400,#2a2200);border:1px solid #d4af00;border-left:3px solid #ffe066;color:#ffe066;font-weight:700;animation:flicker-gold 3s ease-in-out infinite;}
-  .badge-regle{background:linear-gradient(135deg,#0a0f1a,#101828);border:1px solid #3a5a9a;border-left:3px solid #7aadff;color:#aad4ff;}
-  .badge-exception{background:linear-gradient(135deg,#1a0a0a,#2a1010);border:1px solid #8b2a2a;border-left:3px solid #e05050;color:#f09090;}
-
 </style>
 </head>
 <body>
@@ -332,10 +291,10 @@
 <header>
   <div class="title-suite">
     <span class="suit-deco">♠️ ♥️</span>
-    <h1>ORG BACC — COMBO V4 / V5+</h1>
+    <h1>ORG BACC — RÉVÉLATION</h1>
     <span class="suit-deco">♣️ ♦️</span>
   </div>
-  <div class="subtitle">Protocole Combiné · Sélection Automatique V4 / V5+</div>
+  <div class="subtitle">Système RÉVÉLATION · Routage ALGO1/ALGO2 · Calculs bruts · Cible P1</div>
   <div class="author">AUTEUR : X_Code</div>
 </header>
 
@@ -368,6 +327,14 @@
     </div>
   </div>
 
+  <div class="regime-card">
+    <div id="regime-status"></div>
+    <div class="regime-manual">
+      <input type="text" id="manual-revel-num" placeholder="Ex: 866 (définir manuellement une révélation)">
+      <button class="btn-mini" onclick="setManualRevelation()">Définir</button>
+      <button class="btn-mini reset" onclick="resetRegime()">Réinitialiser</button>
+    </div>
+  </div>
 
   <div class="input-card">
     <label for="game-input">Entrez le jeu précédent</label>
@@ -379,20 +346,11 @@
   </div>
 
 
-  <!-- RÉGIME / RÉVÉLATION -->
-  <div class="regime-card">
-    <div id="regime-status"></div>
-    <div class="regime-manual">
-      <input type="text" id="manual-revel-num" placeholder="Forcer réf. révélation (ex: 715)">
-      <button class="btn-mini" onclick="setManualRevelation()">Définir</button>
-      <button class="btn-mini reset" onclick="resetRegime()">Réinitialiser</button>
-    </div>
-  </div>
-
   <div id="result-zone">
     <div class="result-card">
       <div class="next-game-num" id="res-num"></div>
       <div class="prediction-suit" id="res-suit-emoji"></div>
+      <div class="prediction-suit-label" id="res-suit-label"></div>
       <div class="prediction-side" id="res-side"></div>
       <div class="copy-row">
         <button class="btn-copy" id="btn-copy" onclick="copyPrediction()">⧉ COPIER LA PRÉDICTION</button>
@@ -418,42 +376,16 @@
   </div>
 </main>
 
-<footer>ORG BACC COMBO · X_Code · ♠️ ♥️ ♣️ ♦️</footer>
+<footer>ORG BACC · RÉVÉLATION · X_Code · ♠️ ♥️ ♣️ ♦️</footer>
 
 <script>
 // ══════════════════════════════════════════════════════
 //  ÉTAT GLOBAL
 // ══════════════════════════════════════════════════════
-let lastCalcResult = null;
-let telegramHistoryCache = [];   // 150 derniers jeux chargés depuis Telegram (source commune)
+let lastCalcResult   = null;
+let telegramHistoryCache = [];  // 150 derniers jeux chargés depuis Telegram (source commune, identique sur tous les appareils)
 let globalBacktestStats  = null; // stats de fiabilité recalculées à partir de cette source commune
-let liveLastUsableGameNum = null; // dernier n° de jeu réellement TERMINÉ et déjà traité
-let rattrapageMode = null; // {suit, gameNum, attempt, maxAttempts} — rattrapage +2 après une perte P1
-const RATTRAPAGE_MAX_ATTEMPTS = 2; // fenêtre de rattrapage : 2 jeux consécutifs max sur la même enseigne
-
-// ── RATTRAPAGE — mapping "contraire couleur" selon la parité de l'AVANT-DERNIER chiffre
-//    du numéro de jeu prédit QUI A ÉCHOUÉ (tout est ciblé P1 dans ce système) ──
-// AVANT-DERNIER PAIR   → ♠️→♥️ · ♣️→♦️ · ♥️→♣️ · ♦️→♠️
-// AVANT-DERNIER IMPAIR → ♠️→♣️ · ♣️→♠️ · ♥️→♠️ · ♦️→♣️
-const MAP_RATTRAP_PAIR   = {'♠️':'♥️','♣️':'♦️','♥️':'♣️','♦️':'♠️'};
-const MAP_RATTRAP_IMPAIR = {'♠️':'♣️','♣️':'♠️','♥️':'♠️','♦️':'♣️'};
-function avantDernierDigitOf(gameNum){
-  const s=String(gameNum);
-  return s.length>=2 ? parseInt(s[s.length-2],10) : parseInt(s[0],10);
-}
-
-// ── RÉGIME DE RELAIS "RÉVÉLATION" ──
-// Une RÉVÉLATION = un jeu au format 3-3 (3 cartes P1 ET 3 cartes P2).
-// regime.revelationParity = parité (PAIR/IMPAIR) du n° de la dernière révélation connue.
-// Règle de routage : si parité(prochain N°) === regime.revelationParity → ALGO1, sinon → ALGO2.
-// Ce régime reste actif sur TOUS les jeux suivants, jusqu'à ce qu'une nouvelle révélation soit détectée.
-// Par défaut (aucune révélation détectée) : PAIR→ALGO1 / IMPAIR→ALGO2.
-let regime = {
-  revelationNum: null,
-  revelationParity: 'PAIR',
-  anticipated: false,
-  source: 'Aucune (réglage par défaut : PAIR→ALGO1 / IMPAIR→ALGO2)'
-};
+let liveLastUsableGameNum = null; // dernier n° de jeu réellement TERMINÉ et déjà traité (évite de recalculer en boucle)
 
 // ══════════════════════════════════════════════════════
 //  CONSTANTES
@@ -462,55 +394,19 @@ const SUIT_EMOJI = {'♠️':'♠️','♥️':'♥️','♦️':'♦️','♣�
 const SUIT_NAMES = {'♠️':'PIQUE','♥️':'COEUR','♦️':'CARREAU','♣️':'TRÈFLE'};
 function isRed(s){ return s==='♥️'||s==='♦️'; }
 
-// Inversion appliquée uniquement quand le régime route vers ALGO2 (parité du prochain
-// n° différente de la parité de la dernière révélation connue).
-const ALGO2_MAP = {'♣️':'♦️','♦️':'♣️','♠️':'♥️','♥️':'♠️'};
-
-// ── RÈGLE COMBO — TOUT EST PRÉDIT AU NOM DE P1 (le mode P2 a été retiré). Cette
-//    fonction décide seulement, à partir de l'avant-dernier et du dernier chiffre du
-//    n° de jeu prédit, quelle RÈGLE (1 à 4) s'applique et l'exception de couleur
-//    éventuelle. La CIBLE est toujours 'P1'. (Logique brute, basée uniquement sur la
-//    parité des chiffres du numéro — aucune dépendance à l'heure.)
 // ══════════════════════════════════════════════════════
-const MAP_EXC_A = {'♠️':'♣️','♣️':'♠️','♦️':'♥️','♥️':'♦️'};
-const MAP_EXC_B = {'♠️':'♦️','♦️':'♠️','♣️':'♥️','♥️':'♣️'};
-
-function decideRule(avantDernier, dernier){
-  const avOdd = (avantDernier % 2 !== 0);
-  const dEven = (dernier % 2 === 0);
-  const d0to5 = (dernier >= 0 && dernier <= 5);
-  const d6to9 = (dernier >= 6 && dernier <= 9);
-
-  if(avOdd && d0to5){
-    return {regle:1, target:'P1', exception:null,
-      cond:`1er=${avantDernier}(IMPAIR) · 2e=${dernier}(COMPRIS ENTRE 0 ET 5)`};
-  }
-  if(avOdd && d6to9){
-    const exception = dEven ? {map:MAP_EXC_A,label:'♠️↔♣️ / ♦️↔♥️',reason:`dernier=${dernier}(PAIR) & avant-dernier=${avantDernier}(IMPAIR)`} : null;
-    return {regle:2, target:'P1', exception,
-      cond:`1er=${avantDernier}(IMPAIR) · 2e=${dernier}(COMPRIS ENTRE 6 ET 9)`};
-  }
-  if(!avOdd && d0to5){
-    const exception = !dEven ? {map:MAP_EXC_A,label:'♠️↔♣️ / ♦️↔♥️',reason:`dernier=${dernier}(IMPAIR) & avant-dernier=${avantDernier}(PAIR)`} : null;
-    return {regle:3, target:'P1', exception,
-      cond:`1er=${avantDernier}(PAIR) · 2e=${dernier}(COMPRIS ENTRE 0 ET 5)`};
-  }
-  const exception = dEven ? {map:MAP_EXC_B,label:'♠️↔♦️ / ♣️↔♥️',reason:`dernier=${dernier}(PAIR) & avant-dernier=${avantDernier}(PAIR)`} : null;
-  return {regle:4, target:'P1', exception,
-    cond:`1er=${avantDernier}(PAIR) · 2e=${dernier}(COMPRIS ENTRE 6 ET 9)`};
-}
-
-// ── Ancienne inversion 2 CHIFFRES (n° 10-99) : DÉSACTIVÉE ──
-// Elle basculait la cible P1<>P2 ; comme il n'existe plus de mode P2, elle ne fait
-// plus rien désormais (la cible reste toujours P1). Conservée en no-op pour éviter
-// de casser les appels existants.
-function applyTwoDigitInversion(decision, nextNum){
-  return {...decision, target:'P1', isTwoDigitInversion:false};
-}
-
+//  RÉGIME RÉVÉLATION — relais ALGO1/ALGO2
+//  Une RÉVÉLATION = un jeu où P1 ET P2 ont chacun tiré 3 cartes (format 3-3).
+//  regime.revelationParity = parité (PAIR/IMPAIR) du n° de la dernière révélation connue.
+//  Règle : si parité(prochain N°) === regime.revelationParity → ALGO1, sinon → ALGO2.
+//  Par défaut (aucune révélation détectée) : PAIR→ALGO1 / IMPAIR→ALGO2.
 // ══════════════════════════════════════════════════════
-//  RÉGIME / RELAIS — affichage et contrôle manuel
-// ══════════════════════════════════════════════════════
+let regime = {
+  revelationNum: null,
+  revelationParity: 'PAIR',
+  source: 'Aucune (réglage par défaut : PAIR→ALGO1 / IMPAIR→ALGO2)'
+};
+
 function updateRegimeDisplay(){
   const el = document.getElementById('regime-status');
   if(!el) return;
@@ -524,23 +420,21 @@ function updateRegimeDisplay(){
 function setManualRevelation(){
   const raw = document.getElementById('manual-revel-num').value.trim();
   const n = parseInt(raw.replace(/[^0-9]/g,''), 10);
-  if(isNaN(n)){ alert('Numéro de jeu invalide.'); return; }
+  if(isNaN(n)) return;
   regime.revelationNum = n;
   regime.revelationParity = (n % 2 === 0) ? 'PAIR' : 'IMPAIR';
-  regime.anticipated = false;
   regime.source = `#N${n} (définie manuellement)`;
   updateRegimeDisplay();
-  document.getElementById('manual-revel-num').value = '';
 }
 function resetRegime(){
-  regime = { revelationNum: null, revelationParity: 'PAIR', anticipated:false, source: 'Aucune (réglage par défaut : PAIR→ALGO1 / IMPAIR→ALGO2)' };
+  regime = { revelationNum: null, revelationParity: 'PAIR', source: 'Aucune (réglage par défaut : PAIR→ALGO1 / IMPAIR→ALGO2)' };
   updateRegimeDisplay();
 }
 
 // ══════════════════════════════════════════════════════
-//  HISTORIQUE DES PRÉDICTIONS (persisté localStorage)
+//  HISTORIQUE DES PRÉDICTIONS (persisté localStorage) — cible toujours P1
 // ══════════════════════════════════════════════════════
-const HIST_KEY = 'orgbacc_history_v2';
+const HIST_KEY = 'orgbacc_history_revelation_v1';
 
 function loadHistory(){
   try{
@@ -555,65 +449,28 @@ function saveHistory(list){
 // Une seule entrée par numéro de jeu prédit : si elle existe déjà et est encore
 // en attente, on la met à jour (pas de doublon) ; si elle est déjà résolue, on n'y touche pas ;
 // sinon on la crée.
-function upsertHistoryEntry(gameNum, suitKey, side, algoTag, rattrapageInfo){
+function upsertHistoryEntry(gameNum, suitKey, algoUsed){
   const list = loadHistory();
   const existing = list.find(e=>e.gameNum===gameNum);
-  const rAttempt = rattrapageInfo ? rattrapageInfo.attempt : null;
-  const rMax     = rattrapageInfo ? rattrapageInfo.maxAttempts : null;
+
   if(existing){
     if(existing.status===null){
       existing.suitKey = suitKey;
-      existing.side = side;
-      existing.algoTag = algoTag;
-      existing.rattrapageAttempt = rAttempt;
-      existing.rattrapageMax = rMax;
+      existing.algoUsed = algoUsed;
       saveHistory(list);
       renderHistory();
     }
     return;
   }
+
   list.unshift({
     id: Date.now() + '-' + Math.random().toString(36).slice(2,7),
-    gameNum, suitKey, side, algoTag,
-    rattrapageAttempt: rAttempt, rattrapageMax: rMax,
+    gameNum, suitKey, side:'P1', algoUsed,
     status: null, // null=en attente | 'valid' | 'invalid'
     ts: new Date().toISOString()
   });
   saveHistory(list);
   renderHistory();
-}
-
-// ── RATTRAPAGE +2 ──
-// Une entrée résolue en 'valid' nettoie tout rattrapage en cours.
-// Une entrée résolue en 'invalid' :
-//   - si ce n'était PAS déjà une tentative de rattrapage → démarre le cycle (tentative 1/2)
-//     avec l'enseigne "contraire couleur" (selon la parité de l'avant-dernier chiffre du
-//     n° de jeu qui a échoué)
-//   - si c'était la tentative 1/2 → escalade vers la tentative 2/2 sur le jeu suivant, en
-//     reprenant TELLE QUELLE l'enseigne déjà utilisée pour la tentative 1 (aucun recalcul)
-//   - si c'était la tentative 2/2 (dernière chance) → on arrête, plus de rattrapage
-function updateRattrapageFromEntry(entry){
-  if(!entry) return;
-  if(entry.status==='valid'){
-    rattrapageMode = null;
-    return;
-  }
-  if(entry.status==='invalid'){
-    const attempt = entry.rattrapageAttempt || 0;
-    if(attempt>0 && attempt<RATTRAPAGE_MAX_ATTEMPTS){
-      // escalade tentative 2/2 : même enseigne, redonnée telle quelle, aucun recalcul
-      rattrapageMode = {suit:entry.suitKey, gameNum:entry.gameNum+1, attempt:attempt+1, maxAttempts:RATTRAPAGE_MAX_ATTEMPTS};
-    } else if(attempt>=RATTRAPAGE_MAX_ATTEMPTS){
-      rattrapageMode = null; // dernière tentative ratée → on arrête le rattrapage
-    } else {
-      // première défaillance : "contraire couleur" selon la parité de l'avant-dernier
-      // chiffre du n° de jeu QUI A ÉCHOUÉ (entry.gameNum)
-      const avD = avantDernierDigitOf(entry.gameNum);
-      const map = (avD % 2 === 0) ? MAP_RATTRAP_PAIR : MAP_RATTRAP_IMPAIR;
-      const rattrapSuit = map[entry.suitKey] || entry.suitKey;
-      rattrapageMode = {suit:rattrapSuit, gameNum:entry.gameNum+1, attempt:1, maxAttempts:RATTRAPAGE_MAX_ATTEMPTS};
-    }
-  }
 }
 
 function setHistoryStatus(id, status){
@@ -632,13 +489,13 @@ function clearHistory(){
 }
 
 // ── Résout automatiquement la prédiction en attente pour ce numéro de jeu ──
-function resolvePendingHistory(gameNum, p1Cards, p2Cards){
+// en comparant la couleur prédite aux cartes réellement sorties côté P1 (Joueur).
+function resolvePendingHistory(gameNum, p1Cards){
   const list = loadHistory();
   const entry = list.find(e=>e.gameNum===gameNum && e.status===null);
   if(!entry) return null;
-  const cards = entry.side==='P2' ? p2Cards : p1Cards;
-  if(!cards || !cards.length) return null;
-  const actualSuits = new Set(cards.map(c=>c.suit));
+  if(!p1Cards || !p1Cards.length) return null;
+  const actualSuits = new Set(p1Cards.map(c=>c.suit));
   entry.status = actualSuits.has(entry.suitKey) ? 'valid' : 'invalid';
   entry.autoResolved = true;
   entry.actualSuits = [...actualSuits];
@@ -652,31 +509,31 @@ function showAutoValidationFeedback(entry){
   if(!box) return;
   if(!entry){ box.textContent=''; box.style.display='none'; return; }
   const ok = entry.status==='valid';
-  const sideLabel = entry.side==='P2' ? '2ème parenthèse (Banquier/P2)' : '1ère parenthèse (Joueur/P1)';
   box.textContent = ok
-    ? `✓ Auto-validé : #N${entry.gameNum} ${SUIT_EMOJI[entry.suitKey]} ${entry.side} trouvée dans la ${sideLabel} — prédiction réussie.`
-    : `✕ Auto-validé : #N${entry.gameNum} ${SUIT_EMOJI[entry.suitKey]} ${entry.side} absente de la ${sideLabel} — prédiction échouée.`;
+    ? `✓ Auto-validé : #N${entry.gameNum} ${SUIT_EMOJI[entry.suitKey]} P1 trouvée dans la 1ère parenthèse (Joueur) — prédiction réussie.`
+    : `✕ Auto-validé : #N${entry.gameNum} ${SUIT_EMOJI[entry.suitKey]} P1 absente de la 1ère parenthèse (Joueur) — prédiction échouée.`;
   box.className = 'history-autoval show ' + (ok ? 'ok' : 'ko');
   box.style.display = 'block';
   setTimeout(()=>{ box.style.display='none'; }, 8000);
 }
 
-// ── Prédiction déterministe "brute" : moteur RÉVÉLATION seul, SANS bouton manuel,
-//    pour servir de référence stable/rejouable identique partout (backtest Telegram) ──
+// ── Prédiction déterministe "brute" : moteur RÉVÉLATION, sans aucun bouton manuel,
+//    pour servir de référence stable/rejouable identique partout (cible toujours P1)
 function deterministicPredict(raw){
   const r = runCalc(raw);
-  return {nextNum:r.nextNum, suit:r.finalSuit, side:r.target};
+  return {nextNum:r.nextNum, suit:r.finalSuit, side:'P1'};
 }
 
-function actualOutcomeSuits(gameRecord, side){
+function actualOutcomeSuits(gameRecord){
   const parsed = parseGame(gameRecord.normalized || gameRecord.raw_text);
-  const cards = side==='P2' ? parsed.p2 : parsed.p1;
+  const cards = parsed.p1;
   if(!cards || !cards.length) return null;
   return new Set(cards.map(c=>c.suit));
 }
 
 // Rejoue l'algorithme sur les N derniers jeux réels du canal Telegram (identiques pour
-// tout le monde) afin de conserver des statistiques de fiabilité globales.
+// tout le monde) afin de conserver des statistiques de fiabilité globales, indépendantes
+// de l'historique propre à chaque téléphone.
 function computeGlobalBacktestStats(history, windowGames){
   const SUITS=['♠️','♥️','♦️','♣️'];
   const perSuit={}; SUITS.forEach(s=>perSuit[s]={total:0,valid:0});
@@ -689,10 +546,10 @@ function computeGlobalBacktestStats(history, windowGames){
     try{ pred=deterministicPredict(prev.normalized || prev.raw_text); }catch(e){ continue; }
     if(pred.nextNum !== curr.game_number) continue; // trou dans la numérotation du canal
     let actualSuits;
-    try{ actualSuits=actualOutcomeSuits(curr, pred.side); }catch(e){ continue; }
+    try{ actualSuits=actualOutcomeSuits(curr); }catch(e){ continue; }
     if(!actualSuits) continue;
     const status = actualSuits.has(pred.suit) ? 'valid' : 'invalid';
-    results.push({gameNum:curr.game_number, suit:pred.suit, side:pred.side, status});
+    results.push({gameNum:curr.game_number, suit:pred.suit, side:'P1', status});
   }
   const recent = results.slice(-windowGames);
   recent.forEach(e=>{
@@ -735,7 +592,7 @@ function renderHistory(){
     <div class="history-item ${statusClass}">
       <span class="hist-num">#N${e.gameNum}</span>
       <span class="hist-suit" style="color:${red?'#cc4444':'var(--ivory)'}">${emoji}</span>
-      <span class="hist-label">${e.side}${e.algoTag?` <span class="hist-tag">${e.algoTag}</span>`:''}${e.rattrapageAttempt?` <span class="hist-tag hist-live">🆘 ${e.rattrapageAttempt}/${e.rattrapageMax}</span>`:''}${e.source==='live-seed'?` <span class="hist-tag hist-live">🔴 LIVE</span>`:(e.autoResolved?` <span class="hist-tag">auto</span>`:'')}</span>
+      <span class="hist-label">P1${e.algoUsed?` <span class="hist-tag">[${e.algoUsed}]</span>`:''}${e.source==='live-seed'?` <span class="hist-tag hist-live">🔴 LIVE</span>`:(e.autoResolved?` <span class="hist-tag">auto</span>`:'')}</span>
       <div class="hist-actions">
         <button class="hist-btn valid-btn ${e.status==='valid'?'active':''}" title="Validée chez le joueur" onclick="setHistoryStatus('${e.id}','valid')">✓</button>
         <button class="hist-btn invalid-btn ${e.status==='invalid'?'active':''}" title="Non passée" onclick="setHistoryStatus('${e.id}','invalid')">✕</button>
@@ -745,7 +602,7 @@ function renderHistory(){
 }
 
 // ══════════════════════════════════════════════════════
-//  UTILITAIRES
+//  UTILITAIRES COMMUNS
 // ══════════════════════════════════════════════════════
 function normSuit(raw){
   const c=raw.replace(/\uFE0F/g,'');
@@ -761,7 +618,7 @@ function cardValue(v){
   const n=parseInt(v,10);
   return isNaN(n)?null:n;
 }
-const CARD_RE=/([AKQJ]|10|[2-9])([\u2660\u2665\u2666\u2663][\uFE0F]?|[♠♥♦♣][\uFE0F]?)/g;
+// ── Accepte tous les formats de jeu : 2-2, 2-3, 3-2, 3-3 (RÉVÉLATION) ──
 function parseGame(raw){
   const s=raw.trim();
   const numMatch=s.match(/#N(\d+)/i);
@@ -770,11 +627,14 @@ function parseGame(raw){
   const groups=[...s.matchAll(/\(([^)]+)\)/g)].map(m=>m[1]);
   let p1=[],p2=[];
   if(groups.length>=2){
-    p1=[...groups[0].matchAll(CARD_RE)].map(m=>({val:m[1],suit:normSuit(m[2])}));
-    p2=[...groups[1].matchAll(CARD_RE)].map(m=>({val:m[1],suit:normSuit(m[2])}));
+    p1=[...groups[0].matchAll(/([AKQJ]|10|[2-9])([\u2660\u2665\u2666\u2663][\uFE0F]?|[♠♥♦♣][\uFE0F]?)/g)]
+        .map(m=>({val:m[1],suit:normSuit(m[2])}));
+    p2=[...groups[1].matchAll(/([AKQJ]|10|[2-9])([\u2660\u2665\u2666\u2663][\uFE0F]?|[♠♥♦♣][\uFE0F]?)/g)]
+        .map(m=>({val:m[1],suit:normSuit(m[2])}));
   }
   if(!p1.length||!p2.length){
-    const all=[...s.matchAll(CARD_RE)].map(m=>({val:m[1],suit:normSuit(m[2])}));
+    const all=[...s.matchAll(/([AKQJ]|10|[2-9])([\u2660\u2665\u2666\u2663][\uFE0F]?|[♠♥♦♣][\uFE0F]?)/g)]
+               .map(m=>({val:m[1],suit:normSuit(m[2])}));
     if(all.length<2) throw new Error("Cartes introuvables. Vérifiez le format.");
     const h=Math.ceil(all.length/2);
     p1=all.slice(0,h); p2=all.slice(h);
@@ -804,18 +664,95 @@ function signHM(h,m){
   return prod>=0?'+':'-';
 }
 
-// ── Format d'un jeu : "cartes P1"-"cartes P2" (2-2, 2-3, 3-2, 3-3…) ──
-function detectFormat(p1,p2){ return `${p1.length}-${p2.length}`; }
-function isRevelationFormat(p1,p2){ return p1.length===3 && p2.length===3; }
+// ══════════════════════════════════════════════════════
+//  SÉLECTEUR V4 / V5+ (interne au moteur RÉVÉLATION)
+// ══════════════════════════════════════════════════════
+function selectSystem(nextH, nextM, nextNum){
+  const hPair = (nextH % 2 === 0);
+  const hImp  = !hPair;
+  const groupA = [0,1,2,3,4,5,6,7,8,9,20,21,22,23,24].includes(nextH);
+  const groupB = [10,11,12,13,14,15,16,17,18,19].includes(nextH);
+  const numStr = String(nextNum);
+  const avantDernierDigit = numStr.length >= 2 ? parseInt(numStr[numStr.length-2],10) : parseInt(numStr[0],10);
+  const avantDernierPair  = (avantDernierDigit % 2 === 0);
+  const avantDernierImp   = !avantDernierPair;
+  const min0_11  = (nextM >= 0  && nextM <= 11);
+  const min12_59 = (nextM >= 12 && nextM <= 59);
+  if(groupA){
+    if(hImp){
+      if(avantDernierPair){
+        if(min12_59) return {algo:'V5+', invKey:'CD_SH', invLabel:'V5++ ♣↔♦ / ♠↔♥'};
+        if(min0_11)  return {algo:'V4',  invKey:'CH_SD', invLabel:'V4+ ♣↔♥ / ♠↔♦'};
+      }
+      if(avantDernierImp){
+        if(min12_59) return {algo:'V4',  invKey:'CD_SH', invLabel:'V4+ ♣↔♦ / ♠↔♥'};
+        if(min0_11)  return {algo:'V5+', invKey:'CH_SD', invLabel:'V5++ ♣↔♥ / ♠↔♦'};
+      }
+    }
+    if(hPair){
+      if(avantDernierPair){
+        if(min12_59) return {algo:'V5+', invKey:'CD_SH', invLabel:'V5++ ♣↔♦ / ♠↔♥'};
+        if(min0_11)  return {algo:'V5+', invKey:'CD_SH', invLabel:'V5++ ♣↔♦ / ♠↔♥'};
+      }
+      if(avantDernierImp){
+        if(min12_59) return {algo:'V5+', invKey:'CH_SD', invLabel:'V5++ ♣↔♥ / ♠↔♦'};
+        if(min0_11)  return {algo:'V4',  invKey:'CH_SD', invLabel:'V4+ ♣↔♥ / ♠↔♦'};
+      }
+    }
+  }
+  if(groupB){
+    if(hPair){
+      if(avantDernierPair){
+        if(min12_59) return {algo:'V5+', invKey:'CH_SD', invLabel:'V5++ ♣↔♥ / ♠↔♦'};
+        if(min0_11)  return {algo:'V4',  invKey:'CD_SH', invLabel:'V4+ ♣↔♦ / ♠↔♥'};
+      }
+      if(avantDernierImp){
+        if(min12_59) return {algo:'V5+', invKey:'CD_SH', invLabel:'V5++ ♣↔♦ / ♠↔♥'};
+        if(min0_11)  return {algo:'V4',  invKey:'CH_SD', invLabel:'V4+ ♣↔♥ / ♠↔♦'};
+      }
+    }
+    if(hImp){
+      if(avantDernierPair){
+        if(min12_59) return {algo:'V5+', invKey:'CH_SD', invLabel:'V5++ ♣↔♥ / ♠↔♦'};
+        if(min0_11)  return {algo:'V4', invKey:'SPECIAL_LAST', invLabel:'V4+ (dernier chiffre)'};
+      }
+      if(avantDernierImp){
+        if(min12_59) return {algo:'V4', invKey:'SPECIAL_LAST_NOTRANCH', invLabel:'V4+ (dernier chiffre / aucune inv si 6-9 ou 0)'};
+        if(min0_11)  return {algo:'V4',  invKey:'SH_CD', invLabel:'V4+ ♠↔♥ / ♣↔♦'};
+      }
+    }
+  }
+  return {algo:'V4', invKey:'CD_SH', invLabel:'V4+ ♣↔♦ / ♠↔♥'};
+}
+function applyFinalInv(suit, invKey, lastDigit){
+  const CD_SH = {'♣️':'♦️','♦️':'♣️','♠️':'♥️','♥️':'♠️'};
+  const CH_SD = {'♣️':'♥️','♥️':'♣️','♠️':'♦️','♦️':'♠️'};
+  const SH_CD = CD_SH;
+  if(invKey==='CD_SH') return {result:CD_SH[suit]||suit, detail:`${SUIT_EMOJI[suit]}→${SUIT_EMOJI[CD_SH[suit]||suit]}`};
+  if(invKey==='CH_SD') return {result:CH_SD[suit]||suit, detail:`${SUIT_EMOJI[suit]}→${SUIT_EMOJI[CH_SD[suit]||suit]}`};
+  if(invKey==='SH_CD') return {result:SH_CD[suit]||suit, detail:`${SUIT_EMOJI[suit]}→${SUIT_EMOJI[SH_CD[suit]||suit]}`};
+  if(invKey==='SPECIAL_LAST'){
+    const ld = lastDigit;
+    if(ld>=1 && ld<=5) return {result:CH_SD[suit]||suit, detail:`dernier chiffre ${ld} (1-5) → ♣↔♥/♠↔♦ → ${SUIT_EMOJI[suit]}→${SUIT_EMOJI[CH_SD[suit]||suit]}`};
+    else return {result:suit, detail:`dernier chiffre ${ld} (0 ou 6-9) → 0 inversion`};
+  }
+  if(invKey==='SPECIAL_LAST_NOTRANCH'){
+    const ld = lastDigit;
+    if(ld>=6 || ld===0) return {result:suit, detail:`dernier chiffre ${ld} (0 ou 6-9) → 0 inversion`};
+    else return {result:CH_SD[suit]||suit, detail:`dernier chiffre ${ld} (1-5) → ♣↔♥/♠↔♦ → ${SUIT_EMOJI[suit]}→${SUIT_EMOJI[CH_SD[suit]||suit]}`};
+  }
+  return {result:suit, detail:'aucune inversion'};
+}
 
 // ══════════════════════════════════════════════════════
-//  MOTEUR DE BASE (calcul brut, commun, sans aucune dépendance à l'heure)
-//  Détermine la couleur transformée à partir de la 1ère carte du Banquier (P2),
-//  de la parité de l'algorithme (signature heure/couleur + relais Fibonacci) et
-//  de la parité du n° de jeu réduit.
+//  MOTEUR RÉVÉLATION — CALCUL BRUT (sans post-inversion d'heure, sans
+//  tranche/réinversion, sans ALL INVERSE, sans rattrapage)
 // ══════════════════════════════════════════════════════
-function runBaseEngine(num, p1Cards, p2Cards, nextNum){
-  const time=numToTime(num);
+function runEngine(num, p1Cards, p2Cards, nextNum){
+  const isReduced=String(num).length>=4;
+  const calcNum=isReduced?parseInt(String(num).slice(1),10):num;
+  const calcNextNum=calcNum+1;
+  const time=numToTime(calcNum);
   const p1First=p1Cards[0], p2First=p2Cards[0];
   const sHM=signHM(time.h,time.m);
   const sameCol=isRed(p1First.suit)===isRed(p2First.suit);
@@ -825,8 +762,8 @@ function runBaseEngine(num, p1Cards, p2Cards, nextNum){
   const fibSeq=fibonacci(10);
   const cardVals=[...p1Cards.slice(0,2).map(c=>cardValue(c.val)||0),...p2Cards.slice(0,2).map(c=>cardValue(c.val)||0)];
   const sumCards=cardVals.reduce((a,b)=>a+b,0);
-  const sumNum=String(num).split('').reduce((a,c)=>a+parseInt(c,10),0);
-  const fibSeed=num+nextNum+sumCards+sumNum;
+  const sumNum=String(calcNum).split('').reduce((a,c)=>a+parseInt(c,10),0);
+  const fibSeed=calcNum+calcNextNum+sumCards+sumNum;
   const fibIdx=fibSeed%fibSeq.length;
   const fibVal=fibSeq[fibIdx];
   const fibMod=fibVal%4;
@@ -844,115 +781,115 @@ function runBaseEngine(num, p1Cards, p2Cards, nextNum){
     if(!algoEven){rule='ALGO IMPAIR × RÉDUIT PAIR → ♣️↔️♦️ / ♠️↔️♥️';const m={'♣️':'♦️','♦️':'♣️','♠️':'♥️','♥️':'♠️'};transformed=m[p2First.suit]||p2First.suit;}
     else{rule='ALGO PAIR × RÉDUIT IMPAIR → ♣️↔️♠️ / ♦️↔️♥️';const m={'♣️':'♠️','♠️':'♣️','♦️':'♥️','♥️':'♦️'};transformed=m[p2First.suit]||p2First.suit;}
   }
-  return {time:time.str,p1First,p2First,sHM,sameCol,sColor,sTotal,baseAlgo,fibMod,fibVal,fibIdx,fibSeed,algo,algoEven,numEven,reducedDigit,reduceSteps,rule,transformed};
+  return {calcNum,calcNextNum,isReduced,time:time.str,p1First,p2First,sHM,sameCol,sColor,sTotal,
+          baseAlgo,fibMod,fibVal,fibIdx,fibSeed,algo,algoEven,numEven,reducedDigit,reduceSteps,
+          rule,transformed,rawResult:transformed};
 }
 
 // ══════════════════════════════════════════════════════
-//  UI — DÉTECTION DE DISPONIBILITÉ (⏰ / ▶) + ANTICIPATION DE RÉVÉLATION
-//  Symboles Telegram : ⏰ = manche en cours, ▶ = ce côté doit encore tirer une carte.
-//  • Aucun ▶ dans le texte                          → manche terminée → exploitable
-//  • ▶ avant la 1ère parenthèse (P1/Joueur)          → P1 tire encore → PAS exploitable
-//  • ▶ entre P1 et P2 (donc sur P2/Banquier)         → P1 déjà final → exploitable
-//      → si en plus P1 affiche déjà 3 cartes, on SAIT que la fin sera forcément
-//        3-3 (RÉVÉLATION) : on anticipe le changement de régime sans attendre la
-//        fin réelle de la manche, pour ne jamais être en retard sur la prédiction
-//        suivante (anticipatedRevelation = true).
-// ══════════════════════════════════════════════════════
-function checkGameReadiness(raw){
-  if(!raw) return {usable:false, reason:'empty', detail:'Aucune donnée.', p1Count:0, p2Count:0, anticipatedRevelation:false};
-  const parenIdxs=[];
-  for(let i=0;i<raw.length;i++){ if(raw[i]==='(') parenIdxs.push(i); }
-  if(parenIdxs.length<2){
-    return {usable:false, reason:'incomplete', detail:"Le jeu n'affiche pas encore les deux mains (P1/P2) — en attente.", p1Count:0, p2Count:0, anticipatedRevelation:false};
-  }
-  const idxP1Open=parenIdxs[0], idxP2Open=parenIdxs[1];
-  let p1Count=0, p2Count=0;
-  try{
-    const groups=[...raw.matchAll(/\(([^)]+)\)/g)].map(m=>m[1]);
-    if(groups[0]) p1Count=[...groups[0].matchAll(CARD_RE)].length;
-    if(groups[1]) p2Count=[...groups[1].matchAll(CARD_RE)].length;
-  }catch(e){}
-
-  const chevronIdx=raw.indexOf('▶');
-  if(chevronIdx===-1) return {usable:true, reason:'complete', p1Count, p2Count, anticipatedRevelation:false};
-
-  if(chevronIdx<idxP1Open){
-    return {usable:false, reason:'p1-pending', detail:'Le Joueur (P1) doit encore tirer sa 3ème carte — en attente.', p1Count, p2Count, anticipatedRevelation:false};
-  }
-  if(chevronIdx<idxP2Open){
-    const anticipatedRevelation = (p1Count===3);
-    return {
-      usable:true, reason:'p2-pending-ok',
-      detail:'P1 déjà final, le Banquier (P2) tire encore — données exploitables.'
-        + (anticipatedRevelation ? ' RÉVÉLATION ANTICIPÉE (P1=3 cartes) : le régime est mis à jour par avance, sans attendre la fin réelle de la manche.' : ''),
-      p1Count, p2Count, anticipatedRevelation
-    };
-  }
-  return {usable:false, reason:'ambiguous', detail:'Position du symbole ▶ ambiguë — en attente de confirmation.', p1Count, p2Count, anticipatedRevelation:false};
-}
-
-// ══════════════════════════════════════════════════════
-//  CALCUL PRINCIPAL — SYSTÈME "RÉVÉLATION"
-//  1) Détecte le format du jeu joué (2-2 / 2-3 / 3-2 / 3-3) et, si 3-3 (ou
-//     anticipation certaine d'un 3-3 en cours), met à jour le régime de relais.
-//  2) Route le moteur (ALGO1 = base brute / ALGO2 = base brute inversée)
-//     selon que la parité du PROCHAIN n° correspond ou non à la parité de la
-//     dernière révélation connue.
-//  3) Applique la RÈGLE COMBO (calcul brut, aucune dépendance à l'heure, aucun
-//     rattrapage). La cible est TOUJOURS P1 (le mode P2 a été retiré).
+//  CALCUL PRINCIPAL — RÉVÉLATION (routage ALGO1/ALGO2, cible fixe P1)
 // ══════════════════════════════════════════════════════
 function runCalc(raw){
   const {num,p1,p2}=parseGame(raw);
-  const format = detectFormat(p1,p2);
-  const readiness = checkGameReadiness(raw);
 
-  const confirmedRevelation = isRevelationFormat(p1,p2);
-  const isRevelationGame = confirmedRevelation || readiness.anticipatedRevelation;
-  const anticipated = readiness.anticipatedRevelation && !confirmedRevelation;
-
+  // ── Détection RÉVÉLATION : 3 cartes P1 ET 3 cartes P2 (format 3-3) ──
+  const isRevelationGame = (p1.length===3 && p2.length===3);
+  const regimeBefore = { ...regime };
   if(isRevelationGame){
     regime.revelationNum = num;
     regime.revelationParity = (num % 2 === 0) ? 'PAIR' : 'IMPAIR';
-    regime.anticipated = anticipated;
-    regime.source = anticipated
-      ? `#N${num} (RÉVÉLATION ANTICIPÉE — P1=3 cartes, ▶ en cours côté P2)`
-      : `#N${num} (détectée — format 3-3)`;
+    regime.source = `#N${num} (détectée automatiquement dans ce calcul)`;
   }
-  const regimeSnapshot = {...regime};
 
   const nextNum=num+1;
   const nextParity = (nextNum % 2 === 0) ? 'PAIR' : 'IMPAIR';
-  const algoUsed = (nextParity === regimeSnapshot.revelationParity) ? 'ALGO1' : 'ALGO2';
+  // Règle de relais : parité(prochain N°) === parité(dernière révélation) → ALGO1, sinon ALGO2
+  const algoUsed = (nextParity === regime.revelationParity) ? 'ALGO1' : 'ALGO2';
 
-  const base = runBaseEngine(num,p1,p2,nextNum);
-  let engineSuit = base.transformed;
-  if(algoUsed==='ALGO2') engineSuit = ALGO2_MAP[engineSuit] || engineSuit;
-
+  const nextH=Math.floor((nextNum-1)/60)%24;
+  const nextM=(nextNum-1)%60;
   const numStr=String(nextNum);
   const avantDernier=numStr.length>=2?parseInt(numStr[numStr.length-2],10):parseInt(numStr[0],10);
   const dernierDigit=parseInt(numStr[numStr.length-1],10);
-  let decision = decideRule(avantDernier,dernierDigit);
-  decision = applyTwoDigitInversion(decision, nextNum);
+  const sel=selectSystem(nextH,nextM,nextNum);
+  const subEngine=sel.algo; // V4 / V5+ interne (sélection de l'inversion finale)
+  const algoResult=runEngine(num,p1,p2,nextNum);
+  const finalInv=applyFinalInv(algoResult.rawResult, sel.invKey, dernierDigit);
+  let finalSuit=finalInv.result;
 
-  let finalSuit = engineSuit;
-  let exceptionInfo = null;
-  if(decision.exception){
-    const before=finalSuit;
-    finalSuit = decision.exception.map[finalSuit] || finalSuit;
-    exceptionInfo = {before, result:finalSuit, label:decision.exception.label, reason:decision.exception.reason};
+  // HYPER GLOBAL (n° à 3 chiffres)
+  let hyperGlobal = null;
+  if(String(nextNum).length === 3){
+    const minStr = String(nextM).padStart(2,'0');
+    const minFirstDigit = parseInt(minStr[0], 10);
+    const minFirstImp = (minFirstDigit % 2 !== 0);
+    if(minFirstImp){
+      const numFirstDigit = parseInt(String(nextNum)[0], 10);
+      const numFirstPair  = (numFirstDigit % 2 === 0);
+      let hgMap, hgLabel;
+      if(numFirstPair){
+        hgMap={'♠️':'♣️','♣️':'♠️','♥️':'♦️','♦️':'♥️'};
+        hgLabel=`1er chiffre N°(${numFirstDigit})PAIR → ♠↔♣/♥↔♦`;
+      } else {
+        hgMap={'♠️':'♥️','♥️':'♠️','♣️':'♦️','♦️':'♣️'};
+        hgLabel=`1er chiffre N°(${numFirstDigit})IMPAIR → ♠↔♥/♣↔♦`;
+      }
+      const hgResult = hgMap[finalSuit] || finalSuit;
+      hyperGlobal={active:true,numFirstDigit,numFirstPair,minFirstDigit,minFirstImp,hgLabel,hgMap,before:finalSuit,result:hgResult};
+      finalSuit = hgResult;
+    } else {
+      hyperGlobal={active:false,numFirstDigit:parseInt(String(nextNum)[0],10),minFirstDigit:parseInt(String(nextM).padStart(2,'0')[0],10),minFirstImp:false,hgLabel:`1er chiffre MIN(${parseInt(String(nextM).padStart(2,'0')[0],10)}) PAIR → PAS D'INV HYPER GLOBAL`,before:finalSuit,result:finalSuit};
+    }
   }
 
-  return {num,p1,p2,format,isRevelationGame,anticipated,nextNum,nextParity,avantDernier,dernierDigit,
-          algoUsed,regimeSnapshot,base,engineSuit,decision,exceptionInfo,finalSuit,target:decision.target,readiness};
+  // MILIEU PAIR (n° à 3 chiffres)
+  let milieuRule = null;
+  if(String(nextNum).length === 3){
+    const milieuDigit = parseInt(String(nextNum)[1], 10);
+    const milieuPair  = [0,2,4,6,8].includes(milieuDigit);
+    if(milieuPair){
+      const mMap = {'♦️':'♥️','♥️':'♦️','♣️':'♠️','♠️':'♣️'};
+      const before = finalSuit;
+      const result = mMap[finalSuit] || finalSuit;
+      milieuRule={active:true,milieuDigit,before,result,label:`MILIEU=${milieuDigit}(PAIR) → ♦↔♥/♣↔♠`};
+      finalSuit = result;
+    } else {
+      milieuRule={active:false,milieuDigit,before:finalSuit,result:finalSuit,label:`MILIEU=${milieuDigit}(IMPAIR) → INACTIF`};
+    }
+  }
+
+  return {num,p1,p2,nextNum,nextH,nextM,avantDernier,dernierDigit,sel,subEngine,algoResult,finalInv,finalSuit,
+          hyperGlobal,milieuRule,isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime}};
 }
 
-// ══════════════════════════════════════════════════════
-//  UI
-// ══════════════════════════════════════════════════════
 function showError(msg){const b=document.getElementById('error-box');b.textContent='⚠ '+msg;b.style.display='block';}
 function hideError(){document.getElementById('error-box').style.display='none';}
 function showWaiting(msg){const b=document.getElementById('waiting-box');b.textContent='⏳ '+msg;b.style.display='block';}
 function hideWaiting(){document.getElementById('waiting-box').style.display='none';}
+
+// ── Détecte si la manche affichée est réellement TERMINÉE et exploitable ──
+// Symboles Telegram : ⏰ = manche en cours, ▶ = ce côté doit encore tirer une carte.
+//  • Aucun ▶ dans le texte           → manche terminée → exploitable
+//  • ▶ situé avant la 1ère parenthèse (P1/Joueur)  → P1 tire encore → PAS exploitable
+//  • ▶ situé entre P1 et P2 (donc sur P2/Banquier) → P1 déjà final → exploitable
+function checkGameReadiness(raw){
+  if(!raw) return {usable:false, reason:'empty', detail:'Aucune donnée.'};
+  const parenIdxs=[];
+  for(let i=0;i<raw.length;i++){ if(raw[i]==='(') parenIdxs.push(i); }
+  if(parenIdxs.length<2){
+    return {usable:false, reason:'incomplete', detail:"Le jeu n'affiche pas encore les deux mains (P1/P2) — en attente."};
+  }
+  const idxP1Open=parenIdxs[0], idxP2Open=parenIdxs[1];
+  const chevronIdx=raw.indexOf('▶');
+  if(chevronIdx===-1) return {usable:true, reason:'complete'};
+  if(chevronIdx<idxP1Open){
+    return {usable:false, reason:'p1-pending', detail:'Le Joueur (P1) doit encore tirer sa 3ème carte — en attente.'};
+  }
+  if(chevronIdx<idxP2Open){
+    return {usable:true, reason:'p2-pending-ok', detail:'P1 déjà final, le Banquier (P2) tire encore — données exploitables.'};
+  }
+  return {usable:false, reason:'ambiguous', detail:'Position du symbole ▶ ambiguë — en attente de confirmation.'};
+}
 
 function calculate(){
   hideError();
@@ -972,15 +909,12 @@ function calculate(){
     try{
       const r=runCalc(raw);
       lastCalcResult=r;
+      updateRegimeDisplay();
 
-      // ── Auto-validation de la prédiction précédente en attente ──
-      const autoVal = resolvePendingHistory(r.num, r.p1, r.p2);
+      // ── Auto-validation de la prédiction précédente en attente (toujours côté P1) ──
+      const autoVal = resolvePendingHistory(r.num, r.p1);
       showAutoValidationFeedback(autoVal);
 
-      // ── RATTRAPAGE +2 : géré à partir du résultat de l'auto-validation ──
-      updateRattrapageFromEntry(autoVal);
-
-      updateRegimeDisplay();
       renderResult(r);
       document.getElementById('game-input').value='';
     }catch(e){showError(e.message);}
@@ -989,65 +923,104 @@ function calculate(){
 }
 
 function renderResult(r){
-  let finalSuit = r.finalSuit;
-  const side = r.target;
-
-  // ── RATTRAPAGE +2 : si une prédiction précédente a échoué, on NE RECALCULE PLUS RIEN ──
-  // L'enseigne de rattrapage (déjà déterminée par updateRattrapageFromEntry) est redonnée
-  // telle quelle pour CE numéro de jeu, sans passer par le moteur/la règle combo/l'exception.
-  let rattrapageInfo = null;
-  if(rattrapageMode && rattrapageMode.gameNum === r.nextNum){
-    rattrapageInfo = {suit: rattrapageMode.suit, gameNum: rattrapageMode.gameNum, attempt: rattrapageMode.attempt, maxAttempts: rattrapageMode.maxAttempts};
-    finalSuit = rattrapageMode.suit;
-  }
+  const ar=r.algoResult;
+  const displaySuit = r.finalSuit; // calcul brut du système RÉVÉLATION, cible fixe P1
 
   document.getElementById('res-num').textContent=`#N${r.nextNum}`;
-  const red=isRed(finalSuit);
+  const red=isRed(displaySuit);
   document.getElementById('res-suit-emoji').innerHTML=
-    `<span style="color:${red?'#cc4444':'var(--ivory)'}">${SUIT_EMOJI[finalSuit]||finalSuit}</span>`;
-  document.getElementById('res-side').innerHTML=`<span class="side-tag">${side}</span>`;
+    `<span style="color:${red?'#cc4444':'var(--ivory)'}">${SUIT_EMOJI[displaySuit]||displaySuit}</span>`;
+  document.getElementById('res-suit-label').textContent=SUIT_NAMES[displaySuit]||'';
+  document.getElementById('res-side').innerHTML=`<span class="side-tag">P1</span>`;
 
-  upsertHistoryEntry(r.nextNum, finalSuit, side, r.algoUsed, rattrapageInfo);
+  upsertHistoryEntry(r.nextNum, displaySuit, r.algoUsed);
 
-  const fibOverrideLabel=r.base.fibMod===0?'ALGO NORMAL CONSERVÉ':r.base.fibMod===1?'FIB FORCE ALGO 1':r.base.fibMod===2?'FIB FORCE ALGO 2':'FIB INVERSE ALGO';
-  const algoParity=r.base.algoEven?`${r.base.algo} (PAIR)`:`${r.base.algo} (IMPAIR)`;
-  const numParity=r.base.numEven?`${r.base.reducedDigit} (PAIR)`:`${r.base.reducedDigit} (IMPAIR)`;
-
-  const formatLabel = r.isRevelationGame
-    ? `🃏🃏 RÉVÉLATION ${r.anticipated?'ANTICIPÉE ':''}DÉTECTÉE — #N${r.num} format ${r.format} (${r.regimeSnapshot.revelationParity}) → régime mis à jour`
-    : `🃏 Format #N${r.num} : ${r.format} — pas de révélation, régime inchangé (réf. ${r.regimeSnapshot.source})`;
+  const hParite=(r.nextH%2===0)?'PAIR':'IMPAIR';
+  const avantDernierParite=r.avantDernier%2===0?'PAIR':'IMPAIR';
+  const minTranche=r.nextM<=11?'00-11':'12-59';
+  const selectorLine=`GROUPE ${[1,2,3,4,5,6,7,8,9,20,21,22,23,24,0].includes(r.nextH)?'A':'B'} · H=${r.nextH}(${hParite}) · AV-DERN=${r.avantDernier}(${avantDernierParite}) · MIN=${r.nextM}(${minTranche}) → ${r.subEngine} + ${r.sel.invLabel}`;
+  const fibOverrideLabel=ar.fibMod===0?'ALGO NORMAL CONSERVÉ':ar.fibMod===1?'FIB FORCE ALGO 1':ar.fibMod===2?'FIB FORCE ALGO 2':'FIB INVERSE ALGO';
+  const algoParity=ar.algoEven?`${ar.algo} (PAIR)`:`${ar.algo} (IMPAIR)`;
+  const numParity=ar.numEven?`${ar.reducedDigit} (PAIR)`:`${ar.reducedDigit} (IMPAIR)`;
 
   const badges=[
-    ...(rattrapageInfo ? [`<div class="badge badge-exception">🆘 RATTRAPAGE ${rattrapageInfo.attempt}/${rattrapageInfo.maxAttempts} — #N${rattrapageInfo.gameNum} → ${SUIT_EMOJI[rattrapageInfo.suit]} P1 redonnée telle quelle (AUCUN recalcul du moteur)${rattrapageInfo.attempt>=rattrapageInfo.maxAttempts?' — DERNIÈRE CHANCE':''}</div>`] : []),
-    `<div class="badge ${r.isRevelationGame?'badge-revelation':'badge-selector'}">${formatLabel}</div>`,
-    `<div class="badge badge-algo">⚙️ MOTEUR ROUTÉ — #N${r.nextNum} est ${r.nextParity} · parité révélation=${r.regimeSnapshot.revelationParity} → <b>${r.algoUsed}</b>${r.algoUsed==='ALGO2'?' (inversion ♣↔♦/♠↔♥ appliquée)':''}</div>`,
-    `<div class="badge badge-parity">◈ PARITÉ — ALGO ${algoParity} · #N${r.nextNum} RÉDUIT = ${r.base.reduceSteps.join(' → ')} → ${numParity}</div>`,
-    `<div class="badge badge-transform">⚡ RÈGLE MOTEUR — ${r.base.rule}</div>`,
-    `<div class="badge badge-regle">◆ RÈGLE COMBO ${r.decision.regle} — ${r.decision.cond} → CIBLE ${r.decision.target}</div>`,
-    ...(r.exceptionInfo ? [`<div class="badge badge-exception">⚠ EXCEPTION — ${r.exceptionInfo.reason} → ${r.exceptionInfo.label}</div>`] : [])
+    `<div class="badge badge-revelation">🃏 RÉVÉLATION — ${r.isRevelationGame?`DÉTECTÉE sur ce jeu (#N${r.num}, format 3-3)`:'aucune révélation sur ce jeu'} · Régime actif : ${r.regimeSnapshot.source}</div>`,
+    `<div class="badge badge-engine">◆ ROUTAGE — Prochain #N${r.nextNum} (${r.nextParity}) vs régime (${r.regimeSnapshot.revelationParity}) → ${r.algoUsed} PRÉDIT P1</div>`,
+    `<div class="badge badge-selector">🎯 SÉLECTEUR — ${selectorLine}</div>`,
+    `<div class="badge badge-algo">⚙ ALGO INTERNE — BASE : ALGO ${ar.baseAlgo} · ${fibOverrideLabel} → ALGO FINAL : ALGO ${ar.algo}</div>`,
+    `<div class="badge badge-parity">◈ PARITÉ — ALGO ${algoParity} · #N${r.nextNum} RÉDUIT = ${ar.reduceSteps.join(' → ')} → ${numParity}</div>`,
+    `<div class="badge badge-transform">⚡ RÈGLE — ${ar.rule}</div>`,
+    `<div class="badge badge-finalinv">✦ INV FINALE ${r.sel.invLabel} — ${r.finalInv.detail}</div>`,
+    ...(r.hyperGlobal ? (r.hyperGlobal.active
+      ? [`<div class="badge badge-hyper">⚡⚡ INV HYPER GLOBAL (3 chiffres) — MIN 1er chiffre=${r.hyperGlobal.minFirstDigit}(IMPAIR) · ${r.hyperGlobal.hgLabel} → ${SUIT_EMOJI[r.hyperGlobal.before]}→${SUIT_EMOJI[r.hyperGlobal.result]}</div>`]
+      : [`<div class="badge badge-hyper" style="opacity:.45">⚡⚡ HYPER GLOBAL (3 chiffres) — MIN 1er chiffre=${r.hyperGlobal.minFirstDigit}(PAIR) → INACTIF</div>`]
+    ) : []),
+    ...(r.milieuRule ? (r.milieuRule.active
+      ? [`<div class="badge badge-milieu">◉ MILIEU PAIR (3 chiffres) — ${r.milieuRule.label} → ${SUIT_EMOJI[r.milieuRule.before]}→${SUIT_EMOJI[r.milieuRule.result]}</div>`]
+      : [`<div class="badge badge-milieu" style="opacity:.45">◉ MILIEU (3 chiffres) — ${r.milieuRule.label}</div>`]
+    ) : [])
   ];
-  document.getElementById('badge-zone').innerHTML = badges.join('');
+  document.getElementById('badge-zone').innerHTML=badges.join('');
 
-  let detailsHTML = `
-<div class="det-row"><span class="det-label">Jeu analysé</span><span class="det-val">#N${r.num} · format ${r.format}${r.isRevelationGame?' (RÉVÉLATION'+(r.anticipated?' ANTICIPÉE':'')+')':''}</span></div>
-<div class="det-row"><span class="det-label">Prochain jeu</span><span class="det-val">#N${r.nextNum} (${r.nextParity})</span></div>
+  // Détails
+  const p1c=isRed(ar.p1First.suit)?'+':'-';
+  const p2c=isRed(ar.p2First.suit)?'+':'-';
+  const fibModLabels=['ALGO NORMAL CONSERVÉ','FORCER ALGO 1','FORCER ALGO 2','INVERSER ALGO'];
+  let detailsHTML=`
+<div class="det-row"><span class="det-label">Jeu fourni</span><span class="det-val">#N${r.num}</span></div>
+<div class="det-row"><span class="det-label">Jeu prédit</span><span class="det-val">#N${r.nextNum}</span></div>
+<div class="det-row"><span class="det-label">Heure jeu prédit</span><span class="det-val">${String(r.nextH).padStart(2,'0')}h${String(r.nextM).padStart(2,'0')}</span></div>
+<div class="det-row"><span class="det-label">Avant-dernier chiffre #N${r.nextNum}</span><span class="det-val hi-green">${r.avantDernier} (${r.avantDernier%2===0?'PAIR':'IMPAIR'})</span></div>
+<div class="det-row"><span class="det-label">Dernier chiffre #N${r.nextNum}</span><span class="det-val hi-green">${r.dernierDigit}</span></div>
 <hr class="det-sep">
-<div class="det-row"><span class="det-label">ALGO BASE</span><span class="det-val hi">ALGO ${r.base.baseAlgo} · ${fibOverrideLabel} → ALGO FINAL ${r.base.algo} (${r.base.algoEven?'PAIR':'IMPAIR'})</span></div>
-<div class="det-row"><span class="det-label">1ère carte Banquier (P2)</span><span class="det-val">${r.base.p2First.val}${SUIT_EMOJI[r.base.p2First.suit]}</span></div>
-<div class="det-row"><span class="det-label">Règle parité moteur</span><span class="det-val hi-violet">${r.base.rule}</span></div>
-<div class="det-row"><span class="det-label">Après transformation moteur</span><span class="det-val hi-violet">${SUIT_EMOJI[r.base.p2First.suit]} → ${SUIT_EMOJI[r.base.transformed]}</span></div>
+<div class="det-row"><span class="det-label" style="color:#ffe066">🃏 Révélation détectée ce jeu (#N${r.num})</span><span class="det-val" style="color:#ffe066">${r.isRevelationGame?'OUI (format 3-3)':'NON'}</span></div>
+<div class="det-row"><span class="det-label" style="color:#ffe066">Régime avant ce calcul</span><span class="det-val" style="color:#ffe066">${r.regimeBefore.source}</span></div>
+<div class="det-row"><span class="det-label" style="color:#ffe066">Régime après ce calcul</span><span class="det-val" style="color:#ffe066">${r.regimeSnapshot.source}</span></div>
+<div class="det-row"><span class="det-label" style="color:#77ffaa">Parité #N${r.nextNum}</span><span class="det-val" style="color:#77ffaa">${r.nextParity}</span></div>
+<div class="det-row"><span class="det-label" style="color:#77ffaa">MOTEUR ROUTÉ</span><span class="det-val" style="color:#77ffaa">${r.algoUsed}</span></div>
 <hr class="det-sep">
-<div class="det-row"><span class="det-label" style="color:#ffe066">🃏 RÉGIME RÉVÉLATION</span><span class="det-val" style="color:#ffe066">${r.regimeSnapshot.source}</span></div>
-<div class="det-row"><span class="det-label" style="color:#ffe066">Routage</span><span class="det-val" style="color:#ffe066">${r.algoUsed} (parité prochain N°=${r.nextParity} vs parité régime=${r.regimeSnapshot.revelationParity})</span></div>
-${r.algoUsed==='ALGO2'?`<div class="det-row"><span class="det-label" style="color:#ffe066">Inversion ALGO2</span><span class="det-val" style="color:#ffe066">${SUIT_EMOJI[r.base.transformed]} → ${SUIT_EMOJI[r.engineSuit]}</span></div>`:''}
+<div class="det-row"><span class="det-label" style="color:#80e080">🎯 SOUS-MOTEUR SÉLECTIONNÉ</span><span class="det-val hi-green">${r.subEngine}</span></div>
+<div class="det-row"><span class="det-label" style="color:#80e080">INV FINALE PRÉVUE</span><span class="det-val hi-green">${r.sel.invLabel}</span></div>
 <hr class="det-sep">
-<div class="det-row"><span class="det-label" style="color:#d4bfff">◆ RÈGLE COMBO</span><span class="det-val" style="color:#d4bfff">RÈGLE ${r.decision.regle} — ${r.decision.cond}</span></div>
-<div class="det-row"><span class="det-label" style="color:#d4bfff">Cible finale</span><span class="det-val" style="color:#d4bfff">${r.decision.target}</span></div>
-${r.exceptionInfo?`<div class="det-row"><span class="det-label" style="color:#ff9999">⚠ EXCEPTION</span><span class="det-val" style="color:#ff9999">${r.exceptionInfo.reason} → ${r.exceptionInfo.label} — ${SUIT_EMOJI[r.exceptionInfo.before]} → ${SUIT_EMOJI[r.exceptionInfo.result]}</span></div>`:''}
+<div class="det-row"><span class="det-label">Signe H&M (${ar.time})</span><span class="det-val hi">${ar.sHM}</span></div>
+<div class="det-row"><span class="det-label">P1 — ${ar.p1First.val}${SUIT_EMOJI[ar.p1First.suit]} couleur</span><span class="det-val">${p1c}</span></div>
+<div class="det-row"><span class="det-label">P2 — ${ar.p2First.val}${SUIT_EMOJI[ar.p2First.suit]} couleur</span><span class="det-val">${p2c}</span></div>
+<div class="det-row"><span class="det-label">Même couleur P1/P2 ?</span><span class="det-val">${ar.sameCol?'OUI':'NON'} → ${ar.sColor}</span></div>
+<div class="det-row"><span class="det-label">H&M × Couleur</span><span class="det-val">${ar.sHM} × ${ar.sColor} = ${ar.sTotal} → BASE ALGO ${ar.baseAlgo}</span></div>
 <hr class="det-sep">
-${rattrapageInfo?`<div class="det-row"><span class="det-label" style="color:#ff9999">🆘 RATTRAPAGE</span><span class="det-val" style="color:#ff9999">Tentative ${rattrapageInfo.attempt}/${rattrapageInfo.maxAttempts} — ${SUIT_EMOJI[rattrapageInfo.suit]} redonnée telle quelle, sans recalcul du moteur ni de la règle combo${rattrapageInfo.attempt>=rattrapageInfo.maxAttempts?' — dernière chance':''}</span></div>
-<hr class="det-sep">`:''}
-<div class="det-row"><span class="det-label">RÉSULTAT FINAL [${r.algoUsed}]</span><span class="det-val det-result">#N${r.nextNum} — ${SUIT_EMOJI[finalSuit]} ${SUIT_NAMES[finalSuit]} · ${side}</span></div>`;
+<div class="det-row"><span class="det-label">Fibonacci — graine ${ar.fibSeed}</span><span class="det-val hi-blue">F[${ar.fibIdx}]=${ar.fibVal} → mod4=${ar.fibMod}</span></div>
+<div class="det-row"><span class="det-label">Action Fibonacci</span><span class="det-val hi-blue">${fibModLabels[ar.fibMod]}</span></div>
+<div class="det-row"><span class="det-label">ALGO FINAL</span><span class="det-val hi">ALGO ${ar.algo} (${ar.algoEven?'PAIR':'IMPAIR'})</span></div>
+<hr class="det-sep">
+<div class="det-row"><span class="det-label">Réduction #N${r.nextNum}</span><span class="det-val hi-blue">${ar.reduceSteps.join(' → ')} → ${ar.reducedDigit} (${ar.numEven?'PAIR':'IMPAIR'})</span></div>
+<div class="det-row"><span class="det-label">1ère carte Banquier (P2)</span><span class="det-val">${ar.p2First.val}${SUIT_EMOJI[ar.p2First.suit]}</span></div>
+<div class="det-row"><span class="det-label">Règle parité</span><span class="det-val hi-violet">${ar.rule}</span></div>
+<div class="det-row"><span class="det-label">Après transformation</span><span class="det-val hi-violet">${SUIT_EMOJI[ar.p2First.suit]} → ${SUIT_EMOJI[ar.transformed]}</span></div>
+<hr class="det-sep">
+<div class="det-row"><span class="det-label">Résultat brut (avant inv finale)</span><span class="det-val">${SUIT_EMOJI[ar.rawResult]}</span></div>
+<div class="det-row"><span class="det-label" style="color:#ff99ff">✦ INV FINALE — ${r.sel.invLabel}</span><span class="det-val hi-pink">${r.finalInv.detail}</span></div>`;
+
+  if(r.hyperGlobal){
+    detailsHTML+=`
+<hr class="det-sep">
+<div class="det-row"><span class="det-label" style="color:#ffaaff">⚡⚡ HYPER GLOBAL (3 chiffres)</span><span class="det-val" style="color:#ffaaff">${r.hyperGlobal.active?'ACTIF':'INACTIF'}</span></div>
+<div class="det-row"><span class="det-label" style="color:#ffaaff">MIN 1er chiffre</span><span class="det-val" style="color:#ffaaff">${r.hyperGlobal.minFirstDigit} (${r.hyperGlobal.minFirstImp?'IMPAIR':'PAIR'})</span></div>
+${r.hyperGlobal.active?`<div class="det-row"><span class="det-label" style="color:#ffaaff">Règle</span><span class="det-val" style="color:#ffaaff">${r.hyperGlobal.hgLabel}</span></div>
+<div class="det-row"><span class="det-label" style="color:#ffaaff">Après HYPER GLOBAL</span><span class="det-val" style="color:#ffaaff">${SUIT_EMOJI[r.hyperGlobal.before]} → ${SUIT_EMOJI[r.hyperGlobal.result]}</span></div>`:''}`;
+  }
+  if(r.milieuRule){
+    detailsHTML+=`
+<hr class="det-sep">
+<div class="det-row"><span class="det-label" style="color:#66eeff">◉ MILIEU (3 chiffres)</span><span class="det-val" style="color:#66eeff">${r.milieuRule.active?'ACTIF':'INACTIF'}</span></div>
+<div class="det-row"><span class="det-label" style="color:#66eeff">2ème chiffre N°${r.nextNum}</span><span class="det-val" style="color:#66eeff">${r.milieuRule.milieuDigit} (${r.milieuRule.active?'PAIR':'IMPAIR'})</span></div>
+${r.milieuRule.active?`<div class="det-row"><span class="det-label" style="color:#66eeff">Règle</span><span class="det-val" style="color:#66eeff">${r.milieuRule.label}</span></div>
+<div class="det-row"><span class="det-label" style="color:#66eeff">Après MILIEU PAIR</span><span class="det-val" style="color:#66eeff">${SUIT_EMOJI[r.milieuRule.before]} → ${SUIT_EMOJI[r.milieuRule.result]}</span></div>`:''}`;
+  }
+
+  detailsHTML+=`
+<hr class="det-sep">
+<div class="det-row"><span class="det-label">CIBLE</span><span class="det-val det-result">P1 (JOUEUR) — calcul brut, aucun autre traitement</span></div>
+<div class="det-row"><span class="det-label">RÉSULTAT FINAL</span><span class="det-val det-result">#N${r.nextNum} — ${SUIT_EMOJI[displaySuit]} ${SUIT_NAMES[displaySuit]} — P1</span></div>`;
 
   document.getElementById('details-body').innerHTML=detailsHTML;
 
@@ -1060,10 +1033,9 @@ ${rattrapageInfo?`<div class="det-row"><span class="det-label" style="color:#ff9
 
 function copyPrediction(){
   const num=document.getElementById('res-num').textContent;
-  const side=document.getElementById('res-side').textContent;
   const emoji=document.getElementById('res-suit-emoji').textContent;
   const engineTag = lastCalcResult ? ` [${lastCalcResult.algoUsed}]` : '';
-  navigator.clipboard.writeText(`${num}${emoji}${side}${engineTag}`).then(()=>{
+  navigator.clipboard.writeText(`${num} ${emoji} P1${engineTag}`).then(()=>{
     const btn=document.getElementById('btn-copy');
     btn.textContent='✓ COPIÉ';btn.classList.add('copied');
     setTimeout(()=>{btn.textContent='⧉ COPIER LA PRÉDICTION';btn.classList.remove('copied');},1800);
@@ -1120,24 +1092,6 @@ async function demarrerLive(){
     if(telegramHistoryCache.length < 2) throw new Error('Pas assez de jeux récupérés depuis Telegram.');
 
     statusBox.textContent = `${telegramHistoryCache.length} jeux chargés · calcul des statistiques globales…`;
-
-    // ── Rejoue depuis le DÉBUT du cache pour reconstruire le régime RÉVÉLATION
-    //    dans l'ordre chronologique (chaque 3-3 met à jour la table de routage) ──
-    resetRegime();
-    for(let i=0;i<telegramHistoryCache.length;i++){
-      const g = telegramHistoryCache[i];
-      try{
-        const {num,p1,p2} = parseGame(g.normalized || g.raw_text);
-        if(isRevelationFormat(p1,p2)){
-          regime.revelationNum = num;
-          regime.revelationParity = (num % 2 === 0) ? 'PAIR' : 'IMPAIR';
-          regime.anticipated = false;
-          regime.source = `#N${num} (reconstituée depuis l'historique Telegram)`;
-        }
-      }catch(e){ /* jeu illisible : ignoré pour la reconstruction du régime */ }
-    }
-    updateRegimeDisplay();
-
     globalBacktestStats = computeGlobalBacktestStats(telegramHistoryCache, 50);
 
     const n = telegramHistoryCache.length;
@@ -1158,7 +1112,7 @@ async function demarrerLive(){
       if(entry){
         if(entry.status===null){
           let actualSuits;
-          try{ actualSuits = actualOutcomeSuits(curr, entry.side||pred.side); }catch(e){ skipped++; continue; }
+          try{ actualSuits = actualOutcomeSuits(curr); }catch(e){ skipped++; continue; }
           if(!actualSuits){ skipped++; continue; }
           entry.status = actualSuits.has(entry.suitKey) ? 'valid' : 'invalid';
           entry.autoResolved = true;
@@ -1166,13 +1120,13 @@ async function demarrerLive(){
         }
       } else {
         let actualSuits;
-        try{ actualSuits = actualOutcomeSuits(curr, pred.side); }catch(e){ skipped++; continue; }
+        try{ actualSuits = actualOutcomeSuits(curr); }catch(e){ skipped++; continue; }
         if(!actualSuits){ skipped++; continue; }
         const st = actualSuits.has(pred.suit) ? 'valid' : 'invalid';
         st==='valid' ? validCount++ : invalidCount++;
         list.unshift({
           id: Date.now()+'-'+Math.random().toString(36).slice(2,7),
-          gameNum: curr.game_number, suitKey: pred.suit, side: pred.side, algoTag:'',
+          gameNum: curr.game_number, suitKey: pred.suit, side:'P1',
           status:st, autoResolved:true, source:'live-seed',
           ts:new Date().toISOString()
         });
@@ -1183,7 +1137,7 @@ async function demarrerLive(){
 
     statusBox.textContent = `✅ LIVE démarré · ${telegramHistoryCache.length} jeux Telegram analysés · `
       + `15 dernières parties : ${validCount} validées / ${invalidCount} ratées`
-      + `${skipped?` (${skipped} ignorées)`:''} · Régime RÉVÉLATION reconstitué : ${regime.source}.`;
+      + `${skipped?` (${skipped} ignorées)`:''} · Statistiques globales recalculées.`;
   }catch(e){
     statusBox.textContent = '✕ Erreur : '+e.message;
   }finally{
@@ -1209,8 +1163,7 @@ async function fetchLatestTelegramGame(silent=false){
     setLiveSource(data);
 
     // ── Le message Telegram peut être édité en cours de manche (⏰/▶) : on ne
-    //    calcule que lorsque les données sont réellement finalisées et exploitables,
-    //    OU lorsqu'on peut anticiper avec certitude une RÉVÉLATION en cours ──
+    //    calcule que lorsque les données sont réellement finalisées et exploitables ──
     const readiness = checkGameReadiness(data.raw_text || data.normalized);
     if(!readiness.usable){
       setLiveStatus(`⏳ #N${data.game_number} en cours · ${readiness.detail || 'en attente de fin de manche…'}`);
@@ -1220,7 +1173,7 @@ async function fetchLatestTelegramGame(silent=false){
     document.getElementById('game-input').value = data.normalized;
     const isNewUsable = liveLastUsableGameNum !== data.game_number;
     liveLastUsableGameNum = data.game_number;
-    setLiveStatus(`Canal synchronisé · ${isNewUsable ? 'jeu exploitable détecté' : 'dernier jeu (déjà traité) confirmé'} · #N${data.game_number}${readiness.anticipatedRevelation?' · 🃏 RÉVÉLATION ANTICIPÉE':''}`);
+    setLiveStatus(`Canal synchronisé · ${isNewUsable ? 'jeu terminé détecté' : 'dernier jeu (déjà traité) confirmé'} · #N${data.game_number}`);
     if(isNewUsable || !silent){
       calculate();
     }

@@ -332,9 +332,13 @@
   <div class="regime-card">
     <div id="regime-status"></div>
     <div class="regime-manual">
-      <input type="text" id="manual-revel-num" placeholder="Ex: 866 (définir manuellement une révélation)">
+      <input type="text" id="manual-revel-num" placeholder="Override manuel (optionnel) — détection auto prioritaire">
       <button class="btn-mini" onclick="setManualRevelation()">Définir</button>
       <button class="btn-mini reset" onclick="resetRegime()">Réinitialiser</button>
+      <button class="btn-mini" onclick="endRattrapage()" style="border-color:#c9a84c;color:#ffbf80">Fin rattrapage</button>
+    </div>
+    <div style="font-size:.72rem;color:var(--ivory-dim);margin-top:10px;line-height:1.45;letter-spacing:.04em">
+      🃏 Révélation = jeu format <b style="color:var(--gold)">3-3</b> (P1 et P2 à 3 cartes). Détectée automatiquement dans chaque calcul, la synchro Telegram et au démarrage LIVE. Le routage ALGO1/ALGO2 suit la parité de la dernière révélation.
     </div>
   </div>
 
@@ -403,20 +407,135 @@ function isRed(s){ return s==='♥️'||s==='♦️'; }
 //  Règle : si parité(prochain N°) === regime.revelationParity → ALGO1, sinon → ALGO2.
 //  Par défaut (aucune révélation détectée) : PAIR→ALGO1 / IMPAIR→ALGO2.
 // ══════════════════════════════════════════════════════
-let regime = {
-  revelationNum: null,
-  revelationParity: 'PAIR',
-  source: 'Aucune (réglage par défaut : PAIR→ALGO1 / IMPAIR→ALGO2)'
-};
+const REGIME_KEY = 'orgbacc_regime_revelation_v1';
+function loadRegime(){
+  try{
+    const raw = localStorage.getItem(REGIME_KEY);
+    if(!raw) return { revelationNum: null, revelationParity: 'PAIR', source: 'Aucune (réglage par défaut : PAIR→ALGO1 / IMPAIR→ALGO2)' };
+    const o = JSON.parse(raw);
+    return {
+      revelationNum: o.revelationNum != null ? o.revelationNum : null,
+      revelationParity: o.revelationParity === 'IMPAIR' ? 'IMPAIR' : 'PAIR',
+      source: o.source || 'Aucune (réglage par défaut : PAIR→ALGO1 / IMPAIR→ALGO2)'
+    };
+  }catch(e){
+    return { revelationNum: null, revelationParity: 'PAIR', source: 'Aucune (réglage par défaut : PAIR→ALGO1 / IMPAIR→ALGO2)' };
+  }
+}
+function saveRegime(){
+  try{ localStorage.setItem(REGIME_KEY, JSON.stringify(regime)); }catch(e){}
+}
+let regime = loadRegime();
+
+// Détecte automatiquement la dernière RÉVÉLATION (format 3-3) dans une liste de jeux
+// et met à jour le régime de routage ALGO1/ALGO2. Retourne le n° trouvé ou null.
+function applyRevelationFromGameRaw(raw, sourceLabel){
+  if(!raw) return null;
+  try{
+    const {num,p1,p2} = parseGame(raw);
+    if(p1.length===3 && p2.length===3){
+      regime.revelationNum = num;
+      regime.revelationParity = (num % 2 === 0) ? 'PAIR' : 'IMPAIR';
+      regime.source = sourceLabel || `#N${num} (détectée automatiquement, format 3-3)`;
+      saveRegime();
+      updateRegimeDisplay();
+      return num;
+    }
+  }catch(e){}
+  return null;
+}
+
+// Parcourt l'historique (du plus récent au plus ancien) pour trouver la dernière révélation 3-3
+function scanHistoryForLatestRevelation(history){
+  if(!history || !history.length) return null;
+  // history trié croissant → on part de la fin
+  for(let i=history.length-1;i>=0;i--){
+    const g = history[i];
+    const raw = g.normalized || g.raw_text;
+    const found = applyRevelationFromGameRaw(raw, `#N${g.game_number || '?'} (détectée auto dans l'historique Telegram)`);
+    if(found != null) return found;
+  }
+  return null;
+}
+
+// ── RATTRAPAGE : si un ALGO perd, on le réutilise jusqu'à 3 fois, puis retour au routage normal ──
+const RATTRAPAGE_KEY = 'orgbacc_rattrapage_v1';
+const RATTRAPAGE_MAX = 3;
+function loadRattrapage(){
+  try{
+    const raw = localStorage.getItem(RATTRAPAGE_KEY);
+    if(!raw) return { active:false, algo:null, remaining:0, startedAt:null };
+    const o = JSON.parse(raw);
+    return {
+      active: !!o.active,
+      algo: o.algo || null,
+      remaining: Math.max(0, parseInt(o.remaining,10)||0),
+      startedAt: o.startedAt || null
+    };
+  }catch(e){ return { active:false, algo:null, remaining:0, startedAt:null }; }
+}
+function saveRattrapage(r){
+  try{ localStorage.setItem(RATTRAPAGE_KEY, JSON.stringify(r)); }catch(e){}
+}
+let rattrapage = loadRattrapage();
+
+function startRattrapage(algo){
+  if(!algo) return;
+  // Si déjà en rattrapage sur le même algo, on ne réinitialise pas le compteur
+  // (chaque perte ne relance pas un nouveau cycle de 3)
+  if(rattrapage.active && rattrapage.algo === algo && rattrapage.remaining > 0){
+    updateRegimeDisplay();
+    return;
+  }
+  rattrapage = {
+    active: true,
+    algo: algo,
+    remaining: RATTRAPAGE_MAX,
+    startedAt: new Date().toISOString()
+  };
+  saveRattrapage(rattrapage);
+  updateRegimeDisplay();
+}
+function endRattrapage(){
+  rattrapage = { active:false, algo:null, remaining:0, startedAt:null };
+  saveRattrapage(rattrapage);
+  updateRegimeDisplay();
+}
+function consumeRattrapageAttempt(){
+  if(!rattrapage.active) return;
+  rattrapage.remaining = Math.max(0, rattrapage.remaining - 1);
+  if(rattrapage.remaining <= 0){
+    // Dernière tentative consommée : après cette prédiction, le système reprend son cours
+    rattrapage.active = false;
+    rattrapage.algo = null;
+  }
+  saveRattrapage(rattrapage);
+  updateRegimeDisplay();
+}
 
 function updateRegimeDisplay(){
   const el = document.getElementById('regime-status');
   if(!el) return;
   const p1parity = regime.revelationParity;
   const p2parity = p1parity==='PAIR' ? 'IMPAIR' : 'PAIR';
+  let rattrapageHtml = '';
+  if(rattrapage.active && rattrapage.algo){
+    rattrapageHtml = `
+    <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #7a6028">
+      <span class="regime-label" style="color:#ffbf80">⏱ RATTRAPAGE ACTIF</span>
+      <span class="regime-val" style="color:#ffbf80">${rattrapage.algo} · ${rattrapage.remaining} tentative(s) restante(s)</span>
+    </div>`;
+  } else {
+    rattrapageHtml = `
+    <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #2a1a1a">
+      <span class="regime-label">Rattrapage</span>
+      <span class="regime-val" style="color:var(--ivory-dim)">Inactif (max ${RATTRAPAGE_MAX} après une perte)</span>
+    </div>`;
+  }
   el.innerHTML = `
     <div class="regime-row"><span class="regime-label">Dernière révélation</span><span class="regime-val">${regime.source}</span></div>
     <div class="regime-row"><span class="regime-label">Table de routage active</span><span class="regime-val">${p1parity} → ALGO1&nbsp;&nbsp;|&nbsp;&nbsp;${p2parity} → ALGO2</span></div>
+    ${rattrapageHtml}
   `;
 }
 function setManualRevelation(){
@@ -426,10 +545,13 @@ function setManualRevelation(){
   regime.revelationNum = n;
   regime.revelationParity = (n % 2 === 0) ? 'PAIR' : 'IMPAIR';
   regime.source = `#N${n} (définie manuellement)`;
+  saveRegime();
   updateRegimeDisplay();
 }
 function resetRegime(){
   regime = { revelationNum: null, revelationParity: 'PAIR', source: 'Aucune (réglage par défaut : PAIR→ALGO1 / IMPAIR→ALGO2)' };
+  saveRegime();
+  endRattrapage();
   updateRegimeDisplay();
 }
 
@@ -451,7 +573,7 @@ function saveHistory(list){
 // Une seule entrée par numéro de jeu prédit : si elle existe déjà et est encore
 // en attente, on la met à jour (pas de doublon) ; si elle est déjà résolue, on n'y touche pas ;
 // sinon on la crée.
-function upsertHistoryEntry(gameNum, suitKey, algoUsed){
+function upsertHistoryEntry(gameNum, suitKey, algoUsed, isRattrapage){
   const list = loadHistory();
   const existing = list.find(e=>e.gameNum===gameNum);
 
@@ -459,6 +581,7 @@ function upsertHistoryEntry(gameNum, suitKey, algoUsed){
     if(existing.status===null){
       existing.suitKey = suitKey;
       existing.algoUsed = algoUsed;
+      if(isRattrapage) existing.rattrapage = true;
       saveHistory(list);
       renderHistory();
     }
@@ -469,6 +592,7 @@ function upsertHistoryEntry(gameNum, suitKey, algoUsed){
     id: Date.now() + '-' + Math.random().toString(36).slice(2,7),
     gameNum, suitKey, side:'P1', algoUsed,
     status: null, // null=en attente | 'valid' | 'invalid'
+    rattrapage: !!isRattrapage,
     ts: new Date().toISOString()
   });
   saveHistory(list);
@@ -479,9 +603,16 @@ function setHistoryStatus(id, status){
   const list = loadHistory();
   const entry = list.find(e=>e.id===id);
   if(!entry) return;
-  entry.status = (entry.status === status) ? null : status; // re-cliquer annule
+  const nextStatus = (entry.status === status) ? null : status; // re-cliquer annule
+  entry.status = nextStatus;
   saveHistory(list);
   renderHistory();
+  // Rattrapage : perte → forcer le même ALGO (max 3) ; gain → fin du rattrapage
+  if(nextStatus === 'invalid' && entry.algoUsed){
+    startRattrapage(entry.algoUsed);
+  } else if(nextStatus === 'valid' && rattrapage.active){
+    endRattrapage();
+  }
 }
 
 function clearHistory(){
@@ -503,6 +634,12 @@ function resolvePendingHistory(gameNum, p1Cards){
   entry.actualSuits = [...actualSuits];
   saveHistory(list);
   renderHistory();
+  // Rattrapage auto : perte → même ALGO (max 3) ; gain → fin
+  if(entry.status === 'invalid' && entry.algoUsed){
+    startRattrapage(entry.algoUsed);
+  } else if(entry.status === 'valid' && rattrapage.active){
+    endRattrapage();
+  }
   return entry;
 }
 
@@ -594,7 +731,7 @@ function renderHistory(){
     <div class="history-item ${statusClass}">
       <span class="hist-num">#N${e.gameNum}</span>
       <span class="hist-suit" style="color:${red?'#cc4444':'var(--ivory)'}">${emoji}</span>
-      <span class="hist-label">P1${e.algoUsed?` <span class="hist-tag">[${e.algoUsed}]</span>`:''}${e.source==='live-seed'?` <span class="hist-tag hist-live">🔴 LIVE</span>`:(e.autoResolved?` <span class="hist-tag">auto</span>`:'')}</span>
+      <span class="hist-label">P1${e.algoUsed?` <span class="hist-tag">[${e.algoUsed}]</span>`:''}${e.rattrapage?` <span class="hist-tag" style="color:#ffbf80">⏱ RATTR</span>`:''}${e.source==='live-seed'?` <span class="hist-tag hist-live">🔴 LIVE</span>`:(e.autoResolved?` <span class="hist-tag">auto</span>`:'')}</span>
       <div class="hist-actions">
         <button class="hist-btn valid-btn ${e.status==='valid'?'active':''}" title="Validée chez le joueur" onclick="setHistoryStatus('${e.id}','valid')">✓</button>
         <button class="hist-btn invalid-btn ${e.status==='invalid'?'active':''}" title="Non passée" onclick="setHistoryStatus('${e.id}','invalid')">✕</button>
@@ -794,19 +931,25 @@ function runEngine(num, p1Cards, p2Cards, nextNum){
 function runCalc(raw){
   const {num,p1,p2}=parseGame(raw);
 
-  // ── Détection RÉVÉLATION : 3 cartes P1 ET 3 cartes P2 (format 3-3) ──
+  // ── Détection RÉVÉLATION automatique : 3 cartes P1 ET 3 cartes P2 (format 3-3) ──
+  // Le régime se met à jour tout seul — pas besoin de saisie manuelle
   const isRevelationGame = (p1.length===3 && p2.length===3);
   const regimeBefore = { ...regime };
   if(isRevelationGame){
     regime.revelationNum = num;
     regime.revelationParity = (num % 2 === 0) ? 'PAIR' : 'IMPAIR';
-    regime.source = `#N${num} (détectée automatiquement dans ce calcul)`;
+    regime.source = `#N${num} (détectée automatiquement, format 3-3)`;
+    saveRegime();
   }
 
   const nextNum=num+1;
   const nextParity = (nextNum % 2 === 0) ? 'PAIR' : 'IMPAIR';
   // Règle de relais : parité(prochain N°) === parité(dernière révélation) → ALGO1, sinon ALGO2
-  const algoUsed = (nextParity === regime.revelationParity) ? 'ALGO1' : 'ALGO2';
+  // RATTRAPAGE : si actif, on force le même ALGO qui a perdu (max 3 tentatives)
+  const normalAlgo = (nextParity === regime.revelationParity) ? 'ALGO1' : 'ALGO2';
+  const inRattrapage = rattrapage.active && rattrapage.algo && rattrapage.remaining > 0;
+  const algoUsed = inRattrapage ? rattrapage.algo : normalAlgo;
+  const rattrapageForced = inRattrapage;
 
   const nextH=Math.floor((nextNum-1)/60)%24;
   const nextM=(nextNum-1)%60;
@@ -902,8 +1045,14 @@ function runCalc(raw){
     }
   }
 
+  // Snapshot rattrapage (la consommation se fait uniquement dans calculate(), pas en backtest)
+  const rattrapageSnapshot = inRattrapage
+    ? { forced:true, algo:algoUsed, remainingBefore:rattrapage.remaining, remainingAfter:Math.max(0, rattrapage.remaining-1) }
+    : { forced:false, algo:null, remainingBefore:0, remainingAfter:0 };
+
   return {num,p1,p2,nextNum,nextH,nextM,avantDernier,dernierDigit,sel,subEngine,algoResult,finalInv,finalSuit,
-          hyperGlobal,milieuRule,temporalInv,isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime}};
+          hyperGlobal,milieuRule,temporalInv,isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime},
+          rattrapageForced,rattrapageSnapshot,normalAlgo};
 }
 
 function showError(msg){const b=document.getElementById('error-box');b.textContent='⚠ '+msg;b.style.display='block';}
@@ -951,13 +1100,20 @@ function calculate(){
   btn.classList.add('loading');btn.textContent='⟳ CALCUL EN COURS…';
   setTimeout(()=>{
     try{
+      // 1) Valider d'abord la prédiction en attente pour CE jeu (peut activer le rattrapage)
+      const parsed = parseGame(raw);
+      const autoVal = resolvePendingHistory(parsed.num, parsed.p1);
+      showAutoValidationFeedback(autoVal);
+
+      // 2) Calculer la prédiction suivante (prend en compte un rattrapage éventuellement activé)
       const r=runCalc(raw);
       lastCalcResult=r;
-      updateRegimeDisplay();
 
-      // ── Auto-validation de la prédiction précédente en attente (toujours côté P1) ──
-      const autoVal = resolvePendingHistory(r.num, r.p1);
-      showAutoValidationFeedback(autoVal);
+      // 3) Consommer une tentative de rattrapage si cette prédiction a été forcée
+      if(r.rattrapageForced){
+        consumeRattrapageAttempt();
+      }
+      updateRegimeDisplay();
 
       renderResult(r);
       document.getElementById('game-input').value='';
@@ -977,7 +1133,7 @@ function renderResult(r){
   document.getElementById('res-suit-label').textContent=SUIT_NAMES[displaySuit]||'';
   document.getElementById('res-side').innerHTML=`<span class="side-tag">P1</span>`;
 
-  upsertHistoryEntry(r.nextNum, displaySuit, r.algoUsed);
+  upsertHistoryEntry(r.nextNum, displaySuit, r.algoUsed, r.rattrapageForced);
 
   const hParite=(r.nextH%2===0)?'PAIR':'IMPAIR';
   const avantDernierParite=r.avantDernier%2===0?'PAIR':'IMPAIR';
@@ -989,7 +1145,10 @@ function renderResult(r){
 
   const badges=[
     `<div class="badge badge-revelation">🃏 RÉVÉLATION — ${r.isRevelationGame?`DÉTECTÉE sur ce jeu (#N${r.num}, format 3-3)`:'aucune révélation sur ce jeu'} · Régime actif : ${r.regimeSnapshot.source}</div>`,
-    `<div class="badge badge-engine">◆ ROUTAGE — Prochain #N${r.nextNum} (${r.nextParity}) vs régime (${r.regimeSnapshot.revelationParity}) → ${r.algoUsed} PRÉDIT P1</div>`,
+    `<div class="badge badge-engine">◆ ROUTAGE — Prochain #N${r.nextNum} (${r.nextParity}) vs régime (${r.regimeSnapshot.revelationParity}) → ${r.algoUsed} PRÉDIT P1${r.rattrapageForced?` · ⏱ RATTRAPAGE (${r.rattrapageSnapshot.remainingBefore}→${r.rattrapageSnapshot.remainingAfter})`:''}</div>`,
+    ...(r.rattrapageForced
+      ? [`<div class="badge badge-temporal">⏱ RATTRAPAGE — ${r.algoUsed} forcé (même algo après perte) · tentatives restantes après ce coup : ${r.rattrapageSnapshot.remainingAfter}/${RATTRAPAGE_MAX}</div>`]
+      : []),
     `<div class="badge badge-selector">🎯 SÉLECTEUR — ${selectorLine}</div>`,
     `<div class="badge badge-algo">⚙ ALGO INTERNE — BASE : ALGO ${ar.baseAlgo} · ${fibOverrideLabel} → ALGO FINAL : ALGO ${ar.algo}</div>`,
     `<div class="badge badge-parity">◈ PARITÉ — ALGO ${algoParity} · #N${r.nextNum} RÉDUIT = ${ar.reduceSteps.join(' → ')} → ${numParity}</div>`,
@@ -1025,7 +1184,9 @@ function renderResult(r){
 <div class="det-row"><span class="det-label" style="color:#ffe066">Régime avant ce calcul</span><span class="det-val" style="color:#ffe066">${r.regimeBefore.source}</span></div>
 <div class="det-row"><span class="det-label" style="color:#ffe066">Régime après ce calcul</span><span class="det-val" style="color:#ffe066">${r.regimeSnapshot.source}</span></div>
 <div class="det-row"><span class="det-label" style="color:#77ffaa">Parité #N${r.nextNum}</span><span class="det-val" style="color:#77ffaa">${r.nextParity}</span></div>
-<div class="det-row"><span class="det-label" style="color:#77ffaa">MOTEUR ROUTÉ</span><span class="det-val" style="color:#77ffaa">${r.algoUsed}</span></div>
+<div class="det-row"><span class="det-label" style="color:#77ffaa">MOTEUR ROUTÉ (normal)</span><span class="det-val" style="color:#77ffaa">${r.normalAlgo || r.algoUsed}</span></div>
+<div class="det-row"><span class="det-label" style="color:#ffbf80">⏱ RATTRAPAGE</span><span class="det-val" style="color:#ffbf80">${r.rattrapageForced?`ACTIF → ${r.algoUsed} forcé (${r.rattrapageSnapshot.remainingBefore}→${r.rattrapageSnapshot.remainingAfter} restant)`:'INACTIF'}</span></div>
+<div class="det-row"><span class="det-label" style="color:#77ffaa">MOTEUR UTILISÉ</span><span class="det-val" style="color:#77ffaa">${r.algoUsed}${r.rattrapageForced?' (rattrapage)':''}</span></div>
 <hr class="det-sep">
 <div class="det-row"><span class="det-label" style="color:#80e080">🎯 SOUS-MOTEUR SÉLECTIONNÉ</span><span class="det-val hi-green">${r.subEngine}</span></div>
 <div class="det-row"><span class="det-label" style="color:#80e080">INV FINALE PRÉVUE</span><span class="det-val hi-green">${r.sel.invLabel}</span></div>
@@ -1147,6 +1308,11 @@ async function demarrerLive(){
     telegramHistoryCache = (data.games||[]).slice().sort((a,b)=>a.game_number-b.game_number);
     if(telegramHistoryCache.length < 2) throw new Error('Pas assez de jeux récupérés depuis Telegram.');
 
+    // Détection automatique de la dernière RÉVÉLATION (3-3) dans les 150 jeux
+    statusBox.textContent = `${telegramHistoryCache.length} jeux chargés · détection des révélations…`;
+    const lastRevel = scanHistoryForLatestRevelation(telegramHistoryCache);
+    updateRegimeDisplay();
+
     statusBox.textContent = `${telegramHistoryCache.length} jeux chargés · calcul des statistiques globales…`;
     globalBacktestStats = computeGlobalBacktestStats(telegramHistoryCache, 50);
 
@@ -1191,9 +1357,12 @@ async function demarrerLive(){
     saveHistory(list);
     renderHistory();
 
+    const revelInfo = lastRevel != null
+      ? ` · Révélation auto #N${lastRevel} (${regime.revelationParity}) → routage ALGO actif`
+      : ` · Aucune révélation 3-3 trouvée (routage par défaut)`;
     statusBox.textContent = `✅ LIVE démarré · ${telegramHistoryCache.length} jeux Telegram analysés · `
       + `15 dernières parties : ${validCount} validées / ${invalidCount} ratées`
-      + `${skipped?` (${skipped} ignorées)`:''} · Statistiques globales recalculées.`;
+      + `${skipped?` (${skipped} ignorées)`:''}${revelInfo}`;
   }catch(e){
     statusBox.textContent = '✕ Erreur : '+e.message;
   }finally{
@@ -1227,9 +1396,12 @@ async function fetchLatestTelegramGame(silent=false){
     }
 
     document.getElementById('game-input').value = data.normalized;
+    // Détection auto révélation 3-3 sur le dernier jeu (régime mis à jour sans saisie manuelle)
+    applyRevelationFromGameRaw(data.normalized || data.raw_text, `#N${data.game_number} (détectée auto via Telegram)`);
     const isNewUsable = liveLastUsableGameNum !== data.game_number;
     liveLastUsableGameNum = data.game_number;
-    setLiveStatus(`Canal synchronisé · ${isNewUsable ? 'jeu terminé détecté' : 'dernier jeu (déjà traité) confirmé'} · #N${data.game_number}`);
+    const revelTag = regime.revelationNum != null ? ` · régime #N${regime.revelationNum} (${regime.revelationParity})` : '';
+    setLiveStatus(`Canal synchronisé · ${isNewUsable ? 'jeu terminé détecté' : 'dernier jeu (déjà traité) confirmé'} · #N${data.game_number}${revelTag}`);
     if(isNewUsable || !silent){
       calculate();
     }

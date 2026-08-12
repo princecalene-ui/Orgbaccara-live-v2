@@ -1004,21 +1004,21 @@ function runCalc(raw){
   let baseAlgo = (nextParity === regime.revelationParity) ? 'ALGO1' : 'ALGO2';
 
   // ── Bascule ALGO selon les 2 derniers chiffres du n° prédit ──
-  // NORMAL (✅)     : 00–19, 40–59, 60–79
-  // INVERSION (❗️) : 20–39, 80–99  → ALGO1 ↔ ALGO2
+  // NORMAL (✅)     : 20–39, 60–79
+  // INVERSION (❗️) : 00–19, 40–59, 80–99  → ALGO1 ↔ ALGO2
   const lastTwo = nextNum % 100;
   let digitSwap = false;
   let digitZone = '';
-  if(lastTwo >= 20 && lastTwo <= 39){
-    digitSwap = true; digitZone = '20-39';
-  } else if(lastTwo >= 80 && lastTwo <= 99){
-    digitSwap = true; digitZone = '80-99';
-  } else if(lastTwo <= 19){
-    digitZone = '00-19';
-  } else if(lastTwo <= 59){
-    digitZone = '40-59';
-  } else {
+  if(lastTwo <= 19){
+    digitSwap = true; digitZone = '00-19';
+  } else if(lastTwo >= 20 && lastTwo <= 39){
+    digitZone = '20-39';
+  } else if(lastTwo >= 40 && lastTwo <= 59){
+    digitSwap = true; digitZone = '40-59';
+  } else if(lastTwo >= 60 && lastTwo <= 79){
     digitZone = '60-79';
+  } else {
+    digitSwap = true; digitZone = '80-99';
   }
   const algoBeforeDigit = baseAlgo;
   if(digitSwap){

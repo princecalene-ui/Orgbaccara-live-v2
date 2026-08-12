@@ -460,7 +460,7 @@ function scanHistoryForLatestRevelation(history){
 
 // ── RATTRAPAGE : si un ALGO perd, on le réutilise jusqu'à 3 fois, puis retour au routage normal ──
 const RATTRAPAGE_KEY = 'orgbacc_rattrapage_v1';
-const RATTRAPAGE_MAX = 3;
+const RATTRAPAGE_MAX = 2; // max 2 rattrapages puis retour à zéro
 function emptyRattrapage(){
   return { active:false, algo:null, remaining:0, startedAt:null, lostSuit:null, lostColor:null };
 }
@@ -484,24 +484,38 @@ function saveRattrapage(r){
 }
 let rattrapage = loadRattrapage();
 
-// Inversion de rattrapage selon la couleur du jeu perdu (référence) et la couleur prédite :
+// Inversion de rattrapage selon couleur/suit du jeu perdu et la pred :
 //  perdu ROUGE + pred ♦️ → ♠️ | perdu ROUGE + pred ♥️ → ♣️
 //  perdu NOIR  + pred ♥️ → ♣️ | perdu NOIR  + pred ♦️ → ♠️
-//  (prédictions noires ♠️/♣️ : pas d'inversion spécifiée → inchangé)
-function applyRattrapageInv(predSuit, lostColor){
+//  perdu ROUGE + pred ♠️/♣️ → BRUT
+//  perdu ♠️ + pred ♠️ → ♣️ | perdu ♣️ + pred ♣️ → ♣️
+//  autres pred noires → BRUT
+function applyRattrapageInv(predSuit, lostColor, lostSuit){
   if(!predSuit) return { result:predSuit, applied:false, detail:'pas de couleur prédite' };
-  const isPredRed = isRed(predSuit);
-  if(!isPredRed){
-    return { result:predSuit, applied:false, detail:`pred ${SUIT_EMOJI[predSuit]} noir → pas d'inv rattrapage` };
+  const predEmoji = SUIT_EMOJI[predSuit] || predSuit;
+  const lostEmoji = lostSuit ? (SUIT_EMOJI[lostSuit] || lostSuit) : '?';
+  const ref = lostColor === 'rouge' ? 'ROUGE ♥️/♦️' : (lostColor === 'noir' ? 'NOIR ♠️/♣️' : 'inconnu');
+
+  // Même noir que le jeu perdu
+  if(lostSuit === '♠️' && predSuit === '♠️'){
+    return { result:'♣️', applied:true, detail:`réf. perdu ${lostEmoji} · pred ${predEmoji} → inv ♣️` };
   }
-  // ♥️ → ♣️ , ♦️ → ♠️ (même mapping pour référence rouge ou noire d'après les règles)
+  if(lostSuit === '♣️' && predSuit === '♣️'){
+    return { result:'♣️', applied:false, detail:`réf. perdu ${lostEmoji} · pred ${predEmoji} → ♣️ (identique)` };
+  }
+
+  // Pred noire (autres cas) → brut
+  if(!isRed(predSuit)){
+    return { result:predSuit, applied:false, detail:`réf. perdu ${ref} · pred ${predEmoji} noir → brut (pas d'inv)` };
+  }
+
+  // Pred rouge → inv vers noir
   const map = { '♥️':'♣️', '♦️':'♠️' };
   const result = map[predSuit] || predSuit;
-  const ref = lostColor === 'rouge' ? 'ROUGE ♥️/♦️' : (lostColor === 'noir' ? 'NOIR ♠️/♣️' : 'inconnu');
   return {
     result,
     applied: result !== predSuit,
-    detail: `réf. perdu ${ref} · pred ${SUIT_EMOJI[predSuit]} → inv ${SUIT_EMOJI[result]}`
+    detail: `réf. perdu ${ref} (${lostEmoji}) · pred ${predEmoji} → inv ${SUIT_EMOJI[result] || result}`
   };
 }
 
@@ -518,7 +532,7 @@ function onPredictionLost(algo, suitKey){
     updateRegimeDisplay();
     return;
   }
-  // Nouvelle série de rattrapage (max 3)
+  // Nouvelle série de rattrapage (max 2)
   rattrapage = {
     active: true,
     algo: algo,
@@ -565,7 +579,7 @@ function updateRegimeDisplay(){
     </div>
     <div class="regime-row">
       <span class="regime-label" style="color:#ffbf80">Réf. jeu perdu</span>
-      <span class="regime-val" style="color:#ffbf80">${refSuit} (${refCol}) → inv ♥️→♣️ / ♦️→♠️</span>
+      <span class="regime-val" style="color:#ffbf80">${refSuit} (${refCol}) · inv rouge→noir · ♠️=♠️→♣️</span>
     </div>`;
   } else {
     rattrapageHtml = `
@@ -1091,7 +1105,7 @@ function runCalc(raw){
   // Appliquée uniquement si on est en cycle de rattrapage
   let rattrapageInv = null;
   if(inRattrapage){
-    const inv = applyRattrapageInv(finalSuit, rattrapage.lostColor);
+    const inv = applyRattrapageInv(finalSuit, rattrapage.lostColor, rattrapage.lostSuit);
     rattrapageInv = {
       active: inv.applied,
       lostSuit: rattrapage.lostSuit,

@@ -1001,8 +1001,42 @@ function runCalc(raw){
   const nextNum=num+1;
   const nextParity = (nextNum % 2 === 0) ? 'PAIR' : 'IMPAIR';
   // Règle de relais : parité(prochain N°) === parité(dernière révélation) → ALGO1, sinon ALGO2
-  // RATTRAPAGE : si actif, on force le même ALGO qui a perdu (max 3 tentatives)
-  const normalAlgo = (nextParity === regime.revelationParity) ? 'ALGO1' : 'ALGO2';
+  let baseAlgo = (nextParity === regime.revelationParity) ? 'ALGO1' : 'ALGO2';
+
+  // ── Bascule ALGO selon les 2 derniers chiffres du n° prédit ──
+  // NORMAL (✅)     : 00–19, 40–59, 60–79
+  // INVERSION (❗️) : 20–39, 80–99  → ALGO1 ↔ ALGO2
+  const lastTwo = nextNum % 100;
+  let digitSwap = false;
+  let digitZone = '';
+  if(lastTwo >= 20 && lastTwo <= 39){
+    digitSwap = true; digitZone = '20-39';
+  } else if(lastTwo >= 80 && lastTwo <= 99){
+    digitSwap = true; digitZone = '80-99';
+  } else if(lastTwo <= 19){
+    digitZone = '00-19';
+  } else if(lastTwo <= 59){
+    digitZone = '40-59';
+  } else {
+    digitZone = '60-79';
+  }
+  const algoBeforeDigit = baseAlgo;
+  if(digitSwap){
+    baseAlgo = (baseAlgo === 'ALGO1') ? 'ALGO2' : 'ALGO1';
+  }
+  const digitAlgoRule = {
+    lastTwo,
+    zone: digitZone,
+    swap: digitSwap,
+    before: algoBeforeDigit,
+    after: baseAlgo,
+    label: digitSwap
+      ? `2 derniers chiffres ${String(lastTwo).padStart(2,'0')} (${digitZone}) → INV ALGO ${algoBeforeDigit}↔${baseAlgo}`
+      : `2 derniers chiffres ${String(lastTwo).padStart(2,'0')} (${digitZone}) → NORMAL (pas de bascule)`
+  };
+
+  // RATTRAPAGE : si actif, on force le même ALGO qui a perdu (max 2 tentatives) — prioritaire sur la bascule
+  const normalAlgo = baseAlgo;
   const inRattrapage = rattrapage.active && rattrapage.algo && rattrapage.remaining > 0;
   const algoUsed = inRattrapage ? rattrapage.algo : normalAlgo;
   const rattrapageForced = inRattrapage;
@@ -1131,7 +1165,7 @@ function runCalc(raw){
 
   return {num,p1,p2,nextNum,nextH,nextM,avantDernier,dernierDigit,sel,subEngine,algoResult,finalInv,finalSuit,
           hyperGlobal,milieuRule,temporalInv,rattrapageInv,isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime},
-          rattrapageForced,rattrapageSnapshot,normalAlgo};
+          rattrapageForced,rattrapageSnapshot,normalAlgo,digitAlgoRule};
 }
 
 function showError(msg){const b=document.getElementById('error-box');b.textContent='⚠ '+msg;b.style.display='block';}
@@ -1225,6 +1259,11 @@ function renderResult(r){
   const badges=[
     `<div class="badge badge-revelation">🃏 RÉVÉLATION — ${r.isRevelationGame?`DÉTECTÉE sur ce jeu (#N${r.num}, format 3-3)`:'aucune révélation sur ce jeu'} · Régime actif : ${r.regimeSnapshot.source}</div>`,
     `<div class="badge badge-engine">◆ ROUTAGE — Prochain #N${r.nextNum} (${r.nextParity}) vs régime (${r.regimeSnapshot.revelationParity}) → ${r.algoUsed} PRÉDIT P1${r.rattrapageForced?` · ⏱ RATTRAPAGE (${r.rattrapageSnapshot.remainingBefore}→${r.rattrapageSnapshot.remainingAfter})`:''}</div>`,
+    ...(r.digitAlgoRule
+      ? [r.digitAlgoRule.swap
+          ? `<div class="badge badge-transform">⇄ BASCULE 2 DERNIERS CHIFFRES — ${r.digitAlgoRule.label}</div>`
+          : `<div class="badge badge-transform" style="opacity:.55">⇄ 2 DERNIERS CHIFFRES — ${r.digitAlgoRule.label}</div>`]
+      : []),
     ...(r.rattrapageForced
       ? [`<div class="badge badge-temporal">⏱ RATTRAPAGE — ${r.algoUsed} forcé · réf. perdu ${r.rattrapageSnapshot.lostSuit?SUIT_EMOJI[r.rattrapageSnapshot.lostSuit]:'?'} (${r.rattrapageSnapshot.lostColor||'?'}) · restant ${r.rattrapageSnapshot.remainingAfter}/${RATTRAPAGE_MAX}${r.rattrapageInv&&r.rattrapageInv.active?` · inv ${SUIT_EMOJI[r.rattrapageInv.before]}→${SUIT_EMOJI[r.rattrapageInv.result]}`:''}</div>`]
       : []),
@@ -1263,7 +1302,9 @@ function renderResult(r){
 <div class="det-row"><span class="det-label" style="color:#ffe066">Régime avant ce calcul</span><span class="det-val" style="color:#ffe066">${r.regimeBefore.source}</span></div>
 <div class="det-row"><span class="det-label" style="color:#ffe066">Régime après ce calcul</span><span class="det-val" style="color:#ffe066">${r.regimeSnapshot.source}</span></div>
 <div class="det-row"><span class="det-label" style="color:#77ffaa">Parité #N${r.nextNum}</span><span class="det-val" style="color:#77ffaa">${r.nextParity}</span></div>
-<div class="det-row"><span class="det-label" style="color:#77ffaa">MOTEUR ROUTÉ (normal)</span><span class="det-val" style="color:#77ffaa">${r.normalAlgo || r.algoUsed}</span></div>
+${r.digitAlgoRule?`<div class="det-row"><span class="det-label" style="color:#e0bf59">⇄ 2 derniers chiffres</span><span class="det-val" style="color:#e0bf59">${String(r.digitAlgoRule.lastTwo).padStart(2,'0')} (${r.digitAlgoRule.zone}) · ${r.digitAlgoRule.swap?'INV ALGO':'NORMAL'}</span></div>
+<div class="det-row"><span class="det-label" style="color:#e0bf59">Bascule ALGO</span><span class="det-val" style="color:#e0bf59">${r.digitAlgoRule.swap?`${r.digitAlgoRule.before} → ${r.digitAlgoRule.after}`:'aucune'}</span></div>`:''}
+<div class="det-row"><span class="det-label" style="color:#77ffaa">MOTEUR ROUTÉ (après bascule)</span><span class="det-val" style="color:#77ffaa">${r.normalAlgo || r.algoUsed}</span></div>
 <div class="det-row"><span class="det-label" style="color:#ffbf80">⏱ RATTRAPAGE</span><span class="det-val" style="color:#ffbf80">${r.rattrapageForced?`ACTIF → ${r.algoUsed} forcé (${r.rattrapageSnapshot.remainingBefore}→${r.rattrapageSnapshot.remainingAfter} restant)`:'INACTIF'}</span></div>
 ${r.rattrapageForced?`<div class="det-row"><span class="det-label" style="color:#ffbf80">Réf. jeu perdu</span><span class="det-val" style="color:#ffbf80">${r.rattrapageSnapshot.lostSuit?SUIT_EMOJI[r.rattrapageSnapshot.lostSuit]:'—'} (${r.rattrapageSnapshot.lostColor||'?'})</span></div>`:''}
 ${r.rattrapageInv?`<div class="det-row"><span class="det-label" style="color:#ffbf80">Inv. rattrapage</span><span class="det-val" style="color:#ffbf80">${r.rattrapageInv.detail}${r.rattrapageInv.active?` · ${SUIT_EMOJI[r.rattrapageInv.before]}→${SUIT_EMOJI[r.rattrapageInv.result]}`:''}</span></div>`:''}

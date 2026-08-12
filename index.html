@@ -461,43 +461,80 @@ function scanHistoryForLatestRevelation(history){
 // ── RATTRAPAGE : si un ALGO perd, on le réutilise jusqu'à 3 fois, puis retour au routage normal ──
 const RATTRAPAGE_KEY = 'orgbacc_rattrapage_v1';
 const RATTRAPAGE_MAX = 3;
+function emptyRattrapage(){
+  return { active:false, algo:null, remaining:0, startedAt:null, lostSuit:null, lostColor:null };
+}
 function loadRattrapage(){
   try{
     const raw = localStorage.getItem(RATTRAPAGE_KEY);
-    if(!raw) return { active:false, algo:null, remaining:0, startedAt:null };
+    if(!raw) return emptyRattrapage();
     const o = JSON.parse(raw);
     return {
       active: !!o.active,
       algo: o.algo || null,
       remaining: Math.max(0, parseInt(o.remaining,10)||0),
-      startedAt: o.startedAt || null
+      startedAt: o.startedAt || null,
+      lostSuit: o.lostSuit || null,
+      lostColor: o.lostColor || null
     };
-  }catch(e){ return { active:false, algo:null, remaining:0, startedAt:null }; }
+  }catch(e){ return emptyRattrapage(); }
 }
 function saveRattrapage(r){
   try{ localStorage.setItem(RATTRAPAGE_KEY, JSON.stringify(r)); }catch(e){}
 }
 let rattrapage = loadRattrapage();
 
-function startRattrapage(algo){
+// Inversion de rattrapage selon la couleur du jeu perdu (référence) et la couleur prédite :
+//  perdu ROUGE + pred ♦️ → ♠️ | perdu ROUGE + pred ♥️ → ♣️
+//  perdu NOIR  + pred ♥️ → ♣️ | perdu NOIR  + pred ♦️ → ♠️
+//  (prédictions noires ♠️/♣️ : pas d'inversion spécifiée → inchangé)
+function applyRattrapageInv(predSuit, lostColor){
+  if(!predSuit) return { result:predSuit, applied:false, detail:'pas de couleur prédite' };
+  const isPredRed = isRed(predSuit);
+  if(!isPredRed){
+    return { result:predSuit, applied:false, detail:`pred ${SUIT_EMOJI[predSuit]} noir → pas d'inv rattrapage` };
+  }
+  // ♥️ → ♣️ , ♦️ → ♠️ (même mapping pour référence rouge ou noire d'après les règles)
+  const map = { '♥️':'♣️', '♦️':'♠️' };
+  const result = map[predSuit] || predSuit;
+  const ref = lostColor === 'rouge' ? 'ROUGE ♥️/♦️' : (lostColor === 'noir' ? 'NOIR ♠️/♣️' : 'inconnu');
+  return {
+    result,
+    applied: result !== predSuit,
+    detail: `réf. perdu ${ref} · pred ${SUIT_EMOJI[predSuit]} → inv ${SUIT_EMOJI[result]}`
+  };
+}
+
+// Déclenché à chaque perte : 1ère perte = démarre le cycle ; perte en rattrapage = la pred ratée devient la nouvelle référence
+function onPredictionLost(algo, suitKey){
   if(!algo) return;
-  // Si déjà en rattrapage sur le même algo, on ne réinitialise pas le compteur
-  // (chaque perte ne relance pas un nouveau cycle de 3)
-  if(rattrapage.active && rattrapage.algo === algo && rattrapage.remaining > 0){
+  const color = suitKey ? (isRed(suitKey) ? 'rouge' : 'noir') : null;
+  if(rattrapage.active && rattrapage.remaining > 0){
+    // Rattrapage N a perdu → il devient le "jeu perdu" pour le rattrapage N+1
+    rattrapage.lostSuit = suitKey || rattrapage.lostSuit;
+    rattrapage.lostColor = color || rattrapage.lostColor;
+    if(algo) rattrapage.algo = algo;
+    saveRattrapage(rattrapage);
     updateRegimeDisplay();
     return;
   }
+  // Nouvelle série de rattrapage (max 3)
   rattrapage = {
     active: true,
     algo: algo,
     remaining: RATTRAPAGE_MAX,
-    startedAt: new Date().toISOString()
+    startedAt: new Date().toISOString(),
+    lostSuit: suitKey || null,
+    lostColor: color
   };
   saveRattrapage(rattrapage);
   updateRegimeDisplay();
 }
+function startRattrapage(algo, suitKey){
+  onPredictionLost(algo, suitKey);
+}
 function endRattrapage(){
-  rattrapage = { active:false, algo:null, remaining:0, startedAt:null };
+  rattrapage = emptyRattrapage();
   saveRattrapage(rattrapage);
   updateRegimeDisplay();
 }
@@ -506,8 +543,7 @@ function consumeRattrapageAttempt(){
   rattrapage.remaining = Math.max(0, rattrapage.remaining - 1);
   if(rattrapage.remaining <= 0){
     // Dernière tentative consommée : après cette prédiction, le système reprend son cours
-    rattrapage.active = false;
-    rattrapage.algo = null;
+    rattrapage = emptyRattrapage();
   }
   saveRattrapage(rattrapage);
   updateRegimeDisplay();
@@ -520,16 +556,22 @@ function updateRegimeDisplay(){
   const p2parity = p1parity==='PAIR' ? 'IMPAIR' : 'PAIR';
   let rattrapageHtml = '';
   if(rattrapage.active && rattrapage.algo){
+    const refSuit = rattrapage.lostSuit ? (SUIT_EMOJI[rattrapage.lostSuit]||rattrapage.lostSuit) : '—';
+    const refCol = rattrapage.lostColor === 'rouge' ? 'ROUGE' : (rattrapage.lostColor === 'noir' ? 'NOIR' : '?');
     rattrapageHtml = `
     <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #7a6028">
       <span class="regime-label" style="color:#ffbf80">⏱ RATTRAPAGE ACTIF</span>
-      <span class="regime-val" style="color:#ffbf80">${rattrapage.algo} · ${rattrapage.remaining} tentative(s) restante(s)</span>
+      <span class="regime-val" style="color:#ffbf80">${rattrapage.algo} · ${rattrapage.remaining}/${RATTRAPAGE_MAX} restant(s)</span>
+    </div>
+    <div class="regime-row">
+      <span class="regime-label" style="color:#ffbf80">Réf. jeu perdu</span>
+      <span class="regime-val" style="color:#ffbf80">${refSuit} (${refCol}) → inv ♥️→♣️ / ♦️→♠️</span>
     </div>`;
   } else {
     rattrapageHtml = `
     <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #2a1a1a">
       <span class="regime-label">Rattrapage</span>
-      <span class="regime-val" style="color:var(--ivory-dim)">Inactif (max ${RATTRAPAGE_MAX} après une perte)</span>
+      <span class="regime-val" style="color:var(--ivory-dim)">Inactif (max ${RATTRAPAGE_MAX} · inv selon couleur perdue)</span>
     </div>`;
   }
   el.innerHTML = `
@@ -607,9 +649,9 @@ function setHistoryStatus(id, status){
   entry.status = nextStatus;
   saveHistory(list);
   renderHistory();
-  // Rattrapage : perte → forcer le même ALGO (max 3) ; gain → fin du rattrapage
+  // Rattrapage : perte → même ALGO + inv couleur (max 3) ; gain → fin
   if(nextStatus === 'invalid' && entry.algoUsed){
-    startRattrapage(entry.algoUsed);
+    onPredictionLost(entry.algoUsed, entry.suitKey);
   } else if(nextStatus === 'valid' && rattrapage.active){
     endRattrapage();
   }
@@ -634,9 +676,9 @@ function resolvePendingHistory(gameNum, p1Cards){
   entry.actualSuits = [...actualSuits];
   saveHistory(list);
   renderHistory();
-  // Rattrapage auto : perte → même ALGO (max 3) ; gain → fin
+  // Rattrapage auto : perte → même ALGO + inv couleur (max 3) ; gain → fin
   if(entry.status === 'invalid' && entry.algoUsed){
-    startRattrapage(entry.algoUsed);
+    onPredictionLost(entry.algoUsed, entry.suitKey);
   } else if(entry.status === 'valid' && rattrapage.active){
     endRattrapage();
   }
@@ -1045,13 +1087,36 @@ function runCalc(raw){
     }
   }
 
+  // ── INV RATTRAPAGE (basée sur la couleur du jeu perdu) ──
+  // Appliquée uniquement si on est en cycle de rattrapage
+  let rattrapageInv = null;
+  if(inRattrapage){
+    const inv = applyRattrapageInv(finalSuit, rattrapage.lostColor);
+    rattrapageInv = {
+      active: inv.applied,
+      lostSuit: rattrapage.lostSuit,
+      lostColor: rattrapage.lostColor,
+      before: finalSuit,
+      result: inv.result,
+      detail: inv.detail
+    };
+    finalSuit = inv.result;
+  }
+
   // Snapshot rattrapage (la consommation se fait uniquement dans calculate(), pas en backtest)
   const rattrapageSnapshot = inRattrapage
-    ? { forced:true, algo:algoUsed, remainingBefore:rattrapage.remaining, remainingAfter:Math.max(0, rattrapage.remaining-1) }
-    : { forced:false, algo:null, remainingBefore:0, remainingAfter:0 };
+    ? {
+        forced:true,
+        algo:algoUsed,
+        remainingBefore:rattrapage.remaining,
+        remainingAfter:Math.max(0, rattrapage.remaining-1),
+        lostSuit:rattrapage.lostSuit,
+        lostColor:rattrapage.lostColor
+      }
+    : { forced:false, algo:null, remainingBefore:0, remainingAfter:0, lostSuit:null, lostColor:null };
 
   return {num,p1,p2,nextNum,nextH,nextM,avantDernier,dernierDigit,sel,subEngine,algoResult,finalInv,finalSuit,
-          hyperGlobal,milieuRule,temporalInv,isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime},
+          hyperGlobal,milieuRule,temporalInv,rattrapageInv,isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime},
           rattrapageForced,rattrapageSnapshot,normalAlgo};
 }
 
@@ -1147,7 +1212,7 @@ function renderResult(r){
     `<div class="badge badge-revelation">🃏 RÉVÉLATION — ${r.isRevelationGame?`DÉTECTÉE sur ce jeu (#N${r.num}, format 3-3)`:'aucune révélation sur ce jeu'} · Régime actif : ${r.regimeSnapshot.source}</div>`,
     `<div class="badge badge-engine">◆ ROUTAGE — Prochain #N${r.nextNum} (${r.nextParity}) vs régime (${r.regimeSnapshot.revelationParity}) → ${r.algoUsed} PRÉDIT P1${r.rattrapageForced?` · ⏱ RATTRAPAGE (${r.rattrapageSnapshot.remainingBefore}→${r.rattrapageSnapshot.remainingAfter})`:''}</div>`,
     ...(r.rattrapageForced
-      ? [`<div class="badge badge-temporal">⏱ RATTRAPAGE — ${r.algoUsed} forcé (même algo après perte) · tentatives restantes après ce coup : ${r.rattrapageSnapshot.remainingAfter}/${RATTRAPAGE_MAX}</div>`]
+      ? [`<div class="badge badge-temporal">⏱ RATTRAPAGE — ${r.algoUsed} forcé · réf. perdu ${r.rattrapageSnapshot.lostSuit?SUIT_EMOJI[r.rattrapageSnapshot.lostSuit]:'?'} (${r.rattrapageSnapshot.lostColor||'?'}) · restant ${r.rattrapageSnapshot.remainingAfter}/${RATTRAPAGE_MAX}${r.rattrapageInv&&r.rattrapageInv.active?` · inv ${SUIT_EMOJI[r.rattrapageInv.before]}→${SUIT_EMOJI[r.rattrapageInv.result]}`:''}</div>`]
       : []),
     `<div class="badge badge-selector">🎯 SÉLECTEUR — ${selectorLine}</div>`,
     `<div class="badge badge-algo">⚙ ALGO INTERNE — BASE : ALGO ${ar.baseAlgo} · ${fibOverrideLabel} → ALGO FINAL : ALGO ${ar.algo}</div>`,
@@ -1186,6 +1251,8 @@ function renderResult(r){
 <div class="det-row"><span class="det-label" style="color:#77ffaa">Parité #N${r.nextNum}</span><span class="det-val" style="color:#77ffaa">${r.nextParity}</span></div>
 <div class="det-row"><span class="det-label" style="color:#77ffaa">MOTEUR ROUTÉ (normal)</span><span class="det-val" style="color:#77ffaa">${r.normalAlgo || r.algoUsed}</span></div>
 <div class="det-row"><span class="det-label" style="color:#ffbf80">⏱ RATTRAPAGE</span><span class="det-val" style="color:#ffbf80">${r.rattrapageForced?`ACTIF → ${r.algoUsed} forcé (${r.rattrapageSnapshot.remainingBefore}→${r.rattrapageSnapshot.remainingAfter} restant)`:'INACTIF'}</span></div>
+${r.rattrapageForced?`<div class="det-row"><span class="det-label" style="color:#ffbf80">Réf. jeu perdu</span><span class="det-val" style="color:#ffbf80">${r.rattrapageSnapshot.lostSuit?SUIT_EMOJI[r.rattrapageSnapshot.lostSuit]:'—'} (${r.rattrapageSnapshot.lostColor||'?'})</span></div>`:''}
+${r.rattrapageInv?`<div class="det-row"><span class="det-label" style="color:#ffbf80">Inv. rattrapage</span><span class="det-val" style="color:#ffbf80">${r.rattrapageInv.detail}${r.rattrapageInv.active?` · ${SUIT_EMOJI[r.rattrapageInv.before]}→${SUIT_EMOJI[r.rattrapageInv.result]}`:''}</span></div>`:''}
 <div class="det-row"><span class="det-label" style="color:#77ffaa">MOTEUR UTILISÉ</span><span class="det-val" style="color:#77ffaa">${r.algoUsed}${r.rattrapageForced?' (rattrapage)':''}</span></div>
 <hr class="det-sep">
 <div class="det-row"><span class="det-label" style="color:#80e080">🎯 SOUS-MOTEUR SÉLECTIONNÉ</span><span class="det-val hi-green">${r.subEngine}</span></div>

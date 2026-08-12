@@ -874,7 +874,7 @@ function signHM(h,m){
 //  Tranches horaires :
 //    GROUPE A : 00h–09h59
 //    GROUPE B : 10h–19h59
-//    GROUPE C : 20h–23h59 = tables de A, puis inv résultat ♣️↔♠️ / ♦️↔♥️
+//    GROUPE C : 20h–23h59 = tables de A, puis inv résultat ♣️↔♥️ / ♦️↔♠️
 // ══════════════════════════════════════════════════════
 function selectSystem(nextH, nextM, nextNum){
   const hPair = (nextH % 2 === 0);
@@ -1147,17 +1147,17 @@ function runCalc(raw){
     }
   }
 
-  // ── GROUPE C (20h–23h59) : résultat type A, puis inv ♣️↔♠️ / ♦️↔♥️ ──
+  // ── GROUPE C (20h–23h59) : résultat type A, puis inv ♣️↔♥️ / ♦️↔♠️ ──
   let groupCInv = null;
   if(sel.groupC){
-    const cMap = {'♣️':'♠️','♠️':'♣️','♦️':'♥️','♥️':'♦️'};
+    const cMap = {'♣️':'♥️','♥️':'♣️','♦️':'♠️','♠️':'♦️'};
     const before = finalSuit;
     const result = cMap[finalSuit] || finalSuit;
     groupCInv = {
       active: true,
       before,
       result,
-      detail: `GROUPE C (H=${nextH}) = A inversé → ♣️↔♠️ / ♦️↔♥️ · ${SUIT_EMOJI[before]}→${SUIT_EMOJI[result]}`
+      detail: `GROUPE C (H=${nextH}) = A inversé → ♣️↔♥️ / ♦️↔♠️ · ${SUIT_EMOJI[before]}→${SUIT_EMOJI[result]}`
     };
     finalSuit = result;
   }
@@ -1279,7 +1279,7 @@ function renderResult(r){
   const avantDernierParite=r.avantDernier%2===0?'PAIR':'IMPAIR';
   const minTranche=r.nextM<=11?'00-11':'12-59';
   const grpLetter = (r.sel && r.sel.group) ? r.sel.group : ((r.nextH>=20&&r.nextH<=23)?'C':(r.nextH<=9?'A':'B'));
-  const grpBand = grpLetter==='C' ? '20-23 (=A + inv ♣️↔♠️/♦️↔♥️)' : (grpLetter==='A' ? '00-09' : '10-19');
+  const grpBand = grpLetter==='C' ? '20-23 (=A + inv ♣️↔♥️/♦️↔♠️)' : (grpLetter==='A' ? '00-09' : '10-19');
   const selectorLine=`GROUPE ${grpLetter} [${grpBand}] · H=${r.nextH}(${hParite}) · AV-DERN=${r.avantDernier}(${avantDernierParite}) · MIN=${r.nextM}(${minTranche}) → ${r.subEngine} + ${r.sel.invLabel}`;
   const fibOverrideLabel=ar.fibMod===0?'ALGO NORMAL CONSERVÉ':ar.fibMod===1?'FIB FORCE ALGO 1':ar.fibMod===2?'FIB FORCE ALGO 2':'FIB INVERSE ALGO';
   const algoParity=ar.algoEven?`${ar.algo} (PAIR)`:`${ar.algo} (IMPAIR)`;
@@ -1391,7 +1391,7 @@ ${r.temporalInv.active?`<div class="det-row"><span class="det-label" style="colo
     detailsHTML+=`
 <hr class="det-sep">
 <div class="det-row"><span class="det-label" style="color:#80e080">🅲 GROUPE C (20h–23h59)</span><span class="det-val" style="color:#80e080">ACTIF</span></div>
-<div class="det-row"><span class="det-label" style="color:#80e080">Principe</span><span class="det-val" style="color:#80e080">Tables A + inv ♣️↔♠️ / ♦️↔♥️</span></div>
+<div class="det-row"><span class="det-label" style="color:#80e080">Principe</span><span class="det-val" style="color:#80e080">Tables A + inv ♣️↔♥️ / ♦️↔♠️</span></div>
 <div class="det-row"><span class="det-label" style="color:#80e080">Après GROUPE C</span><span class="det-val" style="color:#80e080">${SUIT_EMOJI[r.groupCInv.before]} → ${SUIT_EMOJI[r.groupCInv.result]}</span></div>`;
   }
 

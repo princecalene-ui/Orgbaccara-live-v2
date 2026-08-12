@@ -519,12 +519,15 @@ function applyRattrapageInv(predSuit, lostColor, lostSuit){
   };
 }
 
-// Déclenché à chaque perte : 1ère perte = démarre le cycle ; perte en rattrapage = la pred ratée devient la nouvelle référence
-function onPredictionLost(algo, suitKey){
+// Déclenché à chaque perte :
+// - 1ère perte (pred normale) → démarre cycle max 2
+// - perte rattr1 (encore remaining) → met à jour la réf pour rattr2
+// - perte rattr2 (cycle terminé) → PAS de rattr3 : prochain = brut
+function onPredictionLost(algo, suitKey, wasRattrapageEntry){
   if(!algo) return;
   const color = suitKey ? (isRed(suitKey) ? 'rouge' : 'noir') : null;
   if(rattrapage.active && rattrapage.remaining > 0){
-    // Rattrapage N a perdu → il devient le "jeu perdu" pour le rattrapage N+1
+    // Rattrapage N a perdu → il devient le "jeu perdu" pour le rattrapage N+1 (si remaining le permet)
     rattrapage.lostSuit = suitKey || rattrapage.lostSuit;
     rattrapage.lostColor = color || rattrapage.lostColor;
     if(algo) rattrapage.algo = algo;
@@ -532,7 +535,14 @@ function onPredictionLost(algo, suitKey){
     updateRegimeDisplay();
     return;
   }
-  // Nouvelle série de rattrapage (max 2)
+  // Cycle déjà terminé (rattr2 consommé) : si c'est encore une pred de rattrapage qui perd → on reste à zéro (brut)
+  if(wasRattrapageEntry){
+    rattrapage = emptyRattrapage();
+    saveRattrapage(rattrapage);
+    updateRegimeDisplay();
+    return;
+  }
+  // Nouvelle série de rattrapage (max 2) — uniquement après une perte hors rattrapage
   rattrapage = {
     active: true,
     algo: algo,
@@ -545,7 +555,7 @@ function onPredictionLost(algo, suitKey){
   updateRegimeDisplay();
 }
 function startRattrapage(algo, suitKey){
-  onPredictionLost(algo, suitKey);
+  onPredictionLost(algo, suitKey, false);
 }
 function endRattrapage(){
   rattrapage = emptyRattrapage();
@@ -663,9 +673,9 @@ function setHistoryStatus(id, status){
   entry.status = nextStatus;
   saveHistory(list);
   renderHistory();
-  // Rattrapage : perte → même ALGO + inv couleur (max 3) ; gain → fin
+  // Rattrapage : perte → même ALGO + inv couleur (max 2) ; gain → fin ; rattr2 perdu → brut
   if(nextStatus === 'invalid' && entry.algoUsed){
-    onPredictionLost(entry.algoUsed, entry.suitKey);
+    onPredictionLost(entry.algoUsed, entry.suitKey, !!entry.rattrapage);
   } else if(nextStatus === 'valid' && rattrapage.active){
     endRattrapage();
   }
@@ -690,9 +700,9 @@ function resolvePendingHistory(gameNum, p1Cards){
   entry.actualSuits = [...actualSuits];
   saveHistory(list);
   renderHistory();
-  // Rattrapage auto : perte → même ALGO + inv couleur (max 3) ; gain → fin
+  // Rattrapage auto : perte → même ALGO + inv (max 2) ; gain → fin ; rattr2 perdu → brut
   if(entry.status === 'invalid' && entry.algoUsed){
-    onPredictionLost(entry.algoUsed, entry.suitKey);
+    onPredictionLost(entry.algoUsed, entry.suitKey, !!entry.rattrapage);
   } else if(entry.status === 'valid' && rattrapage.active){
     endRattrapage();
   }
@@ -861,63 +871,65 @@ function signHM(h,m){
 
 // ══════════════════════════════════════════════════════
 //  SÉLECTEUR V4 / V5+ (interne au moteur RÉVÉLATION)
+//  Tranches horaires :
+//    GROUPE A : 00h–09h59
+//    GROUPE B : 10h–19h59
+//    GROUPE C : 20h–23h59 = tables de A, puis inv résultat ♣️↔♠️ / ♦️↔♥️
 // ══════════════════════════════════════════════════════
 function selectSystem(nextH, nextM, nextNum){
   const hPair = (nextH % 2 === 0);
   const hImp  = !hPair;
-  const groupA = [0,1,2,3,4,5,6,7,8,9,20,21,22,23,24].includes(nextH);
-  const groupB = [10,11,12,13,14,15,16,17,18,19].includes(nextH);
+  const groupA = (nextH >= 0 && nextH <= 9);
+  const groupB = (nextH >= 10 && nextH <= 19);
+  const groupC = (nextH >= 20 && nextH <= 23);
+  const groupLetter = groupC ? 'C' : (groupB ? 'B' : 'A');
+  // C utilise les mêmes tables de sélection que A
+  const useA = groupA || groupC;
   const numStr = String(nextNum);
   const avantDernierDigit = numStr.length >= 2 ? parseInt(numStr[numStr.length-2],10) : parseInt(numStr[0],10);
   const avantDernierPair  = (avantDernierDigit % 2 === 0);
   const avantDernierImp   = !avantDernierPair;
   const min0_11  = (nextM >= 0  && nextM <= 11);
   const min12_59 = (nextM >= 12 && nextM <= 59);
-  if(groupA){
+  let picked = {algo:'V4', invKey:'CD_SH', invLabel:'V4+ ♣↔♦ / ♠↔♥'};
+  if(useA){
     if(hImp){
       if(avantDernierPair){
-        if(min12_59) return {algo:'V5+', invKey:'CD_SH', invLabel:'V5++ ♣↔♦ / ♠↔♥'};
-        if(min0_11)  return {algo:'V4',  invKey:'CH_SD', invLabel:'V4+ ♣↔♥ / ♠↔♦'};
+        if(min12_59) picked = {algo:'V5+', invKey:'CD_SH', invLabel:'V5++ ♣↔♦ / ♠↔♥'};
+        else if(min0_11)  picked = {algo:'V4',  invKey:'CH_SD', invLabel:'V4+ ♣↔♥ / ♠↔♦'};
+      } else if(avantDernierImp){
+        if(min12_59) picked = {algo:'V4',  invKey:'CD_SH', invLabel:'V4+ ♣↔♦ / ♠↔♥'};
+        else if(min0_11)  picked = {algo:'V5+', invKey:'CH_SD', invLabel:'V5++ ♣↔♥ / ♠↔♦'};
       }
-      if(avantDernierImp){
-        if(min12_59) return {algo:'V4',  invKey:'CD_SH', invLabel:'V4+ ♣↔♦ / ♠↔♥'};
-        if(min0_11)  return {algo:'V5+', invKey:'CH_SD', invLabel:'V5++ ♣↔♥ / ♠↔♦'};
+    } else if(hPair){
+      if(avantDernierPair){
+        if(min12_59) picked = {algo:'V5+', invKey:'CD_SH', invLabel:'V5++ ♣↔♦ / ♠↔♥'};
+        else if(min0_11)  picked = {algo:'V5+', invKey:'CD_SH', invLabel:'V5++ ♣↔♦ / ♠↔♥'};
+      } else if(avantDernierImp){
+        if(min12_59) picked = {algo:'V5+', invKey:'CH_SD', invLabel:'V5++ ♣↔♥ / ♠↔♦'};
+        else if(min0_11)  picked = {algo:'V4',  invKey:'CH_SD', invLabel:'V4+ ♣↔♥ / ♠↔♦'};
       }
     }
+  } else if(groupB){
     if(hPair){
       if(avantDernierPair){
-        if(min12_59) return {algo:'V5+', invKey:'CD_SH', invLabel:'V5++ ♣↔♦ / ♠↔♥'};
-        if(min0_11)  return {algo:'V5+', invKey:'CD_SH', invLabel:'V5++ ♣↔♦ / ♠↔♥'};
+        if(min12_59) picked = {algo:'V5+', invKey:'CH_SD', invLabel:'V5++ ♣↔♥ / ♠↔♦'};
+        else if(min0_11)  picked = {algo:'V4',  invKey:'CD_SH', invLabel:'V4+ ♣↔♦ / ♠↔♥'};
+      } else if(avantDernierImp){
+        if(min12_59) picked = {algo:'V5+', invKey:'CD_SH', invLabel:'V5++ ♣↔♦ / ♠↔♥'};
+        else if(min0_11)  picked = {algo:'V4',  invKey:'CH_SD', invLabel:'V4+ ♣↔♥ / ♠↔♦'};
       }
-      if(avantDernierImp){
-        if(min12_59) return {algo:'V5+', invKey:'CH_SD', invLabel:'V5++ ♣↔♥ / ♠↔♦'};
-        if(min0_11)  return {algo:'V4',  invKey:'CH_SD', invLabel:'V4+ ♣↔♥ / ♠↔♦'};
+    } else if(hImp){
+      if(avantDernierPair){
+        if(min12_59) picked = {algo:'V5+', invKey:'CH_SD', invLabel:'V5++ ♣↔♥ / ♠↔♦'};
+        else if(min0_11)  picked = {algo:'V4', invKey:'SPECIAL_LAST', invLabel:'V4+ (dernier chiffre)'};
+      } else if(avantDernierImp){
+        if(min12_59) picked = {algo:'V4', invKey:'SPECIAL_LAST_NOTRANCH', invLabel:'V4+ (dernier chiffre / aucune inv si 6-9 ou 0)'};
+        else if(min0_11)  picked = {algo:'V4',  invKey:'SH_CD', invLabel:'V4+ ♠↔♥ / ♣↔♦'};
       }
     }
   }
-  if(groupB){
-    if(hPair){
-      if(avantDernierPair){
-        if(min12_59) return {algo:'V5+', invKey:'CH_SD', invLabel:'V5++ ♣↔♥ / ♠↔♦'};
-        if(min0_11)  return {algo:'V4',  invKey:'CD_SH', invLabel:'V4+ ♣↔♦ / ♠↔♥'};
-      }
-      if(avantDernierImp){
-        if(min12_59) return {algo:'V5+', invKey:'CD_SH', invLabel:'V5++ ♣↔♦ / ♠↔♥'};
-        if(min0_11)  return {algo:'V4',  invKey:'CH_SD', invLabel:'V4+ ♣↔♥ / ♠↔♦'};
-      }
-    }
-    if(hImp){
-      if(avantDernierPair){
-        if(min12_59) return {algo:'V5+', invKey:'CH_SD', invLabel:'V5++ ♣↔♥ / ♠↔♦'};
-        if(min0_11)  return {algo:'V4', invKey:'SPECIAL_LAST', invLabel:'V4+ (dernier chiffre)'};
-      }
-      if(avantDernierImp){
-        if(min12_59) return {algo:'V4', invKey:'SPECIAL_LAST_NOTRANCH', invLabel:'V4+ (dernier chiffre / aucune inv si 6-9 ou 0)'};
-        if(min0_11)  return {algo:'V4',  invKey:'SH_CD', invLabel:'V4+ ♠↔♥ / ♣↔♦'};
-      }
-    }
-  }
-  return {algo:'V4', invKey:'CD_SH', invLabel:'V4+ ♣↔♦ / ♠↔♥'};
+  return {...picked, group: groupLetter, groupC};
 }
 function applyFinalInv(suit, invKey, lastDigit){
   const CD_SH = {'♣️':'♦️','♦️':'♣️','♠️':'♥️','♥️':'♠️'};
@@ -1135,6 +1147,21 @@ function runCalc(raw){
     }
   }
 
+  // ── GROUPE C (20h–23h59) : résultat type A, puis inv ♣️↔♠️ / ♦️↔♥️ ──
+  let groupCInv = null;
+  if(sel.groupC){
+    const cMap = {'♣️':'♠️','♠️':'♣️','♦️':'♥️','♥️':'♦️'};
+    const before = finalSuit;
+    const result = cMap[finalSuit] || finalSuit;
+    groupCInv = {
+      active: true,
+      before,
+      result,
+      detail: `GROUPE C (H=${nextH}) = A inversé → ♣️↔♠️ / ♦️↔♥️ · ${SUIT_EMOJI[before]}→${SUIT_EMOJI[result]}`
+    };
+    finalSuit = result;
+  }
+
   // ── INV RATTRAPAGE (basée sur la couleur du jeu perdu) ──
   // Appliquée uniquement si on est en cycle de rattrapage
   let rattrapageInv = null;
@@ -1164,7 +1191,7 @@ function runCalc(raw){
     : { forced:false, algo:null, remainingBefore:0, remainingAfter:0, lostSuit:null, lostColor:null };
 
   return {num,p1,p2,nextNum,nextH,nextM,avantDernier,dernierDigit,sel,subEngine,algoResult,finalInv,finalSuit,
-          hyperGlobal,milieuRule,temporalInv,rattrapageInv,isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime},
+          hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime},
           rattrapageForced,rattrapageSnapshot,normalAlgo,digitAlgoRule};
 }
 
@@ -1251,7 +1278,9 @@ function renderResult(r){
   const hParite=(r.nextH%2===0)?'PAIR':'IMPAIR';
   const avantDernierParite=r.avantDernier%2===0?'PAIR':'IMPAIR';
   const minTranche=r.nextM<=11?'00-11':'12-59';
-  const selectorLine=`GROUPE ${[1,2,3,4,5,6,7,8,9,20,21,22,23,24,0].includes(r.nextH)?'A':'B'} · H=${r.nextH}(${hParite}) · AV-DERN=${r.avantDernier}(${avantDernierParite}) · MIN=${r.nextM}(${minTranche}) → ${r.subEngine} + ${r.sel.invLabel}`;
+  const grpLetter = (r.sel && r.sel.group) ? r.sel.group : ((r.nextH>=20&&r.nextH<=23)?'C':(r.nextH<=9?'A':'B'));
+  const grpBand = grpLetter==='C' ? '20-23 (=A + inv ♣️↔♠️/♦️↔♥️)' : (grpLetter==='A' ? '00-09' : '10-19');
+  const selectorLine=`GROUPE ${grpLetter} [${grpBand}] · H=${r.nextH}(${hParite}) · AV-DERN=${r.avantDernier}(${avantDernierParite}) · MIN=${r.nextM}(${minTranche}) → ${r.subEngine} + ${r.sel.invLabel}`;
   const fibOverrideLabel=ar.fibMod===0?'ALGO NORMAL CONSERVÉ':ar.fibMod===1?'FIB FORCE ALGO 1':ar.fibMod===2?'FIB FORCE ALGO 2':'FIB INVERSE ALGO';
   const algoParity=ar.algoEven?`${ar.algo} (PAIR)`:`${ar.algo} (IMPAIR)`;
   const numParity=ar.numEven?`${ar.reducedDigit} (PAIR)`:`${ar.reducedDigit} (IMPAIR)`;
@@ -1268,6 +1297,9 @@ function renderResult(r){
       ? [`<div class="badge badge-temporal">⏱ RATTRAPAGE — ${r.algoUsed} forcé · réf. perdu ${r.rattrapageSnapshot.lostSuit?SUIT_EMOJI[r.rattrapageSnapshot.lostSuit]:'?'} (${r.rattrapageSnapshot.lostColor||'?'}) · restant ${r.rattrapageSnapshot.remainingAfter}/${RATTRAPAGE_MAX}${r.rattrapageInv&&r.rattrapageInv.active?` · inv ${SUIT_EMOJI[r.rattrapageInv.before]}→${SUIT_EMOJI[r.rattrapageInv.result]}`:''}</div>`]
       : []),
     `<div class="badge badge-selector">🎯 SÉLECTEUR — ${selectorLine}</div>`,
+    ...(r.groupCInv && r.groupCInv.active
+      ? [`<div class="badge badge-transform">🅲 GROUPE C — ${r.groupCInv.detail}</div>`]
+      : []),
     `<div class="badge badge-algo">⚙ ALGO INTERNE — BASE : ALGO ${ar.baseAlgo} · ${fibOverrideLabel} → ALGO FINAL : ALGO ${ar.algo}</div>`,
     `<div class="badge badge-parity">◈ PARITÉ — ALGO ${algoParity} · #N${r.nextNum} RÉDUIT = ${ar.reduceSteps.join(' → ')} → ${numParity}</div>`,
     `<div class="badge badge-transform">⚡ RÈGLE — ${ar.rule}</div>`,
@@ -1354,6 +1386,13 @@ ${r.milieuRule.active?`<div class="det-row"><span class="det-label" style="color
 <div class="det-row"><span class="det-label" style="color:#ffd977">Heure / Minutes</span><span class="det-val" style="color:#ffd977">${String(r.temporalInv.h).padStart(2,'0')}h${String(r.temporalInv.m).padStart(2,'0')} · H ${r.temporalInv.hParity} · zone ${r.temporalInv.zone}</span></div>
 <div class="det-row"><span class="det-label" style="color:#ffd977">Règle</span><span class="det-val" style="color:#ffd977">${r.temporalInv.label}</span></div>
 ${r.temporalInv.active?`<div class="det-row"><span class="det-label" style="color:#ffd977">Après INV TEMPORELLE</span><span class="det-val" style="color:#ffd977">${SUIT_EMOJI[r.temporalInv.before]} → ${SUIT_EMOJI[r.temporalInv.result]}</span></div>`:''}`;
+  }
+  if(r.groupCInv && r.groupCInv.active){
+    detailsHTML+=`
+<hr class="det-sep">
+<div class="det-row"><span class="det-label" style="color:#80e080">🅲 GROUPE C (20h–23h59)</span><span class="det-val" style="color:#80e080">ACTIF</span></div>
+<div class="det-row"><span class="det-label" style="color:#80e080">Principe</span><span class="det-val" style="color:#80e080">Tables A + inv ♣️↔♠️ / ♦️↔♥️</span></div>
+<div class="det-row"><span class="det-label" style="color:#80e080">Après GROUPE C</span><span class="det-val" style="color:#80e080">${SUIT_EMOJI[r.groupCInv.before]} → ${SUIT_EMOJI[r.groupCInv.result]}</span></div>`;
   }
 
   detailsHTML+=`

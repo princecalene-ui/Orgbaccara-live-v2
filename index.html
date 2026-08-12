@@ -232,6 +232,8 @@
   @keyframes flicker-hyper{0%,100%{box-shadow:0 0 10px #ff44ff55}50%{box-shadow:0 0 24px #ff44ffaa}}
   .badge-finalinv{background:linear-gradient(135deg,#1a0a1a,#2a0f2a);border:1px solid #8b2a8b;border-left:3px solid #dd44dd;color:#ff99ff;animation:flicker-pink 3s ease-in-out infinite;}
   @keyframes flicker-pink{0%,100%{box-shadow:0 0 8px #dd44dd44}50%{box-shadow:0 0 18px #dd44dd88}}
+  .badge-temporal{background:linear-gradient(135deg,#1a1200,#2a1c00);border:1px solid #c9a84c;border-left:3px solid #ffcc44;color:#ffd977;animation:flicker-temporal 3s ease-in-out infinite;font-weight:700;}
+  @keyframes flicker-temporal{0%,100%{box-shadow:0 0 8px #c9a84c55}50%{box-shadow:0 0 20px #c9a84caa}}
 
   .copy-row{display:flex;justify-content:center;margin-bottom:24px}
   .details-toggle{
@@ -294,7 +296,7 @@
     <h1>ORG BACC — RÉVÉLATION</h1>
     <span class="suit-deco">♣️ ♦️</span>
   </div>
-  <div class="subtitle">Système RÉVÉLATION · Routage ALGO1/ALGO2 · Calculs bruts · Cible P1</div>
+  <div class="subtitle">Système RÉVÉLATION · Routage ALGO1/ALGO2 · Inv. temporelle · Cible P1</div>
   <div class="author">AUTEUR : X_Code</div>
 </header>
 
@@ -858,8 +860,50 @@ function runCalc(raw){
     }
   }
 
+  // ── INVERSION TEMPORELLE (heure PAIR/IMPAIR × tranches 09-34 / 35-59) ──
+  // Heure IMPAIRE : 09→34 NORMAL · 35→59 ANOMAL → inv ♠️↔♥️ / ♦️↔♣️
+  // Heure PAIR   : 09→34 ANOMAL → inv ♠️↔♥️ / ♦️↔♣️ · 35→59 NORMAL
+  // Minutes 00-08 : pas d'inversion (non spécifiées)
+  let temporalInv = null;
+  {
+    const hOdd = (nextH % 2 !== 0);
+    const in09_34 = (nextM >= 9 && nextM <= 34);
+    const in35_59 = (nextM >= 35 && nextM <= 59);
+    let isAnomal = false;
+    let zoneLabel = '';
+    if(in09_34){
+      isAnomal = !hOdd; // PAIR → anomal, IMPAIR → normal
+      zoneLabel = '09-34';
+    } else if(in35_59){
+      isAnomal = hOdd;  // IMPAIR → anomal, PAIR → normal
+      zoneLabel = '35-59';
+    } else {
+      zoneLabel = '00-08';
+    }
+    const tMap = {'♠️':'♥️','♥️':'♠️','♦️':'♣️','♣️':'♦️'};
+    const hParity = hOdd ? 'IMPAIR' : 'PAIR';
+    if(isAnomal){
+      const before = finalSuit;
+      const result = tMap[finalSuit] || finalSuit;
+      temporalInv = {
+        active: true,
+        h: nextH, m: nextM, hParity, zone: zoneLabel,
+        before, result,
+        label: `H=${nextH}(${hParity}) · MIN ${zoneLabel} → ANOMAL → ♠️↔♥️ / ♦️↔♣️`
+      };
+      finalSuit = result;
+    } else {
+      temporalInv = {
+        active: false,
+        h: nextH, m: nextM, hParity, zone: zoneLabel,
+        before: finalSuit, result: finalSuit,
+        label: `H=${nextH}(${hParity}) · MIN ${zoneLabel} → NORMAL (pas d'inv temporelle)`
+      };
+    }
+  }
+
   return {num,p1,p2,nextNum,nextH,nextM,avantDernier,dernierDigit,sel,subEngine,algoResult,finalInv,finalSuit,
-          hyperGlobal,milieuRule,isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime}};
+          hyperGlobal,milieuRule,temporalInv,isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime}};
 }
 
 function showError(msg){const b=document.getElementById('error-box');b.textContent='⚠ '+msg;b.style.display='block';}
@@ -958,6 +1002,10 @@ function renderResult(r){
     ...(r.milieuRule ? (r.milieuRule.active
       ? [`<div class="badge badge-milieu">◉ MILIEU PAIR (3 chiffres) — ${r.milieuRule.label} → ${SUIT_EMOJI[r.milieuRule.before]}→${SUIT_EMOJI[r.milieuRule.result]}</div>`]
       : [`<div class="badge badge-milieu" style="opacity:.45">◉ MILIEU (3 chiffres) — ${r.milieuRule.label}</div>`]
+    ) : []),
+    ...(r.temporalInv ? (r.temporalInv.active
+      ? [`<div class="badge badge-temporal">⏱ INV TEMPORELLE — ${r.temporalInv.label} → ${SUIT_EMOJI[r.temporalInv.before]}→${SUIT_EMOJI[r.temporalInv.result]}</div>`]
+      : [`<div class="badge badge-temporal" style="opacity:.45">⏱ INV TEMPORELLE — ${r.temporalInv.label}</div>`]
     ) : [])
   ];
   document.getElementById('badge-zone').innerHTML=badges.join('');
@@ -1016,10 +1064,18 @@ ${r.hyperGlobal.active?`<div class="det-row"><span class="det-label" style="colo
 ${r.milieuRule.active?`<div class="det-row"><span class="det-label" style="color:#66eeff">Règle</span><span class="det-val" style="color:#66eeff">${r.milieuRule.label}</span></div>
 <div class="det-row"><span class="det-label" style="color:#66eeff">Après MILIEU PAIR</span><span class="det-val" style="color:#66eeff">${SUIT_EMOJI[r.milieuRule.before]} → ${SUIT_EMOJI[r.milieuRule.result]}</span></div>`:''}`;
   }
+  if(r.temporalInv){
+    detailsHTML+=`
+<hr class="det-sep">
+<div class="det-row"><span class="det-label" style="color:#ffd977">⏱ INV TEMPORELLE</span><span class="det-val" style="color:#ffd977">${r.temporalInv.active?'ACTIF (ANOMAL)':'INACTIF (NORMAL)'}</span></div>
+<div class="det-row"><span class="det-label" style="color:#ffd977">Heure / Minutes</span><span class="det-val" style="color:#ffd977">${String(r.temporalInv.h).padStart(2,'0')}h${String(r.temporalInv.m).padStart(2,'0')} · H ${r.temporalInv.hParity} · zone ${r.temporalInv.zone}</span></div>
+<div class="det-row"><span class="det-label" style="color:#ffd977">Règle</span><span class="det-val" style="color:#ffd977">${r.temporalInv.label}</span></div>
+${r.temporalInv.active?`<div class="det-row"><span class="det-label" style="color:#ffd977">Après INV TEMPORELLE</span><span class="det-val" style="color:#ffd977">${SUIT_EMOJI[r.temporalInv.before]} → ${SUIT_EMOJI[r.temporalInv.result]}</span></div>`:''}`;
+  }
 
   detailsHTML+=`
 <hr class="det-sep">
-<div class="det-row"><span class="det-label">CIBLE</span><span class="det-val det-result">P1 (JOUEUR) — calcul brut, aucun autre traitement</span></div>
+<div class="det-row"><span class="det-label">CIBLE</span><span class="det-val det-result">P1 (JOUEUR) — calcul brut + inv temporelle si applicable</span></div>
 <div class="det-row"><span class="det-label">RÉSULTAT FINAL</span><span class="det-val det-result">#N${r.nextNum} — ${SUIT_EMOJI[displaySuit]} ${SUIT_NAMES[displaySuit]} — P1</span></div>`;
 
   document.getElementById('details-body').innerHTML=detailsHTML;

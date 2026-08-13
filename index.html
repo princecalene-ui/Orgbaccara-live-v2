@@ -1136,43 +1136,64 @@ function runCalc(raw){
     : { forced:false, algo:null, remainingBefore:0, remainingAfter:0, lostSuit:null, lostColor:null };
 
   // ── PARITÉ DU JOUR (calendrier) ──────────────────────────────────────
-  // Jour PAIR  → prédiction normale P1 (aucun changement)
-  // Jour IMPAIR → cible P2 :
-  //   - par défaut : inversion couleur ♦️↔♥️ / ♣️↔♠️ sur le résultat P1
-  //   - exception  : si avant-dernier chiffre IMPAIR ET dernier chiffre ∈ {0,6,7,8,9}
-  //                 → on recopie exactement le résultat P1 sur P2 (sans inversion)
-  const todayDay = new Date().getDate();
+  // Jour PAIR  → prédiction normale P1
+  // Jour IMPAIR → cible P2 avec inversions selon chiffres du n° de jeu
+  //
+  // Inversion par défaut (jour impair) : ♦️↔♠️ / ♣️↔♥️
+  // Si avant-dernier chiffre IMPAIR :
+  //   · dernier ∈ 0-5          → ♠️↔♥️ / ♦️↔♣️
+  //   · dernier ∈ {6,8} (pair) → ♠️↔♥️ / ♦️↔♣️
+  //   · dernier ∈ {7,9} (impair) → ♠️↔♣️ / ♦️→♠️ / ♥️→♣️
+  //
+  // Fuseau forcé Europe/Paris pour uniformité iPhone / Android / Windows
+  const todayDay = parseInt(
+    new Date().toLocaleString('en-US', { timeZone: 'Europe/Paris', day: 'numeric' }),
+    10
+  );
   const isOddCalendarDay = (todayDay % 2 === 1);
   let targetSide = 'P1';
   let dayParityInfo = null;
 
   if (isOddCalendarDay) {
     targetSide = 'P2';
-    const exceptionNoInv = (avantDernier % 2 === 1) && [0, 6, 7, 8, 9].includes(dernierDigit);
-    if (exceptionNoInv) {
-      dayParityInfo = {
-        mode: 'P2_COPY',
-        day: todayDay,
-        active: false,
-        exception: true,
-        before: finalSuit,
-        result: finalSuit,
-        label: `Jour ${todayDay} IMPAIR · AV-DERN=${avantDernier}(IMPAIR) + DERNIER=${dernierDigit} (0/6-9) → P2 SANS inversion (copie exacte P1)`
-      };
+    const avantDernierImp = (avantDernier % 2 === 1);
+    let invMap, invLabel, mode;
+
+    if (avantDernierImp) {
+      if (dernierDigit >= 0 && dernierDigit <= 5) {
+        // 0-5 → ♠️↔♥️ / ♦️↔♣️
+        invMap = { '♠️': '♥️', '♥️': '♠️', '♦️': '♣️', '♣️': '♦️' };
+        invLabel = `AV-DERN=${avantDernier}(IMPAIR) + DERNIER=${dernierDigit} (0-5) → ♠️↔♥️ / ♦️↔♣️`;
+        mode = 'P2_INV_A';
+      } else if (dernierDigit === 6 || dernierDigit === 8) {
+        // 6 ou 8 (pair 6-9) → ♠️↔♥️ / ♦️↔♣️
+        invMap = { '♠️': '♥️', '♥️': '♠️', '♦️': '♣️', '♣️': '♦️' };
+        invLabel = `AV-DERN=${avantDernier}(IMPAIR) + DERNIER=${dernierDigit} (pair 6-9) → ♠️↔♥️ / ♦️↔♣️`;
+        mode = 'P2_INV_B';
+      } else {
+        // 7 ou 9 (impair 6-9) → ♠️↔♣️ / ♦️→♠️ / ♥️→♣️
+        invMap = { '♠️': '♣️', '♣️': '♠️', '♦️': '♠️', '♥️': '♣️' };
+        invLabel = `AV-DERN=${avantDernier}(IMPAIR) + DERNIER=${dernierDigit} (impair 6-9) → ♠️↔♣️ / ♦️→♠️ / ♥️→♣️`;
+        mode = 'P2_INV_C';
+      }
     } else {
-      const colorInvMap = { '♦️': '♥️', '♥️': '♦️', '♣️': '♠️', '♠️': '♣️' };
-      const before = finalSuit;
-      finalSuit = colorInvMap[finalSuit] || finalSuit;
-      dayParityInfo = {
-        mode: 'P2_INV',
-        day: todayDay,
-        active: true,
-        exception: false,
-        before,
-        result: finalSuit,
-        label: `Jour ${todayDay} IMPAIR → inv couleur ♦️↔♥️ / ♣️↔♠️ → ${SUIT_EMOJI[before]}→${SUIT_EMOJI[finalSuit]} · cible P2`
-      };
+      // Défaut jour impair : ♦️↔♠️ / ♣️↔♥️
+      invMap = { '♦️': '♠️', '♠️': '♦️', '♣️': '♥️', '♥️': '♣️' };
+      invLabel = `AV-DERN=${avantDernier}(PAIR) → inv défaut ♦️↔♠️ / ♣️↔♥️`;
+      mode = 'P2_INV_DEFAULT';
     }
+
+    const before = finalSuit;
+    finalSuit = invMap[finalSuit] || finalSuit;
+    dayParityInfo = {
+      mode,
+      day: todayDay,
+      active: true,
+      exception: false,
+      before,
+      result: finalSuit,
+      label: `Jour ${todayDay} IMPAIR · ${invLabel} → ${SUIT_EMOJI[before]}→${SUIT_EMOJI[finalSuit]} · cible P2`
+    };
   } else {
     dayParityInfo = {
       mode: 'P1',
@@ -1280,11 +1301,9 @@ function renderResult(r){
   const numParity=ar.numEven?`${ar.reducedDigit} (PAIR)`:`${ar.reducedDigit} (IMPAIR)`;
 
   const dayParityBadge = r.dayParityInfo
-    ? (r.dayParityInfo.mode === 'P2_INV'
-        ? `<div class="badge badge-temporal">📅 PARITÉ DU JOUR — ${r.dayParityInfo.label}</div>`
-        : r.dayParityInfo.mode === 'P2_COPY'
-          ? `<div class="badge badge-temporal">📅 PARITÉ DU JOUR — ${r.dayParityInfo.label}</div>`
-          : `<div class="badge badge-temporal" style="opacity:.7">📅 PARITÉ DU JOUR — ${r.dayParityInfo.label}</div>`)
+    ? (r.dayParityInfo.mode === 'P1'
+        ? `<div class="badge badge-temporal" style="opacity:.7">📅 PARITÉ DU JOUR — ${r.dayParityInfo.label}</div>`
+        : `<div class="badge badge-temporal">📅 PARITÉ DU JOUR — ${r.dayParityInfo.label}</div>`)
     : '';
 
   const badges=[
@@ -1384,7 +1403,7 @@ ${r.temporalInv.active?`<div class="det-row"><span class="det-label" style="colo
   if(r.dayParityInfo){
     detailsHTML+=`
 <hr class="det-sep">
-<div class="det-row"><span class="det-label" style="color:#ffd977">📅 PARITÉ DU JOUR</span><span class="det-val" style="color:#ffd977">${r.dayParityInfo.mode === 'P1' ? 'JOUR PAIR → P1' : (r.dayParityInfo.mode === 'P2_INV' ? 'JOUR IMPAIR → P2 + inversion' : 'JOUR IMPAIR → P2 sans inversion (exception)')}</span></div>
+<div class="det-row"><span class="det-label" style="color:#ffd977">📅 PARITÉ DU JOUR</span><span class="det-val" style="color:#ffd977">${r.dayParityInfo.mode === 'P1' ? 'JOUR PAIR → P1' : 'JOUR IMPAIR → P2 + inversion (' + r.dayParityInfo.mode + ')'}</span></div>
 <div class="det-row"><span class="det-label" style="color:#ffd977">Jour du mois</span><span class="det-val" style="color:#ffd977">${r.dayParityInfo.day} (${r.dayParityInfo.day % 2 === 1 ? 'IMPAIR' : 'PAIR'})</span></div>
 <div class="det-row"><span class="det-label" style="color:#ffd977">Règle</span><span class="det-val" style="color:#ffd977">${r.dayParityInfo.label}</span></div>
 ${r.dayParityInfo.active ? `<div class="det-row"><span class="det-label" style="color:#ffd977">Après inv. parité jour</span><span class="det-val" style="color:#ffd977">${SUIT_EMOJI[r.dayParityInfo.before]} → ${SUIT_EMOJI[r.dayParityInfo.result]}</span></div>` : ''}`;
@@ -1583,6 +1602,28 @@ function toggleLiveAutoRefresh(){
   setLiveStatus('Auto-refresh activé : vérification toutes les 20 secondes.');
   fetchLatestTelegramGame(true);
 }
+
+// ── Reprise automatique quand l'onglet revient au premier plan ──
+// Les navigateurs mobiles (Android/iOS) suspendent les setInterval en arrière-plan.
+// Dès que la page redevient visible, on force une synchro immédiate.
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState === 'visible'){
+    if(liveAutoTimer){
+      // Auto-refresh était actif → on relance tout de suite
+      fetchLatestTelegramGame(true);
+      setLiveStatus('Onglet de retour · synchro forcée…');
+    }
+  }
+});
+
+// Certains navigateurs Android utilisent aussi pagehide/pageshow
+window.addEventListener('pageshow', (e)=>{
+  if(e.persisted || document.visibilityState === 'visible'){
+    if(liveAutoTimer){
+      fetchLatestTelegramGame(true);
+    }
+  }
+});
 
 window.addEventListener('load', ()=>{
   updateRegimeDisplay();

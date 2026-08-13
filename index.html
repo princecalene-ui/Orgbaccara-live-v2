@@ -1204,11 +1204,11 @@ function hideError(){document.getElementById('error-box').style.display='none';}
 function showWaiting(msg){const b=document.getElementById('waiting-box');b.textContent='⏳ '+msg;b.style.display='block';}
 function hideWaiting(){document.getElementById('waiting-box').style.display='none';}
 
-// ── Exploitable dès que P1 (Joueur) a sa main finale — on n'attend JAMAIS la fin de P2 ──
-//  • Tir max P1 = 3 cartes → dès que P1 a 3 cartes : pred + correction immédiates
-//  • Fin directe en 2-2 : dès que P1 a 2 cartes : pred + correction
-//  • La 3e carte éventuelle de P2 est ignorée (ne bloque rien)
-//  • ⏰ / logo play / ▶ côté P2 : ignorés
+// ── Exploitable dès que P1 a sa main finale (max 3 cartes) ──
+// Sur le canal, le ▶️ peut rester affiché devant P1 même quand P1 a déjà 3 cartes.
+// Règle : si P1 a déjà 3 cartes → on IGNORE le ▶️ / ⏰ et on prédit.
+// Exemple : ⏰ #N144. ▶️2(K♠️J♦️2♠️) - ▶️0(8♦️2♣️)
+//   → filtré mentalement : #N144. 2(K♠️J♦️2♠️) - ▶️0(8♦️2♣️) → GO
 function checkGameReadiness(raw){
   if(!raw) return {usable:false, reason:'empty', detail:'Aucune donnée.'};
   const parenIdxs=[];
@@ -1217,11 +1217,7 @@ function checkGameReadiness(raw){
     return {usable:false, reason:'incomplete', detail:'Distribution P1/P2 pas encore affichée — en attente.'};
   }
   const idxP1Open=parenIdxs[0], idxP2Open=parenIdxs[1];
-  const chevronIdx=raw.indexOf('▶');
-  // Seul vrai blocage : ▶ encore avant le Joueur (P1 tire encore)
-  if(chevronIdx!==-1 && chevronIdx<idxP1Open){
-    return {usable:false, reason:'p1-pending', detail:'P1 tire encore sa carte — en attente.'};
-  }
+
   let p1Count=0, p2Count=0;
   try{
     const parsed = parseGame(raw);
@@ -1234,14 +1230,32 @@ function checkGameReadiness(raw){
     p1Count = (g1.match(/(?:10|[2-9AJQK])/gi)||[]).length;
     p2Count = (g2.match(/(?:10|[2-9AJQK])/gi)||[]).length;
   }
-  // P1 max = 3 : dès 3 cartes → GO (P2 peut encore tirer, on s'en fiche)
+
+  // PRIORITÉ : P1 a déjà 3 cartes (tir max) → GO, même si ▶️/⏰ encore affichés
   if(p1Count >= 3){
-    return {usable:true, reason:'p1-3-done', detail:'P1 final (3 cartes) — pred/correction immédiates (P2 ignoré).'};
+    return {usable:true, reason:'p1-3-done', detail:'P1 a 3 cartes (max) — ▶️/⏰ ignorés — pred/correction immédiates.'};
   }
-  // 2-2 : P1 a 2 cartes → GO
+
+  // P1 a 2 cartes : GO si le ▶️ n'est plus sur P1, OU si aucune 3e carte n'est attendue côté score 2-2
+  const chevronIdx=raw.indexOf('▶');
+  const playIdx = raw.indexOf('▶️') !== -1 ? raw.indexOf('▶️') : raw.indexOf('▶');
+  const markerIdx = (function(){
+    const a = raw.indexOf('▶️');
+    const b = raw.indexOf('▶');
+    if(a===-1) return b;
+    if(b===-1) return a;
+    return Math.min(a,b);
+  })();
+
+  // ▶️ encore strictement avant P1 et P1 n'a que 2 cartes → possible 3e carte en cours
+  // Mais si on a déjà 2 cartes P1 + 2 P2 et format clair, on autorise quand même le 2-2
   if(p1Count >= 2 && p2Count >= 1){
-    return {usable:true, reason:'p1-2-done', detail:'P1 final (2 cartes) — pred/correction immédiates.'};
+    // Si ▶️ est AVANT la parenthèse P1 et P1 n'a que 2 cartes, le canal affiche souvent
+    // encore le marqueur par erreur — on GO quand même dès que 2 cartes P1 sont lisibles
+    // (la 3e arrivera dans un message suivant si besoin, et on recalculera)
+    return {usable:true, reason:'p1-2-done', detail:'P1 a 2+ cartes — pred/correction (▶️ canal ignoré si cartes déjà là).'};
   }
+
   if(p1Count < 2){
     return {usable:false, reason:'p1-short', detail:"P1 n'a pas encore 2 cartes — en attente."};
   }

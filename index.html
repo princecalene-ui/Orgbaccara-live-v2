@@ -1200,11 +1200,11 @@ function hideError(){document.getElementById('error-box').style.display='none';}
 function showWaiting(msg){const b=document.getElementById('waiting-box');b.textContent='⏳ '+msg;b.style.display='block';}
 function hideWaiting(){document.getElementById('waiting-box').style.display='none';}
 
-// ── Détecte si la manche affichée est réellement TERMINÉE et exploitable ──
-// Symboles Telegram : ⏰ = manche en cours, ▶ = ce côté doit encore tirer une carte.
-//  • Aucun ▶ dans le texte           → manche terminée → exploitable
-//  • ▶ situé avant la 1ère parenthèse (P1/Joueur)  → P1 tire encore → PAS exploitable
-//  • ▶ situé entre P1 et P2 (donc sur P2/Banquier) → P1 déjà final → exploitable
+// ── Détecte si la manche est exploitable pour prédiction / correction ──
+// Cible = P1 : dès que le Joueur a sa main finale, on calcule SANS attendre P2.
+//  • 2-2 sans ▶ côté P1  → terminé côté Joueur → exploitable (⏰/play ignorés)
+//  • 3-2 ou 3-3 dès que P1 a 3 cartes → exploitable immédiatement
+//  • ▶ avant P1 uniquement → P1 tire encore → on attend
 function checkGameReadiness(raw){
   if(!raw) return {usable:false, reason:'empty', detail:'Aucune donnée.'};
   const parenIdxs=[];
@@ -1214,14 +1214,38 @@ function checkGameReadiness(raw){
   }
   const idxP1Open=parenIdxs[0], idxP2Open=parenIdxs[1];
   const chevronIdx=raw.indexOf('▶');
-  if(chevronIdx===-1) return {usable:true, reason:'complete'};
-  if(chevronIdx<idxP1Open){
-    return {usable:false, reason:'p1-pending', detail:'Le Joueur (P1) doit encore tirer sa 3ème carte — en attente.'};
+  // ▶ encore sur le Joueur → pas prêt
+  if(chevronIdx!==-1 && chevronIdx<idxP1Open){
+    return {usable:false, reason:'p1-pending', detail:'Le Joueur (P1) doit encore tirer — en attente.'};
   }
-  if(chevronIdx<idxP2Open){
-    return {usable:true, reason:'p2-pending-ok', detail:'P1 déjà final, le Banquier (P2) tire encore — données exploitables.'};
+  // Compter les cartes P1 / P2 si possible
+  let p1Count=0, p2Count=0;
+  try{
+    const parsed = parseGame(raw);
+    p1Count = (parsed.p1||[]).length;
+    p2Count = (parsed.p2||[]).length;
+  }catch(e){
+    // fallback texte brut entre parenthèses
+    const g1 = raw.slice(idxP1Open+1, idxP2Open);
+    const g2 = raw.slice(idxP2Open+1);
+    p1Count = (g1.match(/(?:10|[2-9AJQK])/gi)||[]).length;
+    p2Count = (g2.match(/(?:10|[2-9AJQK])/gi)||[]).length;
   }
-  return {usable:false, reason:'ambiguous', detail:'Position du symbole ▶ ambiguë — en attente de confirmation.'};
+  // P1 à 3 cartes → prêt tout de suite (3-2 / 3-3), même si P2 tire encore
+  if(p1Count >= 3 && p2Count >= 1){
+    return {usable:true, reason:'p1-3-ready', detail:`P1 final (${p1Count} cartes) — prédiction/correction immédiate.`};
+  }
+  // 2-2 (ou plus) : P1 final dès 2 cartes, pas besoin d'attendre horloge/play ni P2
+  if(p1Count >= 2 && p2Count >= 1){
+    return {usable:true, reason:'p1-final', detail:`P1 final (${p1Count}c) / P2 (${p2Count}c) — exploitable.`};
+  }
+  if(p1Count < 2){
+    return {usable:false, reason:'p1-short', detail:'P1 n\'a pas encore 2 cartes — en attente.'};
+  }
+  if(p2Count < 1){
+    return {usable:false, reason:'p2-missing', detail:'Main Banquier (P2) absente — en attente.'};
+  }
+  return {usable:true, reason:'ready', detail:'Données exploitables.'};
 }
 
 function calculate(){
@@ -1259,7 +1283,7 @@ function calculate(){
       document.getElementById('game-input').value='';
     }catch(e){showError(e.message);}
     btn.classList.remove('loading');btn.textContent='⬡ CALCULER LA PRÉDICTION ⬡';
-  },300);
+  },50);
 }
 
 function renderResult(r){
@@ -1592,9 +1616,9 @@ function toggleLiveAutoRefresh(){
     setLiveStatus('Auto-refresh désactivé.');
     return;
   }
-  liveAutoTimer = setInterval(()=>fetchLatestTelegramGame(true), 20000);
+  liveAutoTimer = setInterval(()=>fetchLatestTelegramGame(true), 5000);
   btn.textContent = 'AUTO REFRESH ON';
-  setLiveStatus('Auto-refresh activé : vérification toutes les 20 secondes.');
+  setLiveStatus('Auto-refresh activé : vérification toutes les 5 secondes.');
   fetchLatestTelegramGame(true);
 }
 

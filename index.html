@@ -305,9 +305,9 @@
   <div class="live-card">
     <div class="live-top">
       <div class="live-meta">
-        <div><strong>Canal</strong> : <a href="https://t.me/statistika_baccara" target="_blank" rel="noopener">@statistika_baccara</a></div>
-        <div><strong>ID</strong> : -1001352009817</div>
-        <div><strong>Mode</strong> : récupération automatique du dernier jeu publié, puis calcul avec les règles existantes</div>
+        <div><strong>Canal principal</strong> : <a href="https://t.me/statistika_baccara" target="_blank" rel="noopener">@statistika_baccara</a> · ID -1001352009817</div>
+        <div><strong>Canal relais</strong> : <a href="https://t.me/jokerwcbnn11280" target="_blank" rel="noopener">@jokerwcbnn11280</a> · ID -1002699763359</div>
+        <div><strong>Mode</strong> : principal d’abord, bascule auto sur le relais si échec · calcul avec les règles existantes</div>
       </div>
     </div>
     <div class="live-status" id="live-status">En attente de synchronisation Telegram…</div>
@@ -1438,7 +1438,11 @@ function setLiveStatus(msg){
 function setLiveSource(payload){
   const box = document.getElementById('live-source');
   if(!box) return;
-  box.innerHTML = `<small>Dernière donnée chargée</small>${payload.normalized}<br><br><span style="color:#7ea6cc">Source : <a href="${payload.source_url}" target="_blank" rel="noopener" style="color:#7fb6e8">message Telegram</a> · ${payload.published_at || 'heure inconnue'}</span>`;
+  const chName = payload.channel_name ? `@${payload.channel_name}` : 'Telegram';
+  const chLabel = payload.channel_label === 'relais' || payload.fallback_used
+    ? ' <span style="color:#ffbf80">[RELAIS]</span>'
+    : ' <span style="color:#8fd6b3">[PRINCIPAL]</span>';
+  box.innerHTML = `<small>Dernière donnée chargée</small>${payload.normalized}<br><br><span style="color:#7ea6cc">Source : <a href="${payload.source_url}" target="_blank" rel="noopener" style="color:#7fb6e8">${chName}</a>${chLabel} · ${payload.published_at || 'heure inconnue'}</span>`;
 }
 
 // ── DÉMARRER LIVE ──
@@ -1521,9 +1525,12 @@ async function demarrerLive(){
     const revelInfo = lastRevel != null
       ? ` · Révélation auto #N${lastRevel} (${regime.revelationParity}) → routage ALGO actif`
       : ` · Aucune révélation 3-3 trouvée (routage par défaut)`;
+    const chInfo = data.channel_name
+      ? ` · source @${data.channel_name}${data.fallback_used || data.channel_label==='relais' ? ' [RELAIS]' : ' [PRINCIPAL]'}`
+      : '';
     statusBox.textContent = `✅ LIVE démarré · ${telegramHistoryCache.length} jeux Telegram analysés · `
       + `15 dernières parties : ${validCount} validées / ${invalidCount} ratées`
-      + `${skipped?` (${skipped} ignorées)`:''}${revelInfo}`;
+      + `${skipped?` (${skipped} ignorées)`:''}${revelInfo}${chInfo}`;
   }catch(e){
     statusBox.textContent = '✕ Erreur : '+e.message;
   }finally{
@@ -1562,7 +1569,10 @@ async function fetchLatestTelegramGame(silent=false){
     const isNewUsable = liveLastUsableGameNum !== data.game_number;
     liveLastUsableGameNum = data.game_number;
     const revelTag = regime.revelationNum != null ? ` · régime #N${regime.revelationNum} (${regime.revelationParity})` : '';
-    setLiveStatus(`Canal synchronisé · ${isNewUsable ? 'jeu terminé détecté' : 'dernier jeu (déjà traité) confirmé'} · #N${data.game_number}${revelTag}`);
+    const chTag = data.channel_name
+      ? ` · @${data.channel_name}${data.fallback_used || data.channel_label==='relais' ? ' [RELAIS]' : ' [PRINCIPAL]'}`
+      : '';
+    setLiveStatus(`Canal synchronisé · ${isNewUsable ? 'jeu terminé détecté' : 'dernier jeu (déjà traité) confirmé'} · #N${data.game_number}${revelTag}${chTag}`);
     if(isNewUsable || !silent){
       calculate();
     }

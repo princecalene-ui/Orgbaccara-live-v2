@@ -9,17 +9,17 @@ BASE_DIR = Path(__file__).resolve().parent
 # Canal principal + canal relais statistique (fallback si le principal échoue)
 CHANNELS = [
     {
-        'name': 'jokerwcbnn11280',
-        'url': 'https://t.me/s/jokerwcbnn11280',
-        'public_url': 'https://t.me/jokerwcbnn11280',
-        'id': '-1002699763359',
-        'label': 'principal',
-    },
-    {
         'name': 'statistika_baccara',
         'url': 'https://t.me/s/statistika_baccara',
         'public_url': 'https://t.me/statistika_baccara',
         'id': '-1001352009817',
+        'label': 'principal',
+    },
+    {
+        'name': 'jokerwcbnn11280',
+        'url': 'https://t.me/s/jokerwcbnn11280',
+        'public_url': 'https://t.me/jokerwcbnn11280',
+        'id': '-1002699763359',
         'label': 'relais',
     },
 ]

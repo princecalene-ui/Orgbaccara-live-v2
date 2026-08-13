@@ -1204,52 +1204,48 @@ function hideError(){document.getElementById('error-box').style.display='none';}
 function showWaiting(msg){const b=document.getElementById('waiting-box');b.textContent='⏳ '+msg;b.style.display='block';}
 function hideWaiting(){document.getElementById('waiting-box').style.display='none';}
 
-// ── Détecte si la manche est exploitable pour prédiction / correction ──
-// Cible = P1 : dès que le Joueur a sa main finale, on calcule SANS attendre P2.
-//  • 2-2 sans ▶ côté P1  → terminé côté Joueur → exploitable (⏰/play ignorés)
-//  • 3-2 ou 3-3 dès que P1 a 3 cartes → exploitable immédiatement
-//  • ▶ avant P1 uniquement → P1 tire encore → on attend
+// ── Exploitable dès que P1 (Joueur) a sa main finale — on n'attend JAMAIS la fin de P2 ──
+//  • Tir max P1 = 3 cartes → dès que P1 a 3 cartes : pred + correction immédiates
+//  • Fin directe en 2-2 : dès que P1 a 2 cartes : pred + correction
+//  • La 3e carte éventuelle de P2 est ignorée (ne bloque rien)
+//  • ⏰ / logo play / ▶ côté P2 : ignorés
 function checkGameReadiness(raw){
   if(!raw) return {usable:false, reason:'empty', detail:'Aucune donnée.'};
   const parenIdxs=[];
   for(let i=0;i<raw.length;i++){ if(raw[i]==='(') parenIdxs.push(i); }
   if(parenIdxs.length<2){
-    return {usable:false, reason:'incomplete', detail:"Le jeu n'affiche pas encore les deux mains (P1/P2) — en attente."};
+    return {usable:false, reason:'incomplete', detail:'Distribution P1/P2 pas encore affichée — en attente.'};
   }
   const idxP1Open=parenIdxs[0], idxP2Open=parenIdxs[1];
   const chevronIdx=raw.indexOf('▶');
-  // ▶ encore sur le Joueur → pas prêt
+  // Seul vrai blocage : ▶ encore avant le Joueur (P1 tire encore)
   if(chevronIdx!==-1 && chevronIdx<idxP1Open){
-    return {usable:false, reason:'p1-pending', detail:'Le Joueur (P1) doit encore tirer — en attente.'};
+    return {usable:false, reason:'p1-pending', detail:'P1 tire encore sa carte — en attente.'};
   }
-  // Compter les cartes P1 / P2 si possible
   let p1Count=0, p2Count=0;
   try{
     const parsed = parseGame(raw);
     p1Count = (parsed.p1||[]).length;
     p2Count = (parsed.p2||[]).length;
   }catch(e){
-    // fallback texte brut entre parenthèses
     const g1 = raw.slice(idxP1Open+1, idxP2Open);
-    const g2 = raw.slice(idxP2Open+1);
+    const g2Close = raw.indexOf(')', idxP2Open);
+    const g2 = raw.slice(idxP2Open+1, g2Close===-1?raw.length:g2Close);
     p1Count = (g1.match(/(?:10|[2-9AJQK])/gi)||[]).length;
     p2Count = (g2.match(/(?:10|[2-9AJQK])/gi)||[]).length;
   }
-  // P1 à 3 cartes → prêt tout de suite (3-2 / 3-3), même si P2 tire encore
-  if(p1Count >= 3 && p2Count >= 1){
-    return {usable:true, reason:'p1-3-ready', detail:`P1 final (${p1Count} cartes) — prédiction/correction immédiate.`};
+  // P1 max = 3 : dès 3 cartes → GO (P2 peut encore tirer, on s'en fiche)
+  if(p1Count >= 3){
+    return {usable:true, reason:'p1-3-done', detail:'P1 final (3 cartes) — pred/correction immédiates (P2 ignoré).'};
   }
-  // 2-2 (ou plus) : P1 final dès 2 cartes, pas besoin d'attendre horloge/play ni P2
+  // 2-2 : P1 a 2 cartes → GO
   if(p1Count >= 2 && p2Count >= 1){
-    return {usable:true, reason:'p1-final', detail:`P1 final (${p1Count}c) / P2 (${p2Count}c) — exploitable.`};
+    return {usable:true, reason:'p1-2-done', detail:'P1 final (2 cartes) — pred/correction immédiates.'};
   }
   if(p1Count < 2){
-    return {usable:false, reason:'p1-short', detail:'P1 n\'a pas encore 2 cartes — en attente.'};
+    return {usable:false, reason:'p1-short', detail:"P1 n'a pas encore 2 cartes — en attente."};
   }
-  if(p2Count < 1){
-    return {usable:false, reason:'p2-missing', detail:'Main Banquier (P2) absente — en attente.'};
-  }
-  return {usable:true, reason:'ready', detail:'Données exploitables.'};
+  return {usable:false, reason:'p2-display', detail:'Donne initiale P2 pas encore affichée — en attente.'};
 }
 
 function calculate(){
@@ -1260,7 +1256,7 @@ function calculate(){
 
   const readiness = checkGameReadiness(raw);
   if(!readiness.usable){
-    showWaiting(readiness.detail || 'Manche en cours — en attente de fin de tirage.');
+    showWaiting(readiness.detail || 'En attente de la main finale du Joueur (P1).');
     return;
   }
 
@@ -1587,7 +1583,7 @@ async function fetchLatestTelegramGame(silent=false){
     //    calcule que lorsque les données sont réellement finalisées et exploitables ──
     const readiness = checkGameReadiness(data.raw_text || data.normalized);
     if(!readiness.usable){
-      setLiveStatus(`⏳ #N${data.game_number} en cours · ${readiness.detail || 'en attente de fin de manche…'}`);
+      setLiveStatus(`⏳ #N${data.game_number} · ${readiness.detail || 'en attente de P1 final…'}`);
       return;
     }
 

@@ -1188,6 +1188,30 @@ function runCalc(raw){
     finalSuit = result;
   }
 
+  // ── JOUR IMPAIR : après inv ALGO1↔ALGO2, réinversion résultat ♣️↔♦️ / ♥️↔♠️ ──
+  let daySuitInv = null;
+  if(dayOdd){
+    const dMap = {'♣️':'♦️','♦️':'♣️','♥️':'♠️','♠️':'♥️'};
+    const before = finalSuit;
+    const result = dMap[finalSuit] || finalSuit;
+    daySuitInv = {
+      active: true,
+      day: dayOfMonth,
+      before,
+      result,
+      detail: `Jour ${dayOfMonth} IMPAIR → réinv ♣️↔♦️ / ♥️↔♠️ · ${SUIT_EMOJI[before]}→${SUIT_EMOJI[result]}`
+    };
+    finalSuit = result;
+  } else {
+    daySuitInv = {
+      active: false,
+      day: dayOfMonth,
+      before: finalSuit,
+      result: finalSuit,
+      detail: `Jour ${dayOfMonth} PAIR → pas de réinv couleurs`
+    };
+  }
+
   // ── INV RATTRAPAGE (basée sur la couleur du jeu perdu) ──
   // Appliquée uniquement si on est en cycle de rattrapage
   let rattrapageInv = null;
@@ -1217,7 +1241,7 @@ function runCalc(raw){
     : { forced:false, algo:null, remainingBefore:0, remainingAfter:0, lostSuit:null, lostColor:null };
 
   return {num,p1,p2,nextNum,nextH,nextM,avantDernier,dernierDigit,sel,subEngine,algoResult,finalInv,finalSuit,
-          hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime},
+          hyperGlobal,milieuRule,temporalInv,groupCInv,daySuitInv,rattrapageInv,isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime},
           rattrapageForced,rattrapageSnapshot,normalAlgo,digitAlgoRule,dayAlgoRule};
 }
 
@@ -1358,6 +1382,9 @@ function renderResult(r){
           ? `<div class="badge badge-transform">📅 INV JOUR IMPAIR — ${r.dayAlgoRule.label}</div>`
           : `<div class="badge badge-transform" style="opacity:.55">📅 JOUR — ${r.dayAlgoRule.label}</div>`]
       : []),
+    ...(r.daySuitInv && r.daySuitInv.active
+      ? [`<div class="badge badge-transform">📅 RÉINV COULEURS JOUR IMPAIR — ${r.daySuitInv.detail}</div>`]
+      : []),
     ...(r.rattrapageForced
       ? [`<div class="badge badge-temporal">⏱ RATTRAPAGE — ${r.algoUsed} forcé · réf. perdu ${r.rattrapageSnapshot.lostSuit?SUIT_EMOJI[r.rattrapageSnapshot.lostSuit]:'?'} (${r.rattrapageSnapshot.lostColor||'?'}) · restant ${r.rattrapageSnapshot.remainingAfter}/${RATTRAPAGE_MAX}${r.rattrapageInv&&r.rattrapageInv.active?` · inv ${SUIT_EMOJI[r.rattrapageInv.before]}→${SUIT_EMOJI[r.rattrapageInv.result]}`:''}</div>`]
       : []),
@@ -1402,7 +1429,8 @@ function renderResult(r){
 ${r.digitAlgoRule?`<div class="det-row"><span class="det-label" style="color:#e0bf59">⇄ 2 derniers chiffres</span><span class="det-val" style="color:#e0bf59">${String(r.digitAlgoRule.lastTwo).padStart(2,'0')} (${r.digitAlgoRule.zone}) · ${r.digitAlgoRule.swap?'INV ALGO':'NORMAL'}</span></div>
 <div class="det-row"><span class="det-label" style="color:#e0bf59">Bascule ALGO</span><span class="det-val" style="color:#e0bf59">${r.digitAlgoRule.swap?`${r.digitAlgoRule.before} → ${r.digitAlgoRule.after}`:'aucune'}</span></div>`:''}
 ${r.dayAlgoRule?`<div class="det-row"><span class="det-label" style="color:#ffbf80">📅 Jour calendaire</span><span class="det-val" style="color:#ffbf80">${r.dayAlgoRule.day} (${r.dayAlgoRule.odd?'IMPAIR':'PAIR'})</span></div>
-<div class="det-row"><span class="det-label" style="color:#ffbf80">Inv. jour impair</span><span class="det-val" style="color:#ffbf80">${r.dayAlgoRule.swap?`${r.dayAlgoRule.before} → ${r.dayAlgoRule.after}`:'aucune'}</span></div>`:''}
+<div class="det-row"><span class="det-label" style="color:#ffbf80">Inv. ALGO jour impair</span><span class="det-val" style="color:#ffbf80">${r.dayAlgoRule.swap?`${r.dayAlgoRule.before} → ${r.dayAlgoRule.after}`:'aucune'}</span></div>`:''}
+${r.daySuitInv?`<div class="det-row"><span class="det-label" style="color:#ffbf80">Réinv. couleurs jour</span><span class="det-val" style="color:#ffbf80">${r.daySuitInv.active?`${SUIT_EMOJI[r.daySuitInv.before]} → ${SUIT_EMOJI[r.daySuitInv.result]} (♣️↔♦️/♥️↔♠️)`:'aucune'}</span></div>`:''}
 <div class="det-row"><span class="det-label" style="color:#77ffaa">MOTEUR ROUTÉ (après bascule)</span><span class="det-val" style="color:#77ffaa">${r.normalAlgo || r.algoUsed}</span></div>
 <div class="det-row"><span class="det-label" style="color:#ffbf80">⏱ RATTRAPAGE</span><span class="det-val" style="color:#ffbf80">${r.rattrapageForced?`ACTIF → ${r.algoUsed} forcé (${r.rattrapageSnapshot.remainingBefore}→${r.rattrapageSnapshot.remainingAfter} restant)`:'INACTIF'}</span></div>
 ${r.rattrapageForced?`<div class="det-row"><span class="det-label" style="color:#ffbf80">Réf. jeu perdu</span><span class="det-val" style="color:#ffbf80">${r.rattrapageSnapshot.lostSuit?SUIT_EMOJI[r.rattrapageSnapshot.lostSuit]:'—'} (${r.rattrapageSnapshot.lostColor||'?'})</span></div>`:''}

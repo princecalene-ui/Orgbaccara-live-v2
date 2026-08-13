@@ -296,7 +296,7 @@
     <h1>ORG BACC — RÉVÉLATION</h1>
     <span class="suit-deco">♣️ ♦️</span>
   </div>
-  <div class="subtitle">Système RÉVÉLATION · Routage ALGO1/ALGO2 · Inv. temporelle · Cible P1</div>
+  <div class="subtitle">Système RÉVÉLATION · Routage ALGO1/ALGO2 · Inv. temporelle · Parité du jour (P1/P2)</div>
   <div class="author">AUTEUR : X_Code</div>
 </header>
 
@@ -629,14 +629,16 @@ function saveHistory(list){
 // Une seule entrée par numéro de jeu prédit : si elle existe déjà et est encore
 // en attente, on la met à jour (pas de doublon) ; si elle est déjà résolue, on n'y touche pas ;
 // sinon on la crée.
-function upsertHistoryEntry(gameNum, suitKey, algoUsed, isRattrapage){
+function upsertHistoryEntry(gameNum, suitKey, algoUsed, isRattrapage, side){
   const list = loadHistory();
   const existing = list.find(e=>e.gameNum===gameNum);
+  const targetSide = side || 'P1';
 
   if(existing){
     if(existing.status===null){
       existing.suitKey = suitKey;
       existing.algoUsed = algoUsed;
+      existing.side = targetSide;
       if(isRattrapage) existing.rattrapage = true;
       saveHistory(list);
       renderHistory();
@@ -646,7 +648,7 @@ function upsertHistoryEntry(gameNum, suitKey, algoUsed, isRattrapage){
 
   list.unshift({
     id: Date.now() + '-' + Math.random().toString(36).slice(2,7),
-    gameNum, suitKey, side:'P1', algoUsed,
+    gameNum, suitKey, side: targetSide, algoUsed,
     status: null, // null=en attente | 'valid' | 'invalid'
     rattrapage: !!isRattrapage,
     ts: new Date().toISOString()
@@ -678,13 +680,15 @@ function clearHistory(){
 }
 
 // ── Résout automatiquement la prédiction en attente pour ce numéro de jeu ──
-// en comparant la couleur prédite aux cartes réellement sorties côté P1 (Joueur).
-function resolvePendingHistory(gameNum, p1Cards){
+// Compare la couleur prédite aux cartes du côté prédit (P1 ou P2 selon parité du jour).
+function resolvePendingHistory(gameNum, p1Cards, p2Cards){
   const list = loadHistory();
   const entry = list.find(e=>e.gameNum===gameNum && e.status===null);
   if(!entry) return null;
-  if(!p1Cards || !p1Cards.length) return null;
-  const actualSuits = new Set(p1Cards.map(c=>c.suit));
+  const side = entry.side || 'P1';
+  const cards = (side === 'P2') ? p2Cards : p1Cards;
+  if(!cards || !cards.length) return null;
+  const actualSuits = new Set(cards.map(c=>c.suit));
   entry.status = actualSuits.has(entry.suitKey) ? 'valid' : 'invalid';
   entry.autoResolved = true;
   entry.actualSuits = [...actualSuits];
@@ -704,9 +708,11 @@ function showAutoValidationFeedback(entry){
   if(!box) return;
   if(!entry){ box.textContent=''; box.style.display='none'; return; }
   const ok = entry.status==='valid';
+  const side = entry.side || 'P1';
+  const sideLabel = side === 'P2' ? 'P2 (Banquier, 2ème parenthèse)' : 'P1 (Joueur, 1ère parenthèse)';
   box.textContent = ok
-    ? `✓ Auto-validé : #N${entry.gameNum} ${SUIT_EMOJI[entry.suitKey]} P1 trouvée dans la 1ère parenthèse (Joueur) — prédiction réussie.`
-    : `✕ Auto-validé : #N${entry.gameNum} ${SUIT_EMOJI[entry.suitKey]} P1 absente de la 1ère parenthèse (Joueur) — prédiction échouée.`;
+    ? `✓ Auto-validé : #N${entry.gameNum} ${SUIT_EMOJI[entry.suitKey]} ${side} trouvée dans ${sideLabel} — prédiction réussie.`
+    : `✕ Auto-validé : #N${entry.gameNum} ${SUIT_EMOJI[entry.suitKey]} ${side} absente de ${sideLabel} — prédiction échouée.`;
   box.className = 'history-autoval show ' + (ok ? 'ok' : 'ko');
   box.style.display = 'block';
   setTimeout(()=>{ box.style.display='none'; }, 8000);
@@ -787,7 +793,7 @@ function renderHistory(){
     <div class="history-item ${statusClass}">
       <span class="hist-num">#N${e.gameNum}</span>
       <span class="hist-suit" style="color:${red?'#cc4444':'var(--ivory)'}">${emoji}</span>
-      <span class="hist-label">P1${e.algoUsed?` <span class="hist-tag">[${e.algoUsed}]</span>`:''}${e.rattrapage?` <span class="hist-tag" style="color:#ffbf80">⏱ RATTR</span>`:''}${e.source==='live-seed'?` <span class="hist-tag hist-live">🔴 LIVE</span>`:(e.autoResolved?` <span class="hist-tag">auto</span>`:'')}</span>
+      <span class="hist-label">${e.side||'P1'}${e.algoUsed?` <span class="hist-tag">[${e.algoUsed}]</span>`:''}${e.rattrapage?` <span class="hist-tag" style="color:#ffbf80">⏱ RATTR</span>`:''}${e.source==='live-seed'?` <span class="hist-tag hist-live">🔴 LIVE</span>`:(e.autoResolved?` <span class="hist-tag">auto</span>`:'')}</span>
       <div class="hist-actions">
         <button class="hist-btn valid-btn ${e.status==='valid'?'active':''}" title="Validée chez le joueur" onclick="setHistoryStatus('${e.id}','valid')">✓</button>
         <button class="hist-btn invalid-btn ${e.status==='invalid'?'active':''}" title="Non passée" onclick="setHistoryStatus('${e.id}','invalid')">✕</button>
@@ -1129,9 +1135,59 @@ function runCalc(raw){
       }
     : { forced:false, algo:null, remainingBefore:0, remainingAfter:0, lostSuit:null, lostColor:null };
 
+  // ── PARITÉ DU JOUR (calendrier) ──────────────────────────────────────
+  // Jour PAIR  → prédiction normale P1 (aucun changement)
+  // Jour IMPAIR → cible P2 :
+  //   - par défaut : inversion couleur ♦️↔♥️ / ♣️↔♠️ sur le résultat P1
+  //   - exception  : si avant-dernier chiffre IMPAIR ET dernier chiffre ∈ {0,6,7,8,9}
+  //                 → on recopie exactement le résultat P1 sur P2 (sans inversion)
+  const todayDay = new Date().getDate();
+  const isOddCalendarDay = (todayDay % 2 === 1);
+  let targetSide = 'P1';
+  let dayParityInfo = null;
+
+  if (isOddCalendarDay) {
+    targetSide = 'P2';
+    const exceptionNoInv = (avantDernier % 2 === 1) && [0, 6, 7, 8, 9].includes(dernierDigit);
+    if (exceptionNoInv) {
+      dayParityInfo = {
+        mode: 'P2_COPY',
+        day: todayDay,
+        active: false,
+        exception: true,
+        before: finalSuit,
+        result: finalSuit,
+        label: `Jour ${todayDay} IMPAIR · AV-DERN=${avantDernier}(IMPAIR) + DERNIER=${dernierDigit} (0/6-9) → P2 SANS inversion (copie exacte P1)`
+      };
+    } else {
+      const colorInvMap = { '♦️': '♥️', '♥️': '♦️', '♣️': '♠️', '♠️': '♣️' };
+      const before = finalSuit;
+      finalSuit = colorInvMap[finalSuit] || finalSuit;
+      dayParityInfo = {
+        mode: 'P2_INV',
+        day: todayDay,
+        active: true,
+        exception: false,
+        before,
+        result: finalSuit,
+        label: `Jour ${todayDay} IMPAIR → inv couleur ♦️↔♥️ / ♣️↔♠️ → ${SUIT_EMOJI[before]}→${SUIT_EMOJI[finalSuit]} · cible P2`
+      };
+    }
+  } else {
+    dayParityInfo = {
+      mode: 'P1',
+      day: todayDay,
+      active: false,
+      exception: false,
+      before: finalSuit,
+      result: finalSuit,
+      label: `Jour ${todayDay} PAIR → prédiction normale P1`
+    };
+  }
+
   return {num,p1,p2,nextNum,nextH,nextM,avantDernier,dernierDigit,sel,subEngine,algoResult,finalInv,finalSuit,
           hyperGlobal,milieuRule,temporalInv,rattrapageInv,isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime},
-          rattrapageForced,rattrapageSnapshot,normalAlgo};
+          rattrapageForced,rattrapageSnapshot,normalAlgo,targetSide,dayParityInfo};
 }
 
 function showError(msg){const b=document.getElementById('error-box');b.textContent='⚠ '+msg;b.style.display='block';}
@@ -1181,7 +1237,7 @@ function calculate(){
     try{
       // 1) Valider d'abord la prédiction en attente pour CE jeu (peut activer le rattrapage)
       const parsed = parseGame(raw);
-      const autoVal = resolvePendingHistory(parsed.num, parsed.p1);
+      const autoVal = resolvePendingHistory(parsed.num, parsed.p1, parsed.p2);
       showAutoValidationFeedback(autoVal);
 
       // 2) Calculer la prédiction suivante (prend en compte un rattrapage éventuellement activé)
@@ -1203,16 +1259,17 @@ function calculate(){
 
 function renderResult(r){
   const ar=r.algoResult;
-  const displaySuit = r.finalSuit; // calcul brut du système RÉVÉLATION, cible fixe P1
+  const displaySuit = r.finalSuit;
+  const targetSide = r.targetSide || 'P1';
 
   document.getElementById('res-num').textContent=`#N${r.nextNum}`;
   const red=isRed(displaySuit);
   document.getElementById('res-suit-emoji').innerHTML=
     `<span style="color:${red?'#cc4444':'var(--ivory)'}">${SUIT_EMOJI[displaySuit]||displaySuit}</span>`;
   document.getElementById('res-suit-label').textContent=SUIT_NAMES[displaySuit]||'';
-  document.getElementById('res-side').innerHTML=`<span class="side-tag">P1</span>`;
+  document.getElementById('res-side').innerHTML=`<span class="side-tag">${targetSide}</span>`;
 
-  upsertHistoryEntry(r.nextNum, displaySuit, r.algoUsed, r.rattrapageForced);
+  upsertHistoryEntry(r.nextNum, displaySuit, r.algoUsed, r.rattrapageForced, targetSide);
 
   const hParite=(r.nextH%2===0)?'PAIR':'IMPAIR';
   const avantDernierParite=r.avantDernier%2===0?'PAIR':'IMPAIR';
@@ -1222,9 +1279,18 @@ function renderResult(r){
   const algoParity=ar.algoEven?`${ar.algo} (PAIR)`:`${ar.algo} (IMPAIR)`;
   const numParity=ar.numEven?`${ar.reducedDigit} (PAIR)`:`${ar.reducedDigit} (IMPAIR)`;
 
+  const dayParityBadge = r.dayParityInfo
+    ? (r.dayParityInfo.mode === 'P2_INV'
+        ? `<div class="badge badge-temporal">📅 PARITÉ DU JOUR — ${r.dayParityInfo.label}</div>`
+        : r.dayParityInfo.mode === 'P2_COPY'
+          ? `<div class="badge badge-temporal">📅 PARITÉ DU JOUR — ${r.dayParityInfo.label}</div>`
+          : `<div class="badge badge-temporal" style="opacity:.7">📅 PARITÉ DU JOUR — ${r.dayParityInfo.label}</div>`)
+    : '';
+
   const badges=[
     `<div class="badge badge-revelation">🃏 RÉVÉLATION — ${r.isRevelationGame?`DÉTECTÉE sur ce jeu (#N${r.num}, format 3-3)`:'aucune révélation sur ce jeu'} · Régime actif : ${r.regimeSnapshot.source}</div>`,
-    `<div class="badge badge-engine">◆ ROUTAGE — Prochain #N${r.nextNum} (${r.nextParity}) vs régime (${r.regimeSnapshot.revelationParity}) → ${r.algoUsed} PRÉDIT P1${r.rattrapageForced?` · ⏱ RATTRAPAGE (${r.rattrapageSnapshot.remainingBefore}→${r.rattrapageSnapshot.remainingAfter})`:''}</div>`,
+    `<div class="badge badge-engine">◆ ROUTAGE — Prochain #N${r.nextNum} (${r.nextParity}) vs régime (${r.regimeSnapshot.revelationParity}) → ${r.algoUsed} PRÉDIT ${targetSide}${r.rattrapageForced?` · ⏱ RATTRAPAGE (${r.rattrapageSnapshot.remainingBefore}→${r.rattrapageSnapshot.remainingAfter})`:''}</div>`,
+    dayParityBadge,
     ...(r.rattrapageForced
       ? [`<div class="badge badge-temporal">⏱ RATTRAPAGE — ${r.algoUsed} forcé · réf. perdu ${r.rattrapageSnapshot.lostSuit?SUIT_EMOJI[r.rattrapageSnapshot.lostSuit]:'?'} (${r.rattrapageSnapshot.lostColor||'?'}) · restant ${r.rattrapageSnapshot.remainingAfter}/${RATTRAPAGE_MAX}${r.rattrapageInv&&r.rattrapageInv.active?` · inv ${SUIT_EMOJI[r.rattrapageInv.before]}→${SUIT_EMOJI[r.rattrapageInv.result]}`:''}</div>`]
       : []),
@@ -1315,10 +1381,19 @@ ${r.milieuRule.active?`<div class="det-row"><span class="det-label" style="color
 ${r.temporalInv.active?`<div class="det-row"><span class="det-label" style="color:#ffd977">Après INV TEMPORELLE</span><span class="det-val" style="color:#ffd977">${SUIT_EMOJI[r.temporalInv.before]} → ${SUIT_EMOJI[r.temporalInv.result]}</span></div>`:''}`;
   }
 
+  if(r.dayParityInfo){
+    detailsHTML+=`
+<hr class="det-sep">
+<div class="det-row"><span class="det-label" style="color:#ffd977">📅 PARITÉ DU JOUR</span><span class="det-val" style="color:#ffd977">${r.dayParityInfo.mode === 'P1' ? 'JOUR PAIR → P1' : (r.dayParityInfo.mode === 'P2_INV' ? 'JOUR IMPAIR → P2 + inversion' : 'JOUR IMPAIR → P2 sans inversion (exception)')}</span></div>
+<div class="det-row"><span class="det-label" style="color:#ffd977">Jour du mois</span><span class="det-val" style="color:#ffd977">${r.dayParityInfo.day} (${r.dayParityInfo.day % 2 === 1 ? 'IMPAIR' : 'PAIR'})</span></div>
+<div class="det-row"><span class="det-label" style="color:#ffd977">Règle</span><span class="det-val" style="color:#ffd977">${r.dayParityInfo.label}</span></div>
+${r.dayParityInfo.active ? `<div class="det-row"><span class="det-label" style="color:#ffd977">Après inv. parité jour</span><span class="det-val" style="color:#ffd977">${SUIT_EMOJI[r.dayParityInfo.before]} → ${SUIT_EMOJI[r.dayParityInfo.result]}</span></div>` : ''}`;
+  }
+
   detailsHTML+=`
 <hr class="det-sep">
-<div class="det-row"><span class="det-label">CIBLE</span><span class="det-val det-result">P1 (JOUEUR) — calcul brut + inv temporelle si applicable</span></div>
-<div class="det-row"><span class="det-label">RÉSULTAT FINAL</span><span class="det-val det-result">#N${r.nextNum} — ${SUIT_EMOJI[displaySuit]} ${SUIT_NAMES[displaySuit]} — P1</span></div>`;
+<div class="det-row"><span class="det-label">CIBLE</span><span class="det-val det-result">${targetSide}${targetSide==='P2' ? ' (BANQUIER)' : ' (JOUEUR)'} — ${r.dayParityInfo ? r.dayParityInfo.label : 'calcul standard'}</span></div>
+<div class="det-row"><span class="det-label">RÉSULTAT FINAL</span><span class="det-val det-result">#N${r.nextNum} — ${SUIT_EMOJI[displaySuit]} ${SUIT_NAMES[displaySuit]} — ${targetSide}</span></div>`;
 
   document.getElementById('details-body').innerHTML=detailsHTML;
 
@@ -1332,8 +1407,9 @@ ${r.temporalInv.active?`<div class="det-row"><span class="det-label" style="colo
 function copyPrediction(){
   const num=document.getElementById('res-num').textContent;
   const emoji=document.getElementById('res-suit-emoji').textContent;
+  const side = (lastCalcResult && lastCalcResult.targetSide) ? lastCalcResult.targetSide : 'P1';
   const engineTag = lastCalcResult ? ` [${lastCalcResult.algoUsed}]` : '';
-  navigator.clipboard.writeText(`${num} ${emoji} P1${engineTag}`).then(()=>{
+  navigator.clipboard.writeText(`${num} ${emoji} ${side}${engineTag}`).then(()=>{
     const btn=document.getElementById('btn-copy');
     btn.textContent='✓ COPIÉ';btn.classList.add('copied');
     setTimeout(()=>{btn.textContent='⧉ COPIER LA PRÉDICTION';btn.classList.remove('copied');},1800);

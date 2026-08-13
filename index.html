@@ -872,18 +872,22 @@ function signHM(h,m){
 // ══════════════════════════════════════════════════════
 //  SÉLECTEUR V4 / V5+ (interne au moteur RÉVÉLATION)
 //  Tranches horaires :
-//    GROUPE A : 00h–09h59
+//    GROUPE C : 00h00–08h44  ET  20h–23h59  (= tables A + inv ♣️↔♥️ / ♦️↔♠️)
+//    GROUPE A : 08h45–09h59
 //    GROUPE B : 10h–19h59
-//    GROUPE C : 20h–23h59 = tables de A, puis inv résultat ♣️↔♥️ / ♦️↔♠️
 // ══════════════════════════════════════════════════════
 function selectSystem(nextH, nextM, nextNum){
   const hPair = (nextH % 2 === 0);
   const hImp  = !hPair;
-  const groupA = (nextH >= 0 && nextH <= 9);
+  // C : 00:00–08:44 et 20:00–23:59
+  const groupC = (nextH >= 20 && nextH <= 23)
+    || (nextH >= 0 && nextH <= 7)
+    || (nextH === 8 && nextM <= 44);
+  // A : 08:45–09:59
+  const groupA = (nextH === 8 && nextM >= 45) || (nextH === 9);
   const groupB = (nextH >= 10 && nextH <= 19);
-  const groupC = (nextH >= 20 && nextH <= 23);
   const groupLetter = groupC ? 'C' : (groupB ? 'B' : 'A');
-  // C utilise les mêmes tables de sélection que A
+  // C et A partagent les mêmes tables de sélection ; C ajoute l'inv après
   const useA = groupA || groupC;
   const numStr = String(nextNum);
   const avantDernierDigit = numStr.length >= 2 ? parseInt(numStr[numStr.length-2],10) : parseInt(numStr[0],10);
@@ -1147,7 +1151,7 @@ function runCalc(raw){
     }
   }
 
-  // ── GROUPE C (20h–23h59) : résultat type A, puis inv ♣️↔♥️ / ♦️↔♠️ ──
+  // ── GROUPE C (00h–08h44 + 20h–23h59) : résultat type A, puis inv ♣️↔♥️ / ♦️↔♠️ ──
   let groupCInv = null;
   if(sel.groupC){
     const cMap = {'♣️':'♥️','♥️':'♣️','♦️':'♠️','♠️':'♦️'};
@@ -1157,7 +1161,7 @@ function runCalc(raw){
       active: true,
       before,
       result,
-      detail: `GROUPE C (H=${nextH}) = A inversé → ♣️↔♥️ / ♦️↔♠️ · ${SUIT_EMOJI[before]}→${SUIT_EMOJI[result]}`
+      detail: `GROUPE C (${String(nextH).padStart(2,'0')}h${String(nextM).padStart(2,'0')}) = A inversé → ♣️↔♥️ / ♦️↔♠️ · ${SUIT_EMOJI[before]}→${SUIT_EMOJI[result]}`
     };
     finalSuit = result;
   }
@@ -1303,7 +1307,7 @@ function renderResult(r){
   const avantDernierParite=r.avantDernier%2===0?'PAIR':'IMPAIR';
   const minTranche=r.nextM<=11?'00-11':'12-59';
   const grpLetter = (r.sel && r.sel.group) ? r.sel.group : ((r.nextH>=20&&r.nextH<=23)?'C':(r.nextH<=9?'A':'B'));
-  const grpBand = grpLetter==='C' ? '20-23 (=A + inv ♣️↔♥️/♦️↔♠️)' : (grpLetter==='A' ? '00-09' : '10-19');
+  const grpBand = grpLetter==='C' ? '00-08h44+20-23 (=A + inv ♣️↔♥️/♦️↔♠️)' : (grpLetter==='A' ? '08h45-09' : '10-19');
   const selectorLine=`GROUPE ${grpLetter} [${grpBand}] · H=${r.nextH}(${hParite}) · AV-DERN=${r.avantDernier}(${avantDernierParite}) · MIN=${r.nextM}(${minTranche}) → ${r.subEngine} + ${r.sel.invLabel}`;
   const fibOverrideLabel=ar.fibMod===0?'ALGO NORMAL CONSERVÉ':ar.fibMod===1?'FIB FORCE ALGO 1':ar.fibMod===2?'FIB FORCE ALGO 2':'FIB INVERSE ALGO';
   const algoParity=ar.algoEven?`${ar.algo} (PAIR)`:`${ar.algo} (IMPAIR)`;
@@ -1414,7 +1418,7 @@ ${r.temporalInv.active?`<div class="det-row"><span class="det-label" style="colo
   if(r.groupCInv && r.groupCInv.active){
     detailsHTML+=`
 <hr class="det-sep">
-<div class="det-row"><span class="det-label" style="color:#80e080">🅲 GROUPE C (20h–23h59)</span><span class="det-val" style="color:#80e080">ACTIF</span></div>
+<div class="det-row"><span class="det-label" style="color:#80e080">🅲 GROUPE C (00h–08h44 + 20h–23h59)</span><span class="det-val" style="color:#80e080">ACTIF</span></div>
 <div class="det-row"><span class="det-label" style="color:#80e080">Principe</span><span class="det-val" style="color:#80e080">Tables A + inv ♣️↔♥️ / ♦️↔♠️</span></div>
 <div class="det-row"><span class="det-label" style="color:#80e080">Après GROUPE C</span><span class="det-val" style="color:#80e080">${SUIT_EMOJI[r.groupCInv.before]} → ${SUIT_EMOJI[r.groupCInv.result]}</span></div>`;
   }

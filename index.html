@@ -305,10 +305,9 @@
   <div class="live-card">
     <div class="live-top">
       <div class="live-meta">
-        <div><strong>Canal principal</strong> : <a href="https://t.me/statistika_baccara" target="_blank" rel="noopener">@statistika_baccara</a> · ID -1001352009817</div>
-        <div><strong>Canal relais</strong> : <a href="https://t.me/jokerwcbnn11280" target="_blank" rel="noopener">@jokerwcbnn11280</a> · ID -1002699763359</div>
-        <div><strong>Mode</strong> : principal d’abord, bascule auto sur le relais si échec · calcul avec les règles existantes</div>
-        <div style="margin-top:6px;color:#7ea6cc"><strong>Arrière-plan</strong> : active AUTO REFRESH et laisse l’onglet ouvert. Wake Lock maintient l’écran si le navigateur l’autorise. Au verrouillage total du téléphone, le JS est souvent coupé par le système — rouvre l’onglet pour rattraper.</div>
+        <div><strong>Canal</strong> : <a href="https://t.me/statistika_baccara" target="_blank" rel="noopener">@statistika_baccara</a></div>
+        <div><strong>ID</strong> : -1001352009817</div>
+        <div><strong>Mode</strong> : récupération automatique du dernier jeu publié, puis calcul avec les règles existantes</div>
       </div>
     </div>
     <div class="live-status" id="live-status">En attente de synchronisation Telegram…</div>
@@ -520,15 +519,12 @@ function applyRattrapageInv(predSuit, lostColor, lostSuit){
   };
 }
 
-// Déclenché à chaque perte :
-// - 1ère perte (pred normale) → démarre cycle max 2
-// - perte rattr1 (encore remaining) → met à jour la réf pour rattr2
-// - perte rattr2 (cycle terminé) → PAS de rattr3 : prochain = brut
-function onPredictionLost(algo, suitKey, wasRattrapageEntry){
+// Déclenché à chaque perte : 1ère perte = démarre le cycle ; perte en rattrapage = la pred ratée devient la nouvelle référence
+function onPredictionLost(algo, suitKey){
   if(!algo) return;
   const color = suitKey ? (isRed(suitKey) ? 'rouge' : 'noir') : null;
   if(rattrapage.active && rattrapage.remaining > 0){
-    // Rattrapage N a perdu → il devient le "jeu perdu" pour le rattrapage N+1 (si remaining le permet)
+    // Rattrapage N a perdu → il devient le "jeu perdu" pour le rattrapage N+1
     rattrapage.lostSuit = suitKey || rattrapage.lostSuit;
     rattrapage.lostColor = color || rattrapage.lostColor;
     if(algo) rattrapage.algo = algo;
@@ -536,14 +532,7 @@ function onPredictionLost(algo, suitKey, wasRattrapageEntry){
     updateRegimeDisplay();
     return;
   }
-  // Cycle déjà terminé (rattr2 consommé) : si c'est encore une pred de rattrapage qui perd → on reste à zéro (brut)
-  if(wasRattrapageEntry){
-    rattrapage = emptyRattrapage();
-    saveRattrapage(rattrapage);
-    updateRegimeDisplay();
-    return;
-  }
-  // Nouvelle série de rattrapage (max 2) — uniquement après une perte hors rattrapage
+  // Nouvelle série de rattrapage (max 2)
   rattrapage = {
     active: true,
     algo: algo,
@@ -556,7 +545,7 @@ function onPredictionLost(algo, suitKey, wasRattrapageEntry){
   updateRegimeDisplay();
 }
 function startRattrapage(algo, suitKey){
-  onPredictionLost(algo, suitKey, false);
+  onPredictionLost(algo, suitKey);
 }
 function endRattrapage(){
   rattrapage = emptyRattrapage();
@@ -674,9 +663,9 @@ function setHistoryStatus(id, status){
   entry.status = nextStatus;
   saveHistory(list);
   renderHistory();
-  // Rattrapage : perte → même ALGO + inv couleur (max 2) ; gain → fin ; rattr2 perdu → brut
+  // Rattrapage : perte → même ALGO + inv couleur (max 3) ; gain → fin
   if(nextStatus === 'invalid' && entry.algoUsed){
-    onPredictionLost(entry.algoUsed, entry.suitKey, !!entry.rattrapage);
+    onPredictionLost(entry.algoUsed, entry.suitKey);
   } else if(nextStatus === 'valid' && rattrapage.active){
     endRattrapage();
   }
@@ -701,9 +690,9 @@ function resolvePendingHistory(gameNum, p1Cards){
   entry.actualSuits = [...actualSuits];
   saveHistory(list);
   renderHistory();
-  // Rattrapage auto : perte → même ALGO + inv (max 2) ; gain → fin ; rattr2 perdu → brut
+  // Rattrapage auto : perte → même ALGO + inv couleur (max 3) ; gain → fin
   if(entry.status === 'invalid' && entry.algoUsed){
-    onPredictionLost(entry.algoUsed, entry.suitKey, !!entry.rattrapage);
+    onPredictionLost(entry.algoUsed, entry.suitKey);
   } else if(entry.status === 'valid' && rattrapage.active){
     endRattrapage();
   }
@@ -872,69 +861,63 @@ function signHM(h,m){
 
 // ══════════════════════════════════════════════════════
 //  SÉLECTEUR V4 / V5+ (interne au moteur RÉVÉLATION)
-//  Tranches horaires :
-//    GROUPE C : 00h00–03h54  ET  20h00–23h59  (= tables A + inv ♣️↔♥️ / ♦️↔♠️)
-//    GROUPE A : 03h55–09h59
-//    GROUPE B : 10h00–19h59
 // ══════════════════════════════════════════════════════
 function selectSystem(nextH, nextM, nextNum){
   const hPair = (nextH % 2 === 0);
   const hImp  = !hPair;
-  // C : 00:00–03:54 et 20:00–23:59
-  const groupC = (nextH >= 20 && nextH <= 23)
-    || (nextH >= 0 && nextH <= 2)
-    || (nextH === 3 && nextM <= 54);
-  // A : 03:55–09:59
-  const groupA = (nextH === 3 && nextM >= 55) || (nextH >= 4 && nextH <= 9);
-  const groupB = (nextH >= 10 && nextH <= 19);
-  const groupLetter = groupC ? 'C' : (groupB ? 'B' : 'A');
-  // C et A partagent les mêmes tables de sélection ; C ajoute l'inv après
-  const useA = groupA || groupC;
+  const groupA = [0,1,2,3,4,5,6,7,8,9,20,21,22,23,24].includes(nextH);
+  const groupB = [10,11,12,13,14,15,16,17,18,19].includes(nextH);
   const numStr = String(nextNum);
   const avantDernierDigit = numStr.length >= 2 ? parseInt(numStr[numStr.length-2],10) : parseInt(numStr[0],10);
   const avantDernierPair  = (avantDernierDigit % 2 === 0);
   const avantDernierImp   = !avantDernierPair;
   const min0_11  = (nextM >= 0  && nextM <= 11);
   const min12_59 = (nextM >= 12 && nextM <= 59);
-  let picked = {algo:'V4', invKey:'CD_SH', invLabel:'V4+ ♣↔♦ / ♠↔♥'};
-  if(useA){
+  if(groupA){
     if(hImp){
       if(avantDernierPair){
-        if(min12_59) picked = {algo:'V5+', invKey:'CD_SH', invLabel:'V5++ ♣↔♦ / ♠↔♥'};
-        else if(min0_11)  picked = {algo:'V4',  invKey:'CH_SD', invLabel:'V4+ ♣↔♥ / ♠↔♦'};
-      } else if(avantDernierImp){
-        if(min12_59) picked = {algo:'V4',  invKey:'CD_SH', invLabel:'V4+ ♣↔♦ / ♠↔♥'};
-        else if(min0_11)  picked = {algo:'V5+', invKey:'CH_SD', invLabel:'V5++ ♣↔♥ / ♠↔♦'};
+        if(min12_59) return {algo:'V5+', invKey:'CD_SH', invLabel:'V5++ ♣↔♦ / ♠↔♥'};
+        if(min0_11)  return {algo:'V4',  invKey:'CH_SD', invLabel:'V4+ ♣↔♥ / ♠↔♦'};
       }
-    } else if(hPair){
-      if(avantDernierPair){
-        if(min12_59) picked = {algo:'V5+', invKey:'CD_SH', invLabel:'V5++ ♣↔♦ / ♠↔♥'};
-        else if(min0_11)  picked = {algo:'V5+', invKey:'CD_SH', invLabel:'V5++ ♣↔♦ / ♠↔♥'};
-      } else if(avantDernierImp){
-        if(min12_59) picked = {algo:'V5+', invKey:'CH_SD', invLabel:'V5++ ♣↔♥ / ♠↔♦'};
-        else if(min0_11)  picked = {algo:'V4',  invKey:'CH_SD', invLabel:'V4+ ♣↔♥ / ♠↔♦'};
+      if(avantDernierImp){
+        if(min12_59) return {algo:'V4',  invKey:'CD_SH', invLabel:'V4+ ♣↔♦ / ♠↔♥'};
+        if(min0_11)  return {algo:'V5+', invKey:'CH_SD', invLabel:'V5++ ♣↔♥ / ♠↔♦'};
       }
     }
-  } else if(groupB){
     if(hPair){
       if(avantDernierPair){
-        if(min12_59) picked = {algo:'V5+', invKey:'CH_SD', invLabel:'V5++ ♣↔♥ / ♠↔♦'};
-        else if(min0_11)  picked = {algo:'V4',  invKey:'CD_SH', invLabel:'V4+ ♣↔♦ / ♠↔♥'};
-      } else if(avantDernierImp){
-        if(min12_59) picked = {algo:'V5+', invKey:'CD_SH', invLabel:'V5++ ♣↔♦ / ♠↔♥'};
-        else if(min0_11)  picked = {algo:'V4',  invKey:'CH_SD', invLabel:'V4+ ♣↔♥ / ♠↔♦'};
+        if(min12_59) return {algo:'V5+', invKey:'CD_SH', invLabel:'V5++ ♣↔♦ / ♠↔♥'};
+        if(min0_11)  return {algo:'V5+', invKey:'CD_SH', invLabel:'V5++ ♣↔♦ / ♠↔♥'};
       }
-    } else if(hImp){
-      if(avantDernierPair){
-        if(min12_59) picked = {algo:'V5+', invKey:'CH_SD', invLabel:'V5++ ♣↔♥ / ♠↔♦'};
-        else if(min0_11)  picked = {algo:'V4', invKey:'SPECIAL_LAST', invLabel:'V4+ (dernier chiffre)'};
-      } else if(avantDernierImp){
-        if(min12_59) picked = {algo:'V4', invKey:'SPECIAL_LAST_NOTRANCH', invLabel:'V4+ (dernier chiffre / aucune inv si 6-9 ou 0)'};
-        else if(min0_11)  picked = {algo:'V4',  invKey:'SH_CD', invLabel:'V4+ ♠↔♥ / ♣↔♦'};
+      if(avantDernierImp){
+        if(min12_59) return {algo:'V5+', invKey:'CH_SD', invLabel:'V5++ ♣↔♥ / ♠↔♦'};
+        if(min0_11)  return {algo:'V4',  invKey:'CH_SD', invLabel:'V4+ ♣↔♥ / ♠↔♦'};
       }
     }
   }
-  return {...picked, group: groupLetter, groupC};
+  if(groupB){
+    if(hPair){
+      if(avantDernierPair){
+        if(min12_59) return {algo:'V5+', invKey:'CH_SD', invLabel:'V5++ ♣↔♥ / ♠↔♦'};
+        if(min0_11)  return {algo:'V4',  invKey:'CD_SH', invLabel:'V4+ ♣↔♦ / ♠↔♥'};
+      }
+      if(avantDernierImp){
+        if(min12_59) return {algo:'V5+', invKey:'CD_SH', invLabel:'V5++ ♣↔♦ / ♠↔♥'};
+        if(min0_11)  return {algo:'V4',  invKey:'CH_SD', invLabel:'V4+ ♣↔♥ / ♠↔♦'};
+      }
+    }
+    if(hImp){
+      if(avantDernierPair){
+        if(min12_59) return {algo:'V5+', invKey:'CH_SD', invLabel:'V5++ ♣↔♥ / ♠↔♦'};
+        if(min0_11)  return {algo:'V4', invKey:'SPECIAL_LAST', invLabel:'V4+ (dernier chiffre)'};
+      }
+      if(avantDernierImp){
+        if(min12_59) return {algo:'V4', invKey:'SPECIAL_LAST_NOTRANCH', invLabel:'V4+ (dernier chiffre / aucune inv si 6-9 ou 0)'};
+        if(min0_11)  return {algo:'V4',  invKey:'SH_CD', invLabel:'V4+ ♠↔♥ / ♣↔♦'};
+      }
+    }
+  }
+  return {algo:'V4', invKey:'CD_SH', invLabel:'V4+ ♣↔♦ / ♠↔♥'};
 }
 function applyFinalInv(suit, invKey, lastDigit){
   const CD_SH = {'♣️':'♦️','♦️':'♣️','♠️':'♥️','♥️':'♠️'};
@@ -1018,63 +1001,8 @@ function runCalc(raw){
   const nextNum=num+1;
   const nextParity = (nextNum % 2 === 0) ? 'PAIR' : 'IMPAIR';
   // Règle de relais : parité(prochain N°) === parité(dernière révélation) → ALGO1, sinon ALGO2
-  let baseAlgo = (nextParity === regime.revelationParity) ? 'ALGO1' : 'ALGO2';
-
-  // ── Bascule ALGO selon les 2 derniers chiffres du n° prédit ──
-  // NORMAL (✅)     : 20–39, 60–79
-  // INVERSION (❗️) : 00–19, 40–59, 80–99  → ALGO1 ↔ ALGO2
-  const lastTwo = nextNum % 100;
-  let digitSwap = false;
-  let digitZone = '';
-  if(lastTwo <= 19){
-    digitSwap = true; digitZone = '00-19';
-  } else if(lastTwo >= 20 && lastTwo <= 39){
-    digitZone = '20-39';
-  } else if(lastTwo >= 40 && lastTwo <= 59){
-    digitSwap = true; digitZone = '40-59';
-  } else if(lastTwo >= 60 && lastTwo <= 79){
-    digitZone = '60-79';
-  } else {
-    digitSwap = true; digitZone = '80-99';
-  }
-  const algoBeforeDigit = baseAlgo;
-  if(digitSwap){
-    baseAlgo = (baseAlgo === 'ALGO1') ? 'ALGO2' : 'ALGO1';
-  }
-  const digitAlgoRule = {
-    lastTwo,
-    zone: digitZone,
-    swap: digitSwap,
-    before: algoBeforeDigit,
-    after: baseAlgo,
-    label: digitSwap
-      ? `2 derniers chiffres ${String(lastTwo).padStart(2,'0')} (${digitZone}) → INV ALGO ${algoBeforeDigit}↔${baseAlgo}`
-      : `2 derniers chiffres ${String(lastTwo).padStart(2,'0')} (${digitZone}) → NORMAL (pas de bascule)`
-  };
-
-  // ── INV TOTALE ALGO des JOURS IMPAIRS (jour calendaire) ──
-  // Jour impair (ex: 13 août) → ALGO1 ↔ ALGO2
-  // Jour pair → aucune bascule
-  const nowDate = new Date();
-  const dayOfMonth = nowDate.getDate(); // 1–31
-  const dayOdd = (dayOfMonth % 2 !== 0);
-  const algoBeforeDay = baseAlgo;
-  if(dayOdd){
-    baseAlgo = (baseAlgo === 'ALGO1') ? 'ALGO2' : 'ALGO1';
-  }
-  const dayAlgoRule = {
-    day: dayOfMonth,
-    odd: dayOdd,
-    swap: dayOdd,
-    before: algoBeforeDay,
-    after: baseAlgo,
-    label: dayOdd
-      ? `Jour ${dayOfMonth} (IMPAIR) → INV TOTALE ALGO ${algoBeforeDay}↔${baseAlgo}`
-      : `Jour ${dayOfMonth} (PAIR) → NORMAL (pas d'inv jour)`
-  };
-
-  // RATTRAPAGE : si actif, on force le même ALGO qui a perdu (max 2 tentatives) — prioritaire sur la bascule
-  const normalAlgo = baseAlgo;
+  // RATTRAPAGE : si actif, on force le même ALGO qui a perdu (max 3 tentatives)
+  const normalAlgo = (nextParity === regime.revelationParity) ? 'ALGO1' : 'ALGO2';
   const inRattrapage = rattrapage.active && rattrapage.algo && rattrapage.remaining > 0;
   const algoUsed = inRattrapage ? rattrapage.algo : normalAlgo;
   const rattrapageForced = inRattrapage;
@@ -1173,45 +1101,6 @@ function runCalc(raw){
     }
   }
 
-  // ── GROUPE C (00h–03h54 + 20h–23h59) : résultat type A, puis inv ♣️↔♥️ / ♦️↔♠️ ──
-  let groupCInv = null;
-  if(sel.groupC){
-    const cMap = {'♣️':'♥️','♥️':'♣️','♦️':'♠️','♠️':'♦️'};
-    const before = finalSuit;
-    const result = cMap[finalSuit] || finalSuit;
-    groupCInv = {
-      active: true,
-      before,
-      result,
-      detail: `GROUPE C (${String(nextH).padStart(2,'0')}h${String(nextM).padStart(2,'0')}) = A inversé → ♣️↔♥️ / ♦️↔♠️ · ${SUIT_EMOJI[before]}→${SUIT_EMOJI[result]}`
-    };
-    finalSuit = result;
-  }
-
-  // ── JOUR IMPAIR : après inv ALGO1↔ALGO2, réinversion résultat ♣️↔♥️ / ♦️↔♠️ ──
-  let daySuitInv = null;
-  if(dayOdd){
-    const dMap = {'♣️':'♥️','♥️':'♣️','♦️':'♠️','♠️':'♦️'};
-    const before = finalSuit;
-    const result = dMap[finalSuit] || finalSuit;
-    daySuitInv = {
-      active: true,
-      day: dayOfMonth,
-      before,
-      result,
-      detail: `Jour ${dayOfMonth} IMPAIR → réinv ♣️↔♥️ / ♦️↔♠️ · ${SUIT_EMOJI[before]}→${SUIT_EMOJI[result]}`
-    };
-    finalSuit = result;
-  } else {
-    daySuitInv = {
-      active: false,
-      day: dayOfMonth,
-      before: finalSuit,
-      result: finalSuit,
-      detail: `Jour ${dayOfMonth} PAIR → pas de réinv couleurs`
-    };
-  }
-
   // ── INV RATTRAPAGE (basée sur la couleur du jeu perdu) ──
   // Appliquée uniquement si on est en cycle de rattrapage
   let rattrapageInv = null;
@@ -1241,8 +1130,8 @@ function runCalc(raw){
     : { forced:false, algo:null, remainingBefore:0, remainingAfter:0, lostSuit:null, lostColor:null };
 
   return {num,p1,p2,nextNum,nextH,nextM,avantDernier,dernierDigit,sel,subEngine,algoResult,finalInv,finalSuit,
-          hyperGlobal,milieuRule,temporalInv,groupCInv,daySuitInv,rattrapageInv,isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime},
-          rattrapageForced,rattrapageSnapshot,normalAlgo,digitAlgoRule,dayAlgoRule};
+          hyperGlobal,milieuRule,temporalInv,rattrapageInv,isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime},
+          rattrapageForced,rattrapageSnapshot,normalAlgo};
 }
 
 function showError(msg){const b=document.getElementById('error-box');b.textContent='⚠ '+msg;b.style.display='block';}
@@ -1250,62 +1139,28 @@ function hideError(){document.getElementById('error-box').style.display='none';}
 function showWaiting(msg){const b=document.getElementById('waiting-box');b.textContent='⏳ '+msg;b.style.display='block';}
 function hideWaiting(){document.getElementById('waiting-box').style.display='none';}
 
-// ── Exploitable dès que P1 a sa main finale (max 3 cartes) ──
-// Sur le canal, le ▶️ peut rester affiché devant P1 même quand P1 a déjà 3 cartes.
-// Règle : si P1 a déjà 3 cartes → on IGNORE le ▶️ / ⏰ et on prédit.
-// Exemple : ⏰ #N144. ▶️2(K♠️J♦️2♠️) - ▶️0(8♦️2♣️)
-//   → filtré mentalement : #N144. 2(K♠️J♦️2♠️) - ▶️0(8♦️2♣️) → GO
+// ── Détecte si la manche affichée est réellement TERMINÉE et exploitable ──
+// Symboles Telegram : ⏰ = manche en cours, ▶ = ce côté doit encore tirer une carte.
+//  • Aucun ▶ dans le texte           → manche terminée → exploitable
+//  • ▶ situé avant la 1ère parenthèse (P1/Joueur)  → P1 tire encore → PAS exploitable
+//  • ▶ situé entre P1 et P2 (donc sur P2/Banquier) → P1 déjà final → exploitable
 function checkGameReadiness(raw){
   if(!raw) return {usable:false, reason:'empty', detail:'Aucune donnée.'};
   const parenIdxs=[];
   for(let i=0;i<raw.length;i++){ if(raw[i]==='(') parenIdxs.push(i); }
   if(parenIdxs.length<2){
-    return {usable:false, reason:'incomplete', detail:'Distribution P1/P2 pas encore affichée — en attente.'};
+    return {usable:false, reason:'incomplete', detail:"Le jeu n'affiche pas encore les deux mains (P1/P2) — en attente."};
   }
   const idxP1Open=parenIdxs[0], idxP2Open=parenIdxs[1];
-
-  let p1Count=0, p2Count=0;
-  try{
-    const parsed = parseGame(raw);
-    p1Count = (parsed.p1||[]).length;
-    p2Count = (parsed.p2||[]).length;
-  }catch(e){
-    const g1 = raw.slice(idxP1Open+1, idxP2Open);
-    const g2Close = raw.indexOf(')', idxP2Open);
-    const g2 = raw.slice(idxP2Open+1, g2Close===-1?raw.length:g2Close);
-    p1Count = (g1.match(/(?:10|[2-9AJQK])/gi)||[]).length;
-    p2Count = (g2.match(/(?:10|[2-9AJQK])/gi)||[]).length;
-  }
-
-  // PRIORITÉ : P1 a déjà 3 cartes (tir max) → GO, même si ▶️/⏰ encore affichés
-  if(p1Count >= 3){
-    return {usable:true, reason:'p1-3-done', detail:'P1 a 3 cartes (max) — ▶️/⏰ ignorés — pred/correction immédiates.'};
-  }
-
-  // P1 a 2 cartes : GO si le ▶️ n'est plus sur P1, OU si aucune 3e carte n'est attendue côté score 2-2
   const chevronIdx=raw.indexOf('▶');
-  const playIdx = raw.indexOf('▶️') !== -1 ? raw.indexOf('▶️') : raw.indexOf('▶');
-  const markerIdx = (function(){
-    const a = raw.indexOf('▶️');
-    const b = raw.indexOf('▶');
-    if(a===-1) return b;
-    if(b===-1) return a;
-    return Math.min(a,b);
-  })();
-
-  // ▶️ encore strictement avant P1 et P1 n'a que 2 cartes → possible 3e carte en cours
-  // Mais si on a déjà 2 cartes P1 + 2 P2 et format clair, on autorise quand même le 2-2
-  if(p1Count >= 2 && p2Count >= 1){
-    // Si ▶️ est AVANT la parenthèse P1 et P1 n'a que 2 cartes, le canal affiche souvent
-    // encore le marqueur par erreur — on GO quand même dès que 2 cartes P1 sont lisibles
-    // (la 3e arrivera dans un message suivant si besoin, et on recalculera)
-    return {usable:true, reason:'p1-2-done', detail:'P1 a 2+ cartes — pred/correction (▶️ canal ignoré si cartes déjà là).'};
+  if(chevronIdx===-1) return {usable:true, reason:'complete'};
+  if(chevronIdx<idxP1Open){
+    return {usable:false, reason:'p1-pending', detail:'Le Joueur (P1) doit encore tirer sa 3ème carte — en attente.'};
   }
-
-  if(p1Count < 2){
-    return {usable:false, reason:'p1-short', detail:"P1 n'a pas encore 2 cartes — en attente."};
+  if(chevronIdx<idxP2Open){
+    return {usable:true, reason:'p2-pending-ok', detail:'P1 déjà final, le Banquier (P2) tire encore — données exploitables.'};
   }
-  return {usable:false, reason:'p2-display', detail:'Donne initiale P2 pas encore affichée — en attente.'};
+  return {usable:false, reason:'ambiguous', detail:'Position du symbole ▶ ambiguë — en attente de confirmation.'};
 }
 
 function calculate(){
@@ -1316,7 +1171,7 @@ function calculate(){
 
   const readiness = checkGameReadiness(raw);
   if(!readiness.usable){
-    showWaiting(readiness.detail || 'En attente de la main finale du Joueur (P1).');
+    showWaiting(readiness.detail || 'Manche en cours — en attente de fin de tirage.');
     return;
   }
 
@@ -1343,7 +1198,7 @@ function calculate(){
       document.getElementById('game-input').value='';
     }catch(e){showError(e.message);}
     btn.classList.remove('loading');btn.textContent='⬡ CALCULER LA PRÉDICTION ⬡';
-  },50);
+  },300);
 }
 
 function renderResult(r){
@@ -1362,9 +1217,7 @@ function renderResult(r){
   const hParite=(r.nextH%2===0)?'PAIR':'IMPAIR';
   const avantDernierParite=r.avantDernier%2===0?'PAIR':'IMPAIR';
   const minTranche=r.nextM<=11?'00-11':'12-59';
-  const grpLetter = (r.sel && r.sel.group) ? r.sel.group : ((r.nextH>=20&&r.nextH<=23)?'C':(r.nextH<=9?'A':'B'));
-  const grpBand = grpLetter==='C' ? '00-03h54+20-23 (=A + inv ♣️↔♥️/♦️↔♠️)' : (grpLetter==='A' ? '03h55-09' : '10-19');
-  const selectorLine=`GROUPE ${grpLetter} [${grpBand}] · H=${r.nextH}(${hParite}) · AV-DERN=${r.avantDernier}(${avantDernierParite}) · MIN=${r.nextM}(${minTranche}) → ${r.subEngine} + ${r.sel.invLabel}`;
+  const selectorLine=`GROUPE ${[1,2,3,4,5,6,7,8,9,20,21,22,23,24,0].includes(r.nextH)?'A':'B'} · H=${r.nextH}(${hParite}) · AV-DERN=${r.avantDernier}(${avantDernierParite}) · MIN=${r.nextM}(${minTranche}) → ${r.subEngine} + ${r.sel.invLabel}`;
   const fibOverrideLabel=ar.fibMod===0?'ALGO NORMAL CONSERVÉ':ar.fibMod===1?'FIB FORCE ALGO 1':ar.fibMod===2?'FIB FORCE ALGO 2':'FIB INVERSE ALGO';
   const algoParity=ar.algoEven?`${ar.algo} (PAIR)`:`${ar.algo} (IMPAIR)`;
   const numParity=ar.numEven?`${ar.reducedDigit} (PAIR)`:`${ar.reducedDigit} (IMPAIR)`;
@@ -1372,26 +1225,10 @@ function renderResult(r){
   const badges=[
     `<div class="badge badge-revelation">🃏 RÉVÉLATION — ${r.isRevelationGame?`DÉTECTÉE sur ce jeu (#N${r.num}, format 3-3)`:'aucune révélation sur ce jeu'} · Régime actif : ${r.regimeSnapshot.source}</div>`,
     `<div class="badge badge-engine">◆ ROUTAGE — Prochain #N${r.nextNum} (${r.nextParity}) vs régime (${r.regimeSnapshot.revelationParity}) → ${r.algoUsed} PRÉDIT P1${r.rattrapageForced?` · ⏱ RATTRAPAGE (${r.rattrapageSnapshot.remainingBefore}→${r.rattrapageSnapshot.remainingAfter})`:''}</div>`,
-    ...(r.digitAlgoRule
-      ? [r.digitAlgoRule.swap
-          ? `<div class="badge badge-transform">⇄ BASCULE 2 DERNIERS CHIFFRES — ${r.digitAlgoRule.label}</div>`
-          : `<div class="badge badge-transform" style="opacity:.55">⇄ 2 DERNIERS CHIFFRES — ${r.digitAlgoRule.label}</div>`]
-      : []),
-    ...(r.dayAlgoRule
-      ? [r.dayAlgoRule.swap
-          ? `<div class="badge badge-transform">📅 INV JOUR IMPAIR — ${r.dayAlgoRule.label}</div>`
-          : `<div class="badge badge-transform" style="opacity:.55">📅 JOUR — ${r.dayAlgoRule.label}</div>`]
-      : []),
-    ...(r.daySuitInv && r.daySuitInv.active
-      ? [`<div class="badge badge-transform">📅 RÉINV COULEURS JOUR IMPAIR — ${r.daySuitInv.detail}</div>`]
-      : []),
     ...(r.rattrapageForced
       ? [`<div class="badge badge-temporal">⏱ RATTRAPAGE — ${r.algoUsed} forcé · réf. perdu ${r.rattrapageSnapshot.lostSuit?SUIT_EMOJI[r.rattrapageSnapshot.lostSuit]:'?'} (${r.rattrapageSnapshot.lostColor||'?'}) · restant ${r.rattrapageSnapshot.remainingAfter}/${RATTRAPAGE_MAX}${r.rattrapageInv&&r.rattrapageInv.active?` · inv ${SUIT_EMOJI[r.rattrapageInv.before]}→${SUIT_EMOJI[r.rattrapageInv.result]}`:''}</div>`]
       : []),
     `<div class="badge badge-selector">🎯 SÉLECTEUR — ${selectorLine}</div>`,
-    ...(r.groupCInv && r.groupCInv.active
-      ? [`<div class="badge badge-transform">🅲 GROUPE C — ${r.groupCInv.detail}</div>`]
-      : []),
     `<div class="badge badge-algo">⚙ ALGO INTERNE — BASE : ALGO ${ar.baseAlgo} · ${fibOverrideLabel} → ALGO FINAL : ALGO ${ar.algo}</div>`,
     `<div class="badge badge-parity">◈ PARITÉ — ALGO ${algoParity} · #N${r.nextNum} RÉDUIT = ${ar.reduceSteps.join(' → ')} → ${numParity}</div>`,
     `<div class="badge badge-transform">⚡ RÈGLE — ${ar.rule}</div>`,
@@ -1426,12 +1263,7 @@ function renderResult(r){
 <div class="det-row"><span class="det-label" style="color:#ffe066">Régime avant ce calcul</span><span class="det-val" style="color:#ffe066">${r.regimeBefore.source}</span></div>
 <div class="det-row"><span class="det-label" style="color:#ffe066">Régime après ce calcul</span><span class="det-val" style="color:#ffe066">${r.regimeSnapshot.source}</span></div>
 <div class="det-row"><span class="det-label" style="color:#77ffaa">Parité #N${r.nextNum}</span><span class="det-val" style="color:#77ffaa">${r.nextParity}</span></div>
-${r.digitAlgoRule?`<div class="det-row"><span class="det-label" style="color:#e0bf59">⇄ 2 derniers chiffres</span><span class="det-val" style="color:#e0bf59">${String(r.digitAlgoRule.lastTwo).padStart(2,'0')} (${r.digitAlgoRule.zone}) · ${r.digitAlgoRule.swap?'INV ALGO':'NORMAL'}</span></div>
-<div class="det-row"><span class="det-label" style="color:#e0bf59">Bascule ALGO</span><span class="det-val" style="color:#e0bf59">${r.digitAlgoRule.swap?`${r.digitAlgoRule.before} → ${r.digitAlgoRule.after}`:'aucune'}</span></div>`:''}
-${r.dayAlgoRule?`<div class="det-row"><span class="det-label" style="color:#ffbf80">📅 Jour calendaire</span><span class="det-val" style="color:#ffbf80">${r.dayAlgoRule.day} (${r.dayAlgoRule.odd?'IMPAIR':'PAIR'})</span></div>
-<div class="det-row"><span class="det-label" style="color:#ffbf80">Inv. ALGO jour impair</span><span class="det-val" style="color:#ffbf80">${r.dayAlgoRule.swap?`${r.dayAlgoRule.before} → ${r.dayAlgoRule.after}`:'aucune'}</span></div>`:''}
-${r.daySuitInv?`<div class="det-row"><span class="det-label" style="color:#ffbf80">Réinv. couleurs jour</span><span class="det-val" style="color:#ffbf80">${r.daySuitInv.active?`${SUIT_EMOJI[r.daySuitInv.before]} → ${SUIT_EMOJI[r.daySuitInv.result]} (♣️↔♥️/♦️↔♠️)`:'aucune'}</span></div>`:''}
-<div class="det-row"><span class="det-label" style="color:#77ffaa">MOTEUR ROUTÉ (après bascule)</span><span class="det-val" style="color:#77ffaa">${r.normalAlgo || r.algoUsed}</span></div>
+<div class="det-row"><span class="det-label" style="color:#77ffaa">MOTEUR ROUTÉ (normal)</span><span class="det-val" style="color:#77ffaa">${r.normalAlgo || r.algoUsed}</span></div>
 <div class="det-row"><span class="det-label" style="color:#ffbf80">⏱ RATTRAPAGE</span><span class="det-val" style="color:#ffbf80">${r.rattrapageForced?`ACTIF → ${r.algoUsed} forcé (${r.rattrapageSnapshot.remainingBefore}→${r.rattrapageSnapshot.remainingAfter} restant)`:'INACTIF'}</span></div>
 ${r.rattrapageForced?`<div class="det-row"><span class="det-label" style="color:#ffbf80">Réf. jeu perdu</span><span class="det-val" style="color:#ffbf80">${r.rattrapageSnapshot.lostSuit?SUIT_EMOJI[r.rattrapageSnapshot.lostSuit]:'—'} (${r.rattrapageSnapshot.lostColor||'?'})</span></div>`:''}
 ${r.rattrapageInv?`<div class="det-row"><span class="det-label" style="color:#ffbf80">Inv. rattrapage</span><span class="det-val" style="color:#ffbf80">${r.rattrapageInv.detail}${r.rattrapageInv.active?` · ${SUIT_EMOJI[r.rattrapageInv.before]}→${SUIT_EMOJI[r.rattrapageInv.result]}`:''}</span></div>`:''}
@@ -1482,13 +1314,6 @@ ${r.milieuRule.active?`<div class="det-row"><span class="det-label" style="color
 <div class="det-row"><span class="det-label" style="color:#ffd977">Règle</span><span class="det-val" style="color:#ffd977">${r.temporalInv.label}</span></div>
 ${r.temporalInv.active?`<div class="det-row"><span class="det-label" style="color:#ffd977">Après INV TEMPORELLE</span><span class="det-val" style="color:#ffd977">${SUIT_EMOJI[r.temporalInv.before]} → ${SUIT_EMOJI[r.temporalInv.result]}</span></div>`:''}`;
   }
-  if(r.groupCInv && r.groupCInv.active){
-    detailsHTML+=`
-<hr class="det-sep">
-<div class="det-row"><span class="det-label" style="color:#80e080">🅲 GROUPE C (00h–03h54 + 20h–23h59)</span><span class="det-val" style="color:#80e080">ACTIF</span></div>
-<div class="det-row"><span class="det-label" style="color:#80e080">Principe</span><span class="det-val" style="color:#80e080">Tables A + inv ♣️↔♥️ / ♦️↔♠️</span></div>
-<div class="det-row"><span class="det-label" style="color:#80e080">Après GROUPE C</span><span class="det-val" style="color:#80e080">${SUIT_EMOJI[r.groupCInv.before]} → ${SUIT_EMOJI[r.groupCInv.result]}</span></div>`;
-  }
 
   detailsHTML+=`
 <hr class="det-sep">
@@ -1533,11 +1358,7 @@ function setLiveStatus(msg){
 function setLiveSource(payload){
   const box = document.getElementById('live-source');
   if(!box) return;
-  const chName = payload.channel_name ? `@${payload.channel_name}` : 'Telegram';
-  const chLabel = payload.channel_label === 'relais' || payload.fallback_used
-    ? ' <span style="color:#ffbf80">[RELAIS]</span>'
-    : ' <span style="color:#8fd6b3">[PRINCIPAL]</span>';
-  box.innerHTML = `<small>Dernière donnée chargée</small>${payload.normalized}<br><br><span style="color:#7ea6cc">Source : <a href="${payload.source_url}" target="_blank" rel="noopener" style="color:#7fb6e8">${chName}</a>${chLabel} · ${payload.published_at || 'heure inconnue'}</span>`;
+  box.innerHTML = `<small>Dernière donnée chargée</small>${payload.normalized}<br><br><span style="color:#7ea6cc">Source : <a href="${payload.source_url}" target="_blank" rel="noopener" style="color:#7fb6e8">message Telegram</a> · ${payload.published_at || 'heure inconnue'}</span>`;
 }
 
 // ── DÉMARRER LIVE ──
@@ -1620,12 +1441,9 @@ async function demarrerLive(){
     const revelInfo = lastRevel != null
       ? ` · Révélation auto #N${lastRevel} (${regime.revelationParity}) → routage ALGO actif`
       : ` · Aucune révélation 3-3 trouvée (routage par défaut)`;
-    const chInfo = data.channel_name
-      ? ` · source @${data.channel_name}${data.fallback_used || data.channel_label==='relais' ? ' [RELAIS]' : ' [PRINCIPAL]'}`
-      : '';
     statusBox.textContent = `✅ LIVE démarré · ${telegramHistoryCache.length} jeux Telegram analysés · `
       + `15 dernières parties : ${validCount} validées / ${invalidCount} ratées`
-      + `${skipped?` (${skipped} ignorées)`:''}${revelInfo}${chInfo}`;
+      + `${skipped?` (${skipped} ignorées)`:''}${revelInfo}`;
   }catch(e){
     statusBox.textContent = '✕ Erreur : '+e.message;
   }finally{
@@ -1654,7 +1472,7 @@ async function fetchLatestTelegramGame(silent=false){
     //    calcule que lorsque les données sont réellement finalisées et exploitables ──
     const readiness = checkGameReadiness(data.raw_text || data.normalized);
     if(!readiness.usable){
-      setLiveStatus(`⏳ #N${data.game_number} · ${readiness.detail || 'en attente de P1 final…'}`);
+      setLiveStatus(`⏳ #N${data.game_number} en cours · ${readiness.detail || 'en attente de fin de manche…'}`);
       return;
     }
 
@@ -1664,10 +1482,7 @@ async function fetchLatestTelegramGame(silent=false){
     const isNewUsable = liveLastUsableGameNum !== data.game_number;
     liveLastUsableGameNum = data.game_number;
     const revelTag = regime.revelationNum != null ? ` · régime #N${regime.revelationNum} (${regime.revelationParity})` : '';
-    const chTag = data.channel_name
-      ? ` · @${data.channel_name}${data.fallback_used || data.channel_label==='relais' ? ' [RELAIS]' : ' [PRINCIPAL]'}`
-      : '';
-    setLiveStatus(`Canal synchronisé · ${isNewUsable ? 'jeu terminé détecté' : 'dernier jeu (déjà traité) confirmé'} · #N${data.game_number}${revelTag}${chTag}`);
+    setLiveStatus(`Canal synchronisé · ${isNewUsable ? 'jeu terminé détecté' : 'dernier jeu (déjà traité) confirmé'} · #N${data.game_number}${revelTag}`);
     if(isNewUsable || !silent){
       calculate();
     }
@@ -1678,90 +1493,20 @@ async function fetchLatestTelegramGame(silent=false){
   }
 }
 
-let liveWakeLock = null;
-let liveAutoActive = false;
-let livePollWorker = null;
-
-async function requestLiveWakeLock(){
-  try{
-    if('wakeLock' in navigator){
-      liveWakeLock = await navigator.wakeLock.request('screen');
-      liveWakeLock.addEventListener('release', ()=>{ liveWakeLock = null; });
-    }
-  }catch(e){ /* permission / non supporté */ }
-}
-async function releaseLiveWakeLock(){
-  try{ if(liveWakeLock){ await liveWakeLock.release(); liveWakeLock = null; } }catch(e){}
-}
-
-function startLivePolling(){
-  stopLivePolling();
-  liveAutoActive = true;
-  // Worker : un peu plus résistant que setInterval dans l'onglet principal
-  try{
-    const workerCode = `
-      let t = null;
-      onmessage = function(e){
-        if(e.data === 'start'){
-          if(t) clearInterval(t);
-          t = setInterval(function(){ postMessage('tick'); }, 5000);
-        } else if(e.data === 'stop'){
-          if(t) clearInterval(t);
-          t = null;
-        }
-      };
-    `;
-    const blob = new Blob([workerCode], {type:'application/javascript'});
-    livePollWorker = new Worker(URL.createObjectURL(blob));
-    livePollWorker.onmessage = function(){ if(liveAutoActive) fetchLatestTelegramGame(true); };
-    livePollWorker.postMessage('start');
-  }catch(e){
-    liveAutoTimer = setInterval(()=>fetchLatestTelegramGame(true), 5000);
-  }
-  // Filet de sécurité setInterval (si worker bloqué)
-  if(!liveAutoTimer){
-    liveAutoTimer = setInterval(()=>{ if(liveAutoActive) fetchLatestTelegramGame(true); }, 5000);
-  }
-  requestLiveWakeLock();
-}
-function stopLivePolling(){
-  liveAutoActive = false;
-  if(liveAutoTimer){ clearInterval(liveAutoTimer); liveAutoTimer = null; }
-  if(livePollWorker){ try{ livePollWorker.postMessage('stop'); livePollWorker.terminate(); }catch(e){} livePollWorker = null; }
-  releaseLiveWakeLock();
-}
-
 function toggleLiveAutoRefresh(){
   const btn = document.getElementById('btn-live-auto');
-  if(liveAutoActive){
-    stopLivePolling();
+  if(liveAutoTimer){
+    clearInterval(liveAutoTimer);
+    liveAutoTimer = null;
     btn.textContent = 'AUTO REFRESH OFF';
     setLiveStatus('Auto-refresh désactivé.');
     return;
   }
-  startLivePolling();
+  liveAutoTimer = setInterval(()=>fetchLatestTelegramGame(true), 20000);
   btn.textContent = 'AUTO REFRESH ON';
-  setLiveStatus('Auto-refresh ON · sync 5s · écran maintenu actif si possible (Wake Lock). Garde l’onglet ouvert pour l’arrière-plan.');
+  setLiveStatus('Auto-refresh activé : vérification toutes les 20 secondes.');
   fetchLatestTelegramGame(true);
 }
-
-// Au retour au premier plan : sync immédiate (les navigateurs freinent le JS en arrière-plan)
-document.addEventListener('visibilitychange', ()=>{
-  if(document.visibilityState === 'visible'){
-    if(liveAutoActive){
-      requestLiveWakeLock();
-      fetchLatestTelegramGame(true);
-      setLiveStatus('Retour au premier plan — synchronisation immédiate…');
-    }
-  }
-});
-
-// Reprendre le Wake Lock si l’OS l’a relâché
-document.addEventListener('visibilitychange', ()=>{
-  if(document.visibilityState === 'visible' && liveAutoActive && !liveWakeLock){
-    requestLiveWakeLock();
-  }
-});
 
 window.addEventListener('load', ()=>{
   updateRegimeDisplay();

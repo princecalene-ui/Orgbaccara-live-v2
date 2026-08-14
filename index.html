@@ -286,11 +286,12 @@
   .live-source{margin-top:12px;padding:10px 12px;background:#0a0f14;border:1px solid #1a2735;border-radius:3px;font-family:'Courier Prime',monospace;font-size:.8rem;line-height:1.5;color:#d7ecff;word-break:break-word}
   .live-source small{display:block;color:#7ea6cc;margin-bottom:6px;font-family:'Rajdhani',sans-serif;letter-spacing:.12em;text-transform:uppercase}
 
-  /* Mode OPTION 1 / OPTION 2 */
-  .mode-select{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+  /* Mode OPTION 1 / 2 / 3 */
+  .mode-select{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px}
+  @media (max-width:560px){.mode-select{grid-template-columns:1fr}}
   .mode-btn{
-    padding:14px 10px;background:#0d0a0a;border:1px solid var(--border);border-radius:4px;
-    color:var(--ivory-dim);font-family:'Cinzel',serif;font-size:.68rem;letter-spacing:.1em;
+    padding:12px 8px;background:#0d0a0a;border:1px solid var(--border);border-radius:4px;
+    color:var(--ivory-dim);font-family:'Cinzel',serif;font-size:.62rem;letter-spacing:.08em;
     text-transform:uppercase;cursor:pointer;transition:all .2s;text-align:center;
   }
   .mode-btn:hover{border-color:var(--gold-dim);color:var(--gold)}
@@ -298,8 +299,8 @@
     border-color:var(--gold);color:var(--gold);background:linear-gradient(135deg,#1a1400,#2a1c00);
     box-shadow:0 0 14px #c9a84c44;
   }
-  .mode-btn .mode-title{display:block;font-size:.78rem;margin-bottom:4px;color:inherit}
-  .mode-btn .mode-desc{display:block;font-family:'Rajdhani',sans-serif;font-size:.72rem;font-weight:400;letter-spacing:.04em;opacity:.85;text-transform:none}
+  .mode-btn .mode-title{display:block;font-size:.72rem;margin-bottom:3px;color:inherit}
+  .mode-btn .mode-desc{display:block;font-family:'Rajdhani',sans-serif;font-size:.68rem;font-weight:400;letter-spacing:.03em;opacity:.85;text-transform:none}
   .mode-hint{font-size:.75rem;color:var(--ivory-dim);text-align:center;margin-bottom:12px;min-height:1.2em}
   .mode-hint.ready{color:var(--green-ok)}
   .prediction-oui{color:#80e080!important;text-shadow:0 0 20px #2d6a4f88}
@@ -315,7 +316,7 @@
     <h1>ORG BACC — RÉVÉLATION</h1>
     <span class="suit-deco">♣️ ♦️</span>
   </div>
-  <div class="subtitle">OPTION 1 Carte enseigne · OPTION 2 Parité OUI/NON · Jour UTC</div>
+  <div class="subtitle">OPT1 Enseigne · OPT2 Parité P1 · OPT3 Total ±10.5 · Jour UTC</div>
   <div class="author">AUTEUR : X_Code</div>
 </header>
 
@@ -366,14 +367,18 @@
     <div class="mode-select">
       <button type="button" class="mode-btn" id="opt1Btn" onclick="selectMode(1)">
         <span class="mode-title">OPTION 1</span>
-        <span class="mode-desc">Carte enseigne (couleur)</span>
+        <span class="mode-desc">Carte enseigne</span>
       </button>
       <button type="button" class="mode-btn" id="opt2Btn" onclick="selectMode(2)">
         <span class="mode-title">OPTION 2</span>
-        <span class="mode-desc">Parité — Total pair OUI / NON</span>
+        <span class="mode-desc">P1 total pair OUI/NON</span>
+      </button>
+      <button type="button" class="mode-btn" id="opt3Btn" onclick="selectMode(3)">
+        <span class="mode-title">OPTION 3</span>
+        <span class="mode-desc">Total ±10.5 pts</span>
       </button>
     </div>
-    <div class="mode-hint" id="modeHint">Sélectionnez OPTION 1 ou OPTION 2</div>
+    <div class="mode-hint" id="modeHint">Sélectionnez OPTION 1, 2 ou 3</div>
 
     <label for="game-input">Entrez le jeu précédent</label>
     <textarea id="game-input"
@@ -425,21 +430,26 @@ let telegramHistoryCache = [];  // 150 derniers jeux chargés depuis Telegram (s
 let globalBacktestStats  = null; // stats de fiabilité recalculées à partir de cette source commune
 let liveLastUsableGameNum = null; // dernier n° de jeu réellement TERMINÉ et déjà traité (évite de recalculer en boucle)
 
-// OPTION 1 = Carte enseigne | OPTION 2 = Parité OUI/NON
+// OPTION 1 = Carte enseigne | OPTION 2 = P1 total pair OUI/NON | OPTION 3 = Total ±10.5
 let selectedMode = null;
 function selectMode(mode){
   selectedMode = mode;
   const b1 = document.getElementById('opt1Btn');
   const b2 = document.getElementById('opt2Btn');
+  const b3 = document.getElementById('opt3Btn');
   const hint = document.getElementById('modeHint');
   if(b1) b1.classList.toggle('active', mode===1);
   if(b2) b2.classList.toggle('active', mode===2);
+  if(b3) b3.classList.toggle('active', mode===3);
   if(hint){
     if(mode===1){
-      hint.textContent = '✓ Mode actif : OPTION 1 — Carte enseigne (couleur P1/P2)';
+      hint.textContent = '✓ OPTION 1 — Carte enseigne (couleur P1/P2)';
+      hint.className = 'mode-hint ready';
+    } else if(mode===2){
+      hint.textContent = '✓ OPTION 2 — P1 aura un total de points PAIR ? OUI / NON';
       hint.className = 'mode-hint ready';
     } else {
-      hint.textContent = '✓ Mode actif : OPTION 2 — Parité (Total du jeu pair → OUI / NON)';
+      hint.textContent = '✓ OPTION 3 — Total combiné ≤10.5 (−) ou ≥11 (+)';
       hint.className = 'mode-hint ready';
     }
   }
@@ -681,16 +691,18 @@ function saveHistory(list){
 // Une seule entrée par numéro de jeu prédit : si elle existe déjà et est encore
 // en attente, on la met à jour (pas de doublon) ; si elle est déjà résolue, on n'y touche pas ;
 // sinon on la crée.
-function upsertHistoryEntry(gameNum, suitKey, algoUsed, isRattrapage, side){
+function upsertHistoryEntry(gameNum, suitKey, algoUsed, isRattrapage, side, predType){
   const list = loadHistory();
-  const existing = list.find(e=>e.gameNum===gameNum);
+  const existing = list.find(e=>e.gameNum===gameNum && (e.predType||'suit')===(predType||'suit'));
   const targetSide = side || 'P1';
+  const pType = predType || 'suit';
 
   if(existing){
     if(existing.status===null){
       existing.suitKey = suitKey;
       existing.algoUsed = algoUsed;
       existing.side = targetSide;
+      existing.predType = pType;
       if(isRattrapage) existing.rattrapage = true;
       saveHistory(list);
       renderHistory();
@@ -701,6 +713,7 @@ function upsertHistoryEntry(gameNum, suitKey, algoUsed, isRattrapage, side){
   list.unshift({
     id: Date.now() + '-' + Math.random().toString(36).slice(2,7),
     gameNum, suitKey, side: targetSide, algoUsed,
+    predType: pType,
     status: null, // null=en attente | 'valid' | 'invalid'
     rattrapage: !!isRattrapage,
     ts: new Date().toISOString()
@@ -839,15 +852,26 @@ function renderHistory(){
 
   listBox.innerHTML = list.map(e=>{
     const statusClass = e.status==='valid' ? 'status-valid' : (e.status==='invalid' ? 'status-invalid' : '');
-    const emoji = SUIT_EMOJI[e.suitKey] || '';
-    const red = isRed(e.suitKey);
+    const pType = e.predType || 'suit';
+    let displayVal, color;
+    if(pType==='parity'){
+      displayVal = e.suitKey; // OUI / NON
+      color = e.suitKey==='OUI' ? 'var(--green-ok)' : 'var(--red)';
+    } else if(pType==='total'){
+      displayVal = e.suitKey; // +10.5 / -10.5
+      color = String(e.suitKey).startsWith('+') ? 'var(--green-ok)' : 'var(--red)';
+    } else {
+      displayVal = SUIT_EMOJI[e.suitKey] || e.suitKey || '';
+      color = isRed(e.suitKey) ? '#cc4444' : 'var(--ivory)';
+    }
+    const typeTag = pType==='parity' ? 'OPT2' : (pType==='total' ? 'OPT3' : (e.side||'P1'));
     return `
     <div class="history-item ${statusClass}">
       <span class="hist-num">#N${e.gameNum}</span>
-      <span class="hist-suit" style="color:${red?'#cc4444':'var(--ivory)'}">${emoji}</span>
-      <span class="hist-label">${e.side||'P1'}${e.algoUsed?` <span class="hist-tag">[${e.algoUsed}]</span>`:''}${e.rattrapage?` <span class="hist-tag" style="color:#ffbf80">⏱ RATTR</span>`:''}${e.source==='live-seed'?` <span class="hist-tag hist-live">🔴 LIVE</span>`:(e.autoResolved?` <span class="hist-tag">auto</span>`:'')}</span>
+      <span class="hist-suit" style="color:${color};font-size:${pType==='suit'?'1rem':'.78rem'};min-width:${pType==='suit'?'22px':'48px'}">${displayVal}</span>
+      <span class="hist-label">${typeTag}${e.algoUsed?` <span class="hist-tag">[${e.algoUsed}]</span>`:''}${e.rattrapage?` <span class="hist-tag" style="color:#ffbf80">⏱ RATTR</span>`:''}${e.source==='live-seed'?` <span class="hist-tag hist-live">🔴 LIVE</span>`:(e.autoResolved?` <span class="hist-tag">auto</span>`:'')}</span>
       <div class="hist-actions">
-        <button class="hist-btn valid-btn ${e.status==='valid'?'active':''}" title="Validée chez le joueur" onclick="setHistoryStatus('${e.id}','valid')">✓</button>
+        <button class="hist-btn valid-btn ${e.status==='valid'?'active':''}" title="Validée" onclick="setHistoryStatus('${e.id}','valid')">✓</button>
         <button class="hist-btn invalid-btn ${e.status==='invalid'?'active':''}" title="Non passée" onclick="setHistoryStatus('${e.id}','invalid')">✕</button>
       </div>
     </div>`;
@@ -1290,7 +1314,7 @@ function checkGameReadiness(raw){
   return {usable:false, reason:'ambiguous', detail:'Position du symbole ▶ ambiguë — en attente de confirmation.'};
 }
 
-// ── OPTION 2 : Parité (Total pair → OUI / NON) — logique REVOLUTION TWO ──
+// ── Valeurs cartes style baccarat (A=1, 2-9, 10/J/Q/K=0) ──
 function getCardValueParity(v){
   if(v==='A') return 1;
   if(v==='10') return 10;
@@ -1298,6 +1322,10 @@ function getCardValueParity(v){
   const n=parseInt(v,10);
   return (!isNaN(n)&&n>=2&&n<=9)?n:0;
 }
+
+// ── OPTION 2 : P1 total PAIR ? OUI / NON ──
+// Base REVOLUTION TWO + inversion si :
+//   nextNum IMPAIR + pred NON + Add&Decomp IMPAIR + valueP1 > valueP2 → flip
 function runParityCalc(raw){
   const {num,p1,p2}=parseGame(raw);
   if(!p1.length||!p2.length) throw new Error('Cartes P1/P2 introuvables');
@@ -1306,6 +1334,7 @@ function runParityCalc(raw){
   const cardsSum=valueP1+valueP2;
   const cardsRed=reduceToDigit(cardsSum);
   const cardsSign=(cardsRed.digit%2===0)?'+':'-';
+  const cardsDigitOdd=(cardsRed.digit%2===1);
 
   const numStr=String(num);
   const is4Digit=numStr.length===4;
@@ -1328,15 +1357,64 @@ function runParityCalc(raw){
   const minuteRed=reduceToDigit(time.m);
   const minuteSign=(minuteRed.digit%2===0)?'+':'-';
 
-  const finalSign=(intermediateSign===minuteSign)?'+':'-';
-  const prediction=finalSign==='+'?'OUI':'NON';
+  let finalSign=(intermediateSign===minuteSign)?'+':'-';
+  let prediction=finalSign==='+'?'OUI':'NON';
   const predictedGameNum=num+2;
+  const nextIsOdd=(predictedGameNum%2===1);
+
+  // Inversion OPT2 : nextNum impair + pred NON + Add&Decomp impair + P1 > P2
+  let inverted=false;
+  let invDetail='pas d\'inversion';
+  if(nextIsOdd && prediction==='NON' && cardsDigitOdd && valueP1>valueP2){
+    prediction = 'OUI';
+    finalSign = '+';
+    inverted = true;
+    invDetail = `INV OPT2 : #N${predictedGameNum} IMPAIR · pred était NON · Add&Dec=${cardsRed.digit} IMPAIR · P1(${valueP1})>P2(${valueP2}) → OUI`;
+  }
 
   return {
     mode:'parity',
-    num, nextNum:predictedGameNum, prediction, finalSign,
-    is4Digit, time, valueP1, valueP2, cardsSum, cardsRed, cardsSign,
+    num, nextNum:predictedGameNum, prediction, finalSign, inverted, invDetail,
+    is4Digit, time, valueP1, valueP2, cardsSum, cardsRed, cardsSign, cardsDigitOdd,
     gameNumRuleText, gameNumRed, gameNumSign, intermediateSign, minuteRed, minuteSign,
+    p1First:p1[0], p2First:p2[0]
+  };
+}
+
+// ── OPTION 3 : Total combiné ±10.5 ──
+// Add&Decomp ≤5 → −10.5 | >5 → +10.5
+// Si ≤5 ET valueP1 > valueP2 → inversion −10.5 devient +10.5
+function runTotalCalc(raw){
+  const {num,p1,p2}=parseGame(raw);
+  if(!p1.length||!p2.length) throw new Error('Cartes P1/P2 introuvables');
+  const valueP1=getCardValueParity(p1[0].val);
+  const valueP2=getCardValueParity(p2[0].val);
+  const cardsSum=valueP1+valueP2;
+  const cardsRed=reduceToDigit(cardsSum);
+  const digit=cardsRed.digit;
+
+  let prediction, baseLabel;
+  if(digit<=5){
+    prediction = '-10.5';
+    baseLabel = `Add&Dec=${digit} ≤5 → TOTAL −10.5`;
+  } else {
+    prediction = '+10.5';
+    baseLabel = `Add&Dec=${digit} >5 → TOTAL +10.5`;
+  }
+
+  let inverted=false;
+  let invDetail='pas d\'inversion';
+  if(digit<=5 && valueP1>valueP2){
+    prediction = '+10.5';
+    inverted = true;
+    invDetail = `INV OPT3 : Add&Dec=${digit}≤5 mais P1(${valueP1})>P2(${valueP2}) → −10.5 devient +10.5`;
+  }
+
+  const predictedGameNum=num+2;
+  return {
+    mode:'total',
+    num, nextNum:predictedGameNum, prediction, inverted, invDetail, baseLabel,
+    valueP1, valueP2, cardsSum, cardsRed, digit,
     p1First:p1[0], p2First:p2[0]
   };
 }
@@ -1345,29 +1423,34 @@ function renderParityResult(r){
   document.getElementById('res-num').textContent=`#N${r.nextNum}`;
   document.getElementById('res-suit-emoji').innerHTML=
     `<span class="${r.prediction==='OUI'?'prediction-oui':'prediction-non'}" style="font-size:clamp(2.8rem,12vw,4.5rem);font-family:'Cinzel',serif;font-weight:900">${r.prediction}</span>`;
-  document.getElementById('res-suit-label').textContent=r.prediction==='OUI'?'TOTAL PAIR':'TOTAL IMPAIR';
+  document.getElementById('res-suit-label').textContent=r.prediction==='OUI'?'P1 TOTAL PAIR':'P1 TOTAL IMPAIR';
   document.getElementById('res-side').innerHTML=`<span class="side-tag">OPTION 2</span>`;
 
   lastCalcResult={...r, targetSide:'PARITY', algoUsed:'PARITÉ', finalSuit:null};
+  upsertHistoryEntry(r.nextNum, r.prediction, 'PARITÉ', false, 'OPT2', 'parity');
 
+  const invBadge = r.inverted
+    ? `<div class="badge badge-temporal">🔄 INVERSION OPT2 — ${r.invDetail}</div>`
+    : '';
   const badges=[
-    `<div class="badge badge-engine">◆ OPTION 2 — PARITÉ · Total du jeu pair → OUI / NON</div>`,
+    `<div class="badge badge-engine">◆ OPTION 2 — P1 aura un total PAIR ? → ${r.prediction}</div>`,
+    invBadge,
     `<div class="badge badge-parity">◈ CARTES 1ères — P1 ${r.p1First.val}${SUIT_EMOJI[r.p1First.suit]||''}(${r.valueP1}) + P2 ${r.p2First.val}${SUIT_EMOJI[r.p2First.suit]||''}(${r.valueP2}) = ${r.cardsSum} → ${r.cardsRed.digit} ${r.cardsSign==='+'?'PAIR':'IMPAIR'}</div>`,
     `<div class="badge badge-algo">⚙ NUMÉRO — ${r.gameNumRuleText} → ${r.gameNumRed.digit} ${r.gameNumSign==='+'?'PAIR':'IMPAIR'}</div>`,
     `<div class="badge badge-transform">⚡ INTERMÉDIAIRE — ${r.cardsSign} × ${r.gameNumSign} = ${r.intermediateSign}</div>`,
     `<div class="badge badge-temporal">⏱ MINUTE — ${String(r.time.h).padStart(2,'0')}h${String(r.time.m).padStart(2,'0')} → ${r.minuteRed.digit} ${r.minuteSign==='+'?'PAIR':'IMPAIR'}</div>`,
-    `<div class="badge badge-finalinv">✦ FINAL — ${r.intermediateSign} × ${r.minuteSign} = ${r.finalSign} → <b>${r.prediction}</b></div>`
-  ];
+    `<div class="badge badge-finalinv">✦ FINAL — ${r.intermediateSign} × ${r.minuteSign} = ${r.finalSign} → <b>${r.prediction}</b>${r.inverted?' (après inv)':''}</div>`
+  ].filter(Boolean);
   document.getElementById('badge-zone').innerHTML=badges.join('');
 
   document.getElementById('details-body').innerHTML=`
-<div class="det-row"><span class="det-label">Mode</span><span class="det-val">OPTION 2 — Parité</span></div>
+<div class="det-row"><span class="det-label">Mode</span><span class="det-val">OPTION 2 — P1 total pair</span></div>
 <div class="det-row"><span class="det-label">Jeu fourni</span><span class="det-val">#N${r.num}</span></div>
-<div class="det-row"><span class="det-label">Jeu prédit</span><span class="det-val">#N${r.nextNum} (N+2)</span></div>
+<div class="det-row"><span class="det-label">Jeu prédit</span><span class="det-val">#N${r.nextNum} (N+2) · ${(r.nextNum%2)?'IMPAIR':'PAIR'}</span></div>
 <hr class="det-sep">
 <div class="det-row"><span class="det-label">1ère carte P1</span><span class="det-val">${r.p1First.val}${SUIT_EMOJI[r.p1First.suit]||''} = ${r.valueP1}</span></div>
 <div class="det-row"><span class="det-label">1ère carte P2</span><span class="det-val">${r.p2First.val}${SUIT_EMOJI[r.p2First.suit]||''} = ${r.valueP2}</span></div>
-<div class="det-row"><span class="det-label">Somme cartes</span><span class="det-val">${r.cardsSum} → ${r.cardsRed.steps.join(' → ')} → ${r.cardsSign}</span></div>
+<div class="det-row"><span class="det-label">Add & Décomp</span><span class="det-val">${r.cardsSum} → ${r.cardsRed.steps.join(' → ')} → ${r.cardsSign}</span></div>
 <hr class="det-sep">
 <div class="det-row"><span class="det-label">Règle numéro</span><span class="det-val">${r.gameNumRuleText}</span></div>
 <div class="det-row"><span class="det-label">Signe numéro</span><span class="det-val">${r.gameNumRed.digit} → ${r.gameNumSign}</span></div>
@@ -1375,8 +1458,54 @@ function renderParityResult(r){
 <hr class="det-sep">
 <div class="det-row"><span class="det-label">Heure / Minute</span><span class="det-val">${String(r.time.h).padStart(2,'0')}h${String(r.time.m).padStart(2,'0')} → min ${r.minuteRed.digit} → ${r.minuteSign}</span></div>
 <div class="det-row"><span class="det-label">Calcul final</span><span class="det-val">${r.intermediateSign} × ${r.minuteSign} = ${r.finalSign}</span></div>
+${r.inverted?`<div class="det-row"><span class="det-label" style="color:#ffd977">🔄 Inversion OPT2</span><span class="det-val" style="color:#ffd977">${r.invDetail}</span></div>`:''}
 <hr class="det-sep">
-<div class="det-row"><span class="det-label">RÉSULTAT</span><span class="det-val det-result">#N${r.nextNum} — ${r.prediction} (${r.prediction==='OUI'?'TOTAL PAIR':'TOTAL IMPAIR'})</span></div>`;
+<div class="det-row"><span class="det-label">RÉSULTAT</span><span class="det-val det-result">#N${r.nextNum} — ${r.prediction} (P1 total ${r.prediction==='OUI'?'PAIR':'IMPAIR'})</span></div>`;
+
+  const zone=document.getElementById('result-zone');
+  zone.style.display='block';
+  document.getElementById('details-body').classList.remove('open');
+  document.getElementById('chevron').classList.remove('open');
+  setTimeout(()=>zone.scrollIntoView({behavior:'smooth',block:'start'}),100);
+}
+
+function renderTotalResult(r){
+  document.getElementById('res-num').textContent=`#N${r.nextNum}`;
+  const isPlus = r.prediction==='+10.5';
+  document.getElementById('res-suit-emoji').innerHTML=
+    `<span class="${isPlus?'prediction-oui':'prediction-non'}" style="font-size:clamp(2.4rem,11vw,3.8rem);font-family:'Cinzel',serif;font-weight:900">${r.prediction}</span>`;
+  document.getElementById('res-suit-label').textContent=isPlus?'TOTAL ≥ 11':'TOTAL ≤ 10';
+  document.getElementById('res-side').innerHTML=`<span class="side-tag">OPTION 3</span>`;
+
+  lastCalcResult={...r, targetSide:'TOTAL', algoUsed:'TOTAL±10.5', finalSuit:null};
+  upsertHistoryEntry(r.nextNum, r.prediction, 'TOTAL±10.5', false, 'OPT3', 'total');
+
+  const invBadge = r.inverted
+    ? `<div class="badge badge-temporal">🔄 INVERSION OPT3 — ${r.invDetail}</div>`
+    : '';
+  const badges=[
+    `<div class="badge badge-engine">◆ OPTION 3 — Total combiné P1+P2 → ${r.prediction}</div>`,
+    invBadge,
+    `<div class="badge badge-parity">◈ CARTES 1ères — P1 ${r.p1First.val}${SUIT_EMOJI[r.p1First.suit]||''}(${r.valueP1}) + P2 ${r.p2First.val}${SUIT_EMOJI[r.p2First.suit]||''}(${r.valueP2}) = ${r.cardsSum} → ${r.digit}</div>`,
+    `<div class="badge badge-algo">⚙ RÈGLE — ${r.baseLabel}</div>`,
+    `<div class="badge badge-finalinv">✦ RÉSULTAT — <b>${r.prediction}</b>${r.inverted?' (après inv)':''}</div>`
+  ].filter(Boolean);
+  document.getElementById('badge-zone').innerHTML=badges.join('');
+
+  document.getElementById('details-body').innerHTML=`
+<div class="det-row"><span class="det-label">Mode</span><span class="det-val">OPTION 3 — Total ±10.5</span></div>
+<div class="det-row"><span class="det-label">Jeu fourni</span><span class="det-val">#N${r.num}</span></div>
+<div class="det-row"><span class="det-label">Jeu prédit</span><span class="det-val">#N${r.nextNum} (N+2)</span></div>
+<hr class="det-sep">
+<div class="det-row"><span class="det-label">1ère carte P1</span><span class="det-val">${r.p1First.val}${SUIT_EMOJI[r.p1First.suit]||''} = ${r.valueP1}</span></div>
+<div class="det-row"><span class="det-label">1ère carte P2</span><span class="det-val">${r.p2First.val}${SUIT_EMOJI[r.p2First.suit]||''} = ${r.valueP2}</span></div>
+<div class="det-row"><span class="det-label">Add & Décomp</span><span class="det-val">${r.cardsSum} → ${r.cardsRed.steps.join(' → ')}</span></div>
+<div class="det-row"><span class="det-label">Chiffre final</span><span class="det-val hi-green">${r.digit} (${r.digit<=5?'≤5':'≥6'})</span></div>
+<hr class="det-sep">
+<div class="det-row"><span class="det-label">Règle de base</span><span class="det-val">${r.baseLabel}</span></div>
+${r.inverted?`<div class="det-row"><span class="det-label" style="color:#ffd977">🔄 Inversion OPT3</span><span class="det-val" style="color:#ffd977">${r.invDetail}</span></div>`:''}
+<hr class="det-sep">
+<div class="det-row"><span class="det-label">RÉSULTAT</span><span class="det-val det-result">#N${r.nextNum} — ${r.prediction} (${isPlus?'somme ≥11':'somme ≤10'})</span></div>`;
 
   const zone=document.getElementById('result-zone');
   zone.style.display='block';
@@ -1390,7 +1519,7 @@ function calculate(){
   hideWaiting();
 
   if(!selectedMode){
-    showError("Choisissez d'abord OPTION 1 (Carte enseigne) ou OPTION 2 (Parité).");
+    showError("Choisissez d'abord OPTION 1, 2 ou 3.");
     return;
   }
 
@@ -1408,13 +1537,17 @@ function calculate(){
   setTimeout(()=>{
     try{
       if(selectedMode===2){
-        // OPTION 2 — Parité OUI/NON
         const r=runParityCalc(raw);
         lastCalcResult=r;
         renderParityResult(r);
         document.getElementById('game-input').value='';
+      } else if(selectedMode===3){
+        const r=runTotalCalc(raw);
+        lastCalcResult=r;
+        renderTotalResult(r);
+        document.getElementById('game-input').value='';
       } else {
-        // OPTION 1 — Carte enseigne (moteur RÉVÉLATION existant)
+        // OPTION 1 — Carte enseigne
         const parsed = parseGame(raw);
         const autoVal = resolvePendingHistory(parsed.num, parsed.p1, parsed.p2);
         showAutoValidationFeedback(autoVal);
@@ -1584,6 +1717,8 @@ function copyPrediction(){
   const num=document.getElementById('res-num').textContent;
   let text;
   if(lastCalcResult && lastCalcResult.mode==='parity'){
+    text = `${num}: ${lastCalcResult.prediction} (P1 pair)`;
+  } else if(lastCalcResult && lastCalcResult.mode==='total'){
     text = `${num}: ${lastCalcResult.prediction}`;
   } else {
     const emoji=document.getElementById('res-suit-emoji').textContent;

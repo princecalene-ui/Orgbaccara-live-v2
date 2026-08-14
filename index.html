@@ -1632,6 +1632,294 @@ function checkGameReadiness(raw){
   return {usable:false, reason:'p2-display', detail:'Donne initiale P2 pas encore affichée — en attente.'};
 }
 
+
+// ══════════════════════════════════════════════════════
+//  RÉGIME INVERSION FORMAT (OPT2 / OPT3)
+//  3-3 = bascule globale  |  2-3 = annule / réactive  |  2-2 = one-shot prochain
+// ══════════════════════════════════════════════════════
+const FMT_INV_KEY = 'orgbacc_format_inversion_v1';
+function emptyFmtInv(){
+  return {
+    globalOn: false,          // inversion globale active (après 3-3 ou 2-3 réactivé)
+    oneShotNext: false,       // 2-2 : inverse uniquement le prochain calcul
+    lastFormat: null,         // '2-2' | '2-3' | '3-2' | '3-3'
+    source: 'Aucune (pas d\'inversion format)'
+  };
+}
+function loadFmtInv(){
+  try{
+    const raw = localStorage.getItem(FMT_INV_KEY);
+    if(!raw) return emptyFmtInv();
+    const o = JSON.parse(raw);
+    return {
+      globalOn: !!o.globalOn,
+      oneShotNext: !!o.oneShotNext,
+      lastFormat: o.lastFormat || null,
+      source: o.source || 'Aucune (pas d\'inversion format)'
+    };
+  }catch(e){ return emptyFmtInv(); }
+}
+function saveFmtInv(s){
+  try{ localStorage.setItem(FMT_INV_KEY, JSON.stringify(s)); }catch(e){}
+}
+let fmtInv = loadFmtInv();
+
+function detectHandFormat(p1, p2){
+  const a = (p1 && p1.length) || 0;
+  const b = (p2 && p2.length) || 0;
+  if(a === 3 && b === 3) return '3-3';
+  if(a === 2 && b === 3) return '2-3';
+  if(a === 3 && b === 2) return '3-2';
+  if(a === 2 && b === 2) return '2-2';
+  return a + '-' + b;
+}
+
+// Met à jour le régime d'inversion à partir du jeu fourni (avant de prédire le suivant)
+function applyFormatInversionFromGame(p1, p2, gameNum){
+  const fmt = detectHandFormat(p1, p2);
+  fmtInv.lastFormat = fmt;
+
+  if(fmt === '3-3'){
+    // Révélation : bascule globale
+    fmtInv.globalOn = !fmtInv.globalOn;
+    fmtInv.oneShotNext = false;
+    fmtInv.source = `#N${gameNum} format 3-3 → inversion globale ${fmtInv.globalOn ? 'ON' : 'OFF'}`;
+  } else if(fmt === '2-3' || fmt === '3-2'){
+    // 2-3 / 3-2 : annule si ON, réactive si était OFF après annulation récente
+    // Règle user : annule directement ; un 2-3 encore avant 3-3 réactive
+    if(fmtInv.globalOn){
+      fmtInv.globalOn = false;
+      fmtInv.source = `#N${gameNum} format ${fmt} → inversion ANNULÉE`;
+    } else {
+      // réactivation si on était off (ex: après une annulation précédente)
+      fmtInv.globalOn = true;
+      fmtInv.source = `#N${gameNum} format ${fmt} → inversion RÉACTIVÉE`;
+    }
+    fmtInv.oneShotNext = false;
+  } else if(fmt === '2-2'){
+    // 2-2 : one-shot sur le prochain jeu seulement
+    fmtInv.oneShotNext = true;
+    fmtInv.source = `#N${gameNum} format 2-2 → one-shot sur le prochain jeu` +
+      (fmtInv.globalOn ? ' (annule inversion pour 1 jeu)' : ' (active inversion pour 1 jeu)');
+  } else {
+    fmtInv.source = `#N${gameNum} format ${fmt} → pas de changement inversion`;
+  }
+  saveFmtInv(fmtInv);
+  return fmt;
+}
+
+// Doit-on inverser la prédiction OPT2/OPT3 pour CE calcul ?
+function shouldInvertOpt23(){
+  // one-shot 2-2 a priorité pour le prochain calcul
+  if(fmtInv.oneShotNext){
+    // Si global était ON → one-shot annule (donc pas d'inv) ; si OFF → one-shot active (inv)
+    const invert = !fmtInv.globalOn;
+    return { invert, reason: fmtInv.globalOn
+      ? '2-2 one-shot : annulation temporaire (pas d\'inv ce jeu)'
+      : '2-2 one-shot : inversion forcée ce jeu' };
+  }
+  if(fmtInv.globalOn){
+    return { invert: true, reason: 'Inversion globale active (3-3 / 2-3)' };
+  }
+  return { invert: false, reason: 'Pas d\'inversion format' };
+}
+
+function consumeOneShotIfAny(){
+  if(fmtInv.oneShotNext){
+    fmtInv.oneShotNext = false;
+    // après one-shot, le système reprend son état global
+    fmtInv.source = (fmtInv.globalOn
+      ? 'Après 2-2 one-shot → reprise inversion globale ON'
+      : 'Après 2-2 one-shot → reprise sans inversion');
+    saveFmtInv(fmtInv);
+  }
+}
+
+function getCardValueParity(v){
+  if(v==='A') return 1;
+  if(v==='10'||v==='J'||v==='Q'||v==='K') return 0;
+  const n=parseInt(v,10);
+  return (!isNaN(n)&&n>=2&&n<=9)?n:0;
+}
+
+// ── OPTION 2 : P1 total PAIR ? OUI / NON ──
+function runParityCalc(raw){
+  const {num,p1,p2}=parseGame(raw);
+  if(!p1.length||!p2.length) throw new Error('Cartes P1/P2 introuvables');
+
+  applyFormatInversionFromGame(p1, p2, num);
+
+  const valueP1=getCardValueParity(p1[0].val);
+  const valueP2=getCardValueParity(p2[0].val);
+  const cardsSum=valueP1+valueP2;
+  const cardsRed=reduceToDigit(cardsSum);
+  const cardsSign=(cardsRed.digit%2===0)?'+':'-';
+  const cardsDigitOdd=(cardsRed.digit%2===1);
+
+  const numStr=String(num);
+  const is4Digit=numStr.length===4;
+  let gameNumToProcess, gameNumRuleText;
+  if(is4Digit){
+    const d1=parseInt(numStr[numStr.length-2],10);
+    const d2=parseInt(numStr[numStr.length-1],10);
+    gameNumToProcess=d1+d2;
+    gameNumRuleText=`4 chiffres → derniers 2: ${d1}+${d2}=${gameNumToProcess}`;
+  } else {
+    gameNumToProcess=parseInt(numStr[numStr.length-1],10);
+    gameNumRuleText=`3 chiffres → dernier: ${gameNumToProcess}`;
+  }
+  const gameNumRed=reduceToDigit(gameNumToProcess);
+  const gameNumSign=(gameNumRed.digit%2===0)?'+':'-';
+  const intermediateSign=(cardsSign===gameNumSign)?'+':'-';
+  const time=numToTime(num);
+  const minuteRed=reduceToDigit(time.m);
+  const minuteSign=(minuteRed.digit%2===0)?'+':'-';
+  let finalSign=(intermediateSign===minuteSign)?'+':'-';
+  let prediction=finalSign==='+'?'OUI':'NON';
+  const predictedGameNum=num+2;
+  const nextIsOdd=(predictedGameNum%2===1);
+
+  let inverted=false;
+  let invDetail='pas d\'inversion moteur';
+  if(nextIsOdd && prediction==='NON' && cardsDigitOdd && valueP1>valueP2){
+    prediction = 'OUI';
+    finalSign = '+';
+    inverted = true;
+    invDetail = `INV moteur OPT2 : #N${predictedGameNum} IMPAIR · NON → OUI`;
+  }
+
+  // Inversion format (3-3 / 2-3 / 2-2)
+  const fmtDec = shouldInvertOpt23();
+  let formatInverted = false;
+  if(fmtDec.invert){
+    prediction = (prediction === 'OUI') ? 'NON' : 'OUI';
+    formatInverted = true;
+  }
+  consumeOneShotIfAny();
+
+  return {
+    mode:'parity',
+    num, nextNum:predictedGameNum, prediction, finalSign, inverted, invDetail,
+    formatInverted, formatReason: fmtDec.reason, fmtInvSnapshot:{...fmtInv},
+    is4Digit, time, valueP1, valueP2, cardsSum, cardsRed, cardsSign, cardsDigitOdd,
+    gameNumRuleText, gameNumRed, gameNumSign, intermediateSign, minuteRed, minuteSign,
+    p1First:p1[0], p2First:p2[0]
+  };
+}
+
+// ── OPTION 3 : Total combiné ±10.5 ──
+function runTotalCalc(raw){
+  const {num,p1,p2}=parseGame(raw);
+  if(!p1.length||!p2.length) throw new Error('Cartes P1/P2 introuvables');
+
+  applyFormatInversionFromGame(p1, p2, num);
+
+  const valueP1=getCardValueParity(p1[0].val);
+  const valueP2=getCardValueParity(p2[0].val);
+  const cardsSum=valueP1+valueP2;
+  const cardsRed=reduceToDigit(cardsSum);
+  const digit=cardsRed.digit;
+  const predictedGameNum=num+2;
+  const predTime = numToTime(predictedGameNum);
+  const hourOdd = (predTime.h % 2 === 1);
+
+  let prediction, baseLabel;
+  if(!hourOdd){
+    if(digit<=5){ prediction = '-10.5'; baseLabel = `H=${predTime.h} PAIR · Add&Dec=${digit} ≤5 → −10.5`; }
+    else { prediction = '+10.5'; baseLabel = `H=${predTime.h} PAIR · Add&Dec=${digit} >5 → +10.5`; }
+  } else {
+    if(digit<=5){ prediction = '+10.5'; baseLabel = `H=${predTime.h} IMPAIR · Add&Dec=${digit} ≤5 → +10.5`; }
+    else { prediction = '-10.5'; baseLabel = `H=${predTime.h} IMPAIR · Add&Dec=${digit} >5 → −10.5`; }
+  }
+
+  let inverted=false;
+  let invDetail='pas d\'inversion moteur';
+  if(digit<=5 && valueP1>valueP2){
+    const before = prediction;
+    prediction = (prediction === '+10.5') ? '-10.5' : '+10.5';
+    inverted = true;
+    invDetail = `Add&Dec≤5 + P1(${valueP1})>P2(${valueP2}) → ${before} devient ${prediction}`;
+  }
+
+  const fmtDec = shouldInvertOpt23();
+  let formatInverted = false;
+  if(fmtDec.invert){
+    prediction = (prediction === '+10.5') ? '-10.5' : '+10.5';
+    formatInverted = true;
+  }
+  consumeOneShotIfAny();
+
+  return {
+    mode:'total',
+    num, nextNum:predictedGameNum, prediction, inverted, invDetail, baseLabel,
+    formatInverted, formatReason: fmtDec.reason, fmtInvSnapshot:{...fmtInv},
+    valueP1, valueP2, cardsSum, cardsRed, digit, predTime, hourOdd,
+    p1First:p1[0], p2First:p2[0]
+  };
+}
+
+function renderParityResult(r){
+  document.getElementById('res-num').textContent=`#N${r.nextNum}`;
+  document.getElementById('res-suit-emoji').innerHTML=
+    `<span class="${r.prediction==='OUI'?'prediction-oui':'prediction-non'}" style="font-size:clamp(2.8rem,12vw,4.5rem);font-family:'Cinzel',serif;font-weight:900">${r.prediction}</span>`;
+  document.getElementById('res-suit-label').textContent=r.prediction==='OUI'?'P1 TOTAL PAIR':'P1 TOTAL IMPAIR';
+  document.getElementById('res-side').innerHTML=`<span class="side-tag">OPTION 2</span>`;
+  lastCalcResult={...r, targetSide:'PARITY', algoUsed:'PARITÉ', finalSuit:null};
+  upsertHistoryEntry(r.nextNum, r.prediction, 'PARITÉ', false);
+
+  const badges=[
+    `<div class="badge badge-engine">◆ OPTION 2 — P1 total PAIR ? → ${r.prediction}</div>`,
+    r.formatInverted ? `<div class="badge badge-temporal">🔄 INV FORMAT — ${r.formatReason} → résultat inversé</div>` : `<div class="badge badge-temporal" style="opacity:.6">INV FORMAT — ${r.formatReason}</div>`,
+    r.inverted ? `<div class="badge badge-temporal">🔄 INV MOTEUR OPT2 — ${r.invDetail}</div>` : '',
+    `<div class="badge badge-parity">◈ CARTES — P1 ${r.p1First.val}${SUIT_EMOJI[r.p1First.suit]||''}(${r.valueP1}) + P2 ${r.p2First.val}${SUIT_EMOJI[r.p2First.suit]||''}(${r.valueP2}) = ${r.cardsSum} → ${r.cardsRed.digit}</div>`,
+    `<div class="badge badge-finalinv">✦ FINAL — <b>${r.prediction}</b></div>`
+  ].filter(Boolean);
+  document.getElementById('badge-zone').innerHTML=badges.join('');
+  document.getElementById('details-body').innerHTML=`
+<div class="det-row"><span class="det-label">Mode</span><span class="det-val">OPTION 2 — P1 total pair</span></div>
+<div class="det-row"><span class="det-label">Jeu fourni / prédit</span><span class="det-val">#N${r.num} → #N${r.nextNum}</span></div>
+<div class="det-row"><span class="det-label">Régime inv. format</span><span class="det-val">${r.fmtInvSnapshot.source||'—'}</span></div>
+<div class="det-row"><span class="det-label">Décision inv.</span><span class="det-val">${r.formatReason}</span></div>
+<div class="det-row"><span class="det-label">RÉSULTAT</span><span class="det-val det-result">#N${r.nextNum} — ${r.prediction}</span></div>`;
+  const zone=document.getElementById('result-zone');
+  zone.style.display='block';
+  document.getElementById('details-body').classList.remove('open');
+  document.getElementById('chevron').classList.remove('open');
+  setTimeout(()=>zone.scrollIntoView({behavior:'smooth',block:'start'}),100);
+}
+
+function renderTotalResult(r){
+  document.getElementById('res-num').textContent=`#N${r.nextNum}`;
+  const isPlus = r.prediction==='+10.5';
+  document.getElementById('res-suit-emoji').innerHTML=
+    `<span class="${isPlus?'prediction-oui':'prediction-non'}" style="font-size:clamp(2.4rem,11vw,3.8rem);font-family:'Cinzel',serif;font-weight:900">${r.prediction}</span>`;
+  document.getElementById('res-suit-label').textContent=isPlus?'TOTAL ≥ 11':'TOTAL ≤ 10';
+  document.getElementById('res-side').innerHTML=`<span class="side-tag">OPTION 3</span>`;
+  lastCalcResult={...r, targetSide:'TOTAL', algoUsed:'TOTAL±10.5', finalSuit:null};
+  upsertHistoryEntry(r.nextNum, r.prediction, 'TOTAL±10.5', false);
+
+  const badges=[
+    `<div class="badge badge-engine">◆ OPTION 3 — Total combiné → ${r.prediction}</div>`,
+    r.formatInverted ? `<div class="badge badge-temporal">🔄 INV FORMAT — ${r.formatReason} → résultat inversé</div>` : `<div class="badge badge-temporal" style="opacity:.6">INV FORMAT — ${r.formatReason}</div>`,
+    r.inverted ? `<div class="badge badge-temporal">🔄 INV MOTEUR OPT3 — ${r.invDetail}</div>` : '',
+    `<div class="badge badge-algo">⚙ ${r.baseLabel}</div>`,
+    `<div class="badge badge-finalinv">✦ RÉSULTAT — <b>${r.prediction}</b></div>`
+  ].filter(Boolean);
+  document.getElementById('badge-zone').innerHTML=badges.join('');
+  document.getElementById('details-body').innerHTML=`
+<div class="det-row"><span class="det-label">Mode</span><span class="det-val">OPTION 3 — Total ±10.5</span></div>
+<div class="det-row"><span class="det-label">Jeu fourni / prédit</span><span class="det-val">#N${r.num} → #N${r.nextNum}</span></div>
+<div class="det-row"><span class="det-label">Régime inv. format</span><span class="det-val">${r.fmtInvSnapshot.source||'—'}</span></div>
+<div class="det-row"><span class="det-label">Décision inv.</span><span class="det-val">${r.formatReason}</span></div>
+<div class="det-row"><span class="det-label">RÉSULTAT</span><span class="det-val det-result">#N${r.nextNum} — ${r.prediction}</span></div>`;
+  const zone=document.getElementById('result-zone');
+  zone.style.display='block';
+  document.getElementById('details-body').classList.remove('open');
+  document.getElementById('chevron').classList.remove('open');
+  setTimeout(()=>zone.scrollIntoView({behavior:'smooth',block:'start'}),100);
+}
+
+
 function calculate(){
   hideError();
   hideWaiting();
@@ -1650,23 +1938,28 @@ function calculate(){
   btn.classList.add('loading');btn.textContent='⟳ CALCUL EN COURS…';
   setTimeout(()=>{
     try{
-      // 1) Valider d'abord la prédiction en attente pour CE jeu (peut activer le rattrapage)
       const parsed = parseGame(raw);
       const autoVal = resolvePendingHistory(parsed.num, parsed.p1);
       showAutoValidationFeedback(autoVal);
 
-      // 2) Calculer la prédiction suivante (prend en compte un rattrapage éventuellement activé)
-      const r=runCalc(raw);
-      lastCalcResult=r;
-
-      // 3) Consommer une tentative de rattrapage si cette prédiction a été forcée
-      if(r.rattrapageForced){
-        consumeRattrapageAttempt();
+      if(selectedMode===2){
+        const r=runParityCalc(raw);
+        lastCalcResult=r;
+        renderParityResult(r);
+        document.getElementById('game-input').value='';
+      } else if(selectedMode===3){
+        const r=runTotalCalc(raw);
+        lastCalcResult=r;
+        renderTotalResult(r);
+        document.getElementById('game-input').value='';
+      } else {
+        const r=runCalc(raw);
+        lastCalcResult=r;
+        if(r.rattrapageForced){ consumeRattrapageAttempt(); }
+        updateRegimeDisplay();
+        renderResult(r);
+        document.getElementById('game-input').value='';
       }
-      updateRegimeDisplay();
-
-      renderResult(r);
-      document.getElementById('game-input').value='';
     }catch(e){showError(e.message);}
     btn.classList.remove('loading');btn.textContent='⬡ CALCULER LA PRÉDICTION ⬡';
   },50);

@@ -750,7 +750,7 @@ function selectMode(mode){
   if(b3) b3.classList.toggle('active', mode===3);
   if(hint){
     if(mode===1){ hint.textContent = '✓ OPTION 1 — Carte enseigne (couleur P1)'; hint.className = 'mode-hint ready'; }
-    else if(mode===2){ hint.textContent = '✓ OPTION 2 — P1 total PAIR ? OUI / NON'; hint.className = 'mode-hint ready'; }
+    else if(mode===2){ hint.textContent = '✓ OPTION 2 — Le total P1 sera-t-il PAIR ? → OUI ou NON'; hint.className = 'mode-hint ready'; }
     else { hint.textContent = '✓ OPTION 3 — Total combiné ≤10.5 (−) ou ≥11 (+)'; hint.className = 'mode-hint ready'; }
   }
 }
@@ -1384,6 +1384,10 @@ function runCalc(raw){
     saveRegime();
   }
 
+  // Régime inversion format OPT1/2/3 (3-3 / 2-3 / 2-2)
+  applyFormatInversionFromGame(p1, p2, num);
+
+
   const nextNum=num+1;
   const nextParity = (nextNum % 2 === 0) ? 'PAIR' : 'IMPAIR';
   // Règle de relais : parité(prochain N°) === parité(dernière révélation) → ALGO1, sinon ALGO2
@@ -1564,9 +1568,24 @@ function runCalc(raw){
       }
     : { forced:false, algo:null, remainingBefore:0, remainingAfter:0, lostSuit:null, lostColor:null };
 
+  // ── INV FORMAT ULTIME OPT1 (au-dessus de toute la chaîne) ──
+  let formatSuitInv = null;
+  {
+    const dec = shouldInvertOpt1Suit(finalSuit);
+    formatSuitInv = {
+      active: dec.invert,
+      map: dec.map,
+      before: finalSuit,
+      result: dec.result,
+      reason: dec.reason
+    };
+    finalSuit = dec.result;
+    consumeOneShotIfAny();
+  }
+
   return {num,p1,p2,nextNum,nextH,nextM,avantDernier,dernierDigit,sel,subEngine,algoResult,finalInv,finalSuit,
-          hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime},
-          rattrapageForced,rattrapageSnapshot,normalAlgo,digitAlgoRule};
+          hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,formatSuitInv,isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime},
+          rattrapageForced,rattrapageSnapshot,normalAlgo,digitAlgoRule,fmtInvSnapshot:{...fmtInv}};
 }
 
 function showError(msg){const b=document.getElementById('error-box');b.textContent='⚠ '+msg;b.style.display='block';}
@@ -1633,16 +1652,25 @@ function checkGameReadiness(raw){
 }
 
 
+
 // ══════════════════════════════════════════════════════
-//  RÉGIME INVERSION FORMAT (OPT2 / OPT3)
+//  RÉGIME INVERSION FORMAT (OPT1 / OPT2 / OPT3)
 //  3-3 = bascule globale  |  2-3 = annule / réactive  |  2-2 = one-shot prochain
+//  OPT1 maps :
+//    inv 3-3 (globale) : ♠️↔♦️ / ♥️↔♣️
+//    inv 2-2 (one-shot): ♠️↔♣️ / ♦️↔♥️
+//  OPT2 : OUI ↔ NON
+//  OPT3 : −10.5 ↔ +10.5
 // ══════════════════════════════════════════════════════
 const FMT_INV_KEY = 'orgbacc_format_inversion_v1';
+const MAP_33 = {'♠️':'♦️','♦️':'♠️','♥️':'♣️','♣️':'♥️'}; // inversion 3-3
+const MAP_22 = {'♠️':'♣️','♣️':'♠️','♦️':'♥️','♥️':'♦️'}; // inversion 2-2
+
 function emptyFmtInv(){
   return {
-    globalOn: false,          // inversion globale active (après 3-3 ou 2-3 réactivé)
-    oneShotNext: false,       // 2-2 : inverse uniquement le prochain calcul
-    lastFormat: null,         // '2-2' | '2-3' | '3-2' | '3-3'
+    globalOn: false,
+    oneShotNext: false,
+    lastFormat: null,
     source: 'Aucune (pas d\'inversion format)'
   };
 }
@@ -1674,33 +1702,27 @@ function detectHandFormat(p1, p2){
   return a + '-' + b;
 }
 
-// Met à jour le régime d'inversion à partir du jeu fourni (avant de prédire le suivant)
 function applyFormatInversionFromGame(p1, p2, gameNum){
   const fmt = detectHandFormat(p1, p2);
   fmtInv.lastFormat = fmt;
 
   if(fmt === '3-3'){
-    // Révélation : bascule globale
     fmtInv.globalOn = !fmtInv.globalOn;
     fmtInv.oneShotNext = false;
-    fmtInv.source = `#N${gameNum} format 3-3 → inversion globale ${fmtInv.globalOn ? 'ON' : 'OFF'}`;
+    fmtInv.source = `#N${gameNum} format 3-3 → inversion globale ${fmtInv.globalOn ? 'ON (♠️↔♦️/♥️↔♣️)' : 'OFF'}`;
   } else if(fmt === '2-3' || fmt === '3-2'){
-    // 2-3 / 3-2 : annule si ON, réactive si était OFF après annulation récente
-    // Règle user : annule directement ; un 2-3 encore avant 3-3 réactive
     if(fmtInv.globalOn){
       fmtInv.globalOn = false;
       fmtInv.source = `#N${gameNum} format ${fmt} → inversion ANNULÉE`;
     } else {
-      // réactivation si on était off (ex: après une annulation précédente)
       fmtInv.globalOn = true;
-      fmtInv.source = `#N${gameNum} format ${fmt} → inversion RÉACTIVÉE`;
+      fmtInv.source = `#N${gameNum} format ${fmt} → inversion RÉACTIVÉE (♠️↔♦️/♥️↔♣️)`;
     }
     fmtInv.oneShotNext = false;
   } else if(fmt === '2-2'){
-    // 2-2 : one-shot sur le prochain jeu seulement
     fmtInv.oneShotNext = true;
-    fmtInv.source = `#N${gameNum} format 2-2 → one-shot sur le prochain jeu` +
-      (fmtInv.globalOn ? ' (annule inversion pour 1 jeu)' : ' (active inversion pour 1 jeu)');
+    fmtInv.source = `#N${gameNum} format 2-2 → one-shot prochain` +
+      (fmtInv.globalOn ? ' (annule inv globale 1 jeu)' : ' (active inv ♠️↔♣️/♦️↔♥️ 1 jeu)');
   } else {
     fmtInv.source = `#N${gameNum} format ${fmt} → pas de changement inversion`;
   }
@@ -1708,11 +1730,9 @@ function applyFormatInversionFromGame(p1, p2, gameNum){
   return fmt;
 }
 
-// Doit-on inverser la prédiction OPT2/OPT3 pour CE calcul ?
+// OPT2 / OPT3 : simple invert yes/no
 function shouldInvertOpt23(){
-  // one-shot 2-2 a priorité pour le prochain calcul
   if(fmtInv.oneShotNext){
-    // Si global était ON → one-shot annule (donc pas d'inv) ; si OFF → one-shot active (inv)
     const invert = !fmtInv.globalOn;
     return { invert, reason: fmtInv.globalOn
       ? '2-2 one-shot : annulation temporaire (pas d\'inv ce jeu)'
@@ -1724,10 +1744,29 @@ function shouldInvertOpt23(){
   return { invert: false, reason: 'Pas d\'inversion format' };
 }
 
+// OPT1 : which suit map to apply as ultimate inversion (after all other inv)
+function shouldInvertOpt1Suit(suit){
+  if(!suit) return { invert:false, result:suit, map:null, reason:'pas de couleur' };
+  // 2-2 one-shot prioritaires
+  if(fmtInv.oneShotNext){
+    if(fmtInv.globalOn){
+      // était en inv globale → one-shot annule → pas d'inv ce jeu
+      return { invert:false, result:suit, map:null, reason:'2-2 one-shot : annule inv globale (brut ce jeu)' };
+    }
+    // pas d'inv globale → one-shot active map 2-2
+    const result = MAP_22[suit] || suit;
+    return { invert: result!==suit, result, map:'22', reason:`2-2 one-shot → ♠️↔♣️/♦️↔♥️ · ${SUIT_EMOJI[suit]}→${SUIT_EMOJI[result]}` };
+  }
+  if(fmtInv.globalOn){
+    const result = MAP_33[suit] || suit;
+    return { invert: result!==suit, result, map:'33', reason:`Inv globale 3-3 → ♠️↔♦️/♥️↔♣️ · ${SUIT_EMOJI[suit]}→${SUIT_EMOJI[result]}` };
+  }
+  return { invert:false, result:suit, map:null, reason:'Pas d\'inversion format' };
+}
+
 function consumeOneShotIfAny(){
   if(fmtInv.oneShotNext){
     fmtInv.oneShotNext = false;
-    // après one-shot, le système reprend son état global
     fmtInv.source = (fmtInv.globalOn
       ? 'Après 2-2 one-shot → reprise inversion globale ON'
       : 'Après 2-2 one-shot → reprise sans inversion');
@@ -1862,7 +1901,7 @@ function renderParityResult(r){
   document.getElementById('res-num').textContent=`#N${r.nextNum}`;
   document.getElementById('res-suit-emoji').innerHTML=
     `<span class="${r.prediction==='OUI'?'prediction-oui':'prediction-non'}" style="font-size:clamp(2.8rem,12vw,4.5rem);font-family:'Cinzel',serif;font-weight:900">${r.prediction}</span>`;
-  document.getElementById('res-suit-label').textContent=r.prediction==='OUI'?'P1 TOTAL PAIR':'P1 TOTAL IMPAIR';
+  document.getElementById('res-suit-label').textContent=r.prediction==='OUI'?'OUI — total P1 PAIR':'NON — total P1 pas PAIR';
   document.getElementById('res-side').innerHTML=`<span class="side-tag">OPTION 2</span>`;
   lastCalcResult={...r, targetSide:'PARITY', algoUsed:'PARITÉ', finalSuit:null};
   upsertHistoryEntry(r.nextNum, r.prediction, 'PARITÉ', false);
@@ -2002,6 +2041,11 @@ function renderResult(r){
     `<div class="badge badge-selector">🎯 SÉLECTEUR — ${selectorLine}</div>`,
     ...(r.groupCInv && r.groupCInv.active
       ? [`<div class="badge badge-transform">🅲 GROUPE C — ${r.groupCInv.detail}</div>`]
+      : []),
+    ...(r.formatSuitInv
+      ? [r.formatSuitInv.active
+          ? `<div class="badge badge-hyper">🔄 INV FORMAT OPT1 — ${r.formatSuitInv.reason}</div>`
+          : `<div class="badge badge-hyper" style="opacity:.55">INV FORMAT OPT1 — ${r.formatSuitInv.reason}</div>`]
       : []),
     `<div class="badge badge-algo">⚙ ALGO INTERNE — BASE : ALGO ${ar.baseAlgo} · ${fibOverrideLabel} → ALGO FINAL : ALGO ${ar.algo}</div>`,
     `<div class="badge badge-parity">◈ PARITÉ — ALGO ${algoParity} · #N${r.nextNum} RÉDUIT = ${ar.reduceSteps.join(' → ')} → ${numParity}</div>`,

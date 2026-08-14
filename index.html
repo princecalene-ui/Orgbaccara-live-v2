@@ -350,7 +350,7 @@
 <div class="key-gate" id="keyGate">
   <div class="key-box">
     <h2>🔐 ACCÈS ABONNÉ</h2>
-    <p>Entrez votre clé d’abonnement pour débloquer le système.<br>Durée : <b style="color:var(--gold)">5 minutes</b> · une clé = une utilisation.</p>
+    <p>Entrez votre clé d’abonnement pour débloquer le système.<br>Durées : <b style="color:var(--gold)">5 min · 1 j · 8 j · 16 j · 31 j</b><br>Une clé = <b style="color:var(--gold)">une seule utilisation mondiale</b><br>(tous téléphones, PC et navigateurs).</p>
     <input type="password" id="keyInput" placeholder="Clé d’abonnement" autocomplete="off" onkeydown="if(event.key==='Enter')submitKey()">
     <button class="btn-key" onclick="submitKey()">Déverrouiller</button>
     <div class="key-error" id="keyError"></div>
@@ -482,21 +482,123 @@ let liveLastUsableGameNum = null; // dernier n° de jeu réellement TERMINÉ et 
 //  CLÉS D'ABONNEMENT (facile d'en ajouter)
 // ══════════════════════════════════════════════════════
 const SUB_KEYS = [
-  { key: 'Ber€Ye%#', durationMs: 5 * 60 * 1000 },
-  { key: '5minY<#',  durationMs: 5 * 60 * 1000 }
-  // Ajouter ici : { key: 'NOUVELLE', durationMs: 10*60*1000 }
+  // ══ 5 MINUTES (20) ══
+  { key:'Ber€Ye%#', durationMs:5*60*1000, label:'5 min' },
+  { key:'5minY<#', durationMs:5*60*1000, label:'5 min' },
+  { key:'Qk7#mP2x', durationMs:5*60*1000, label:'5 min' },
+  { key:'nR9$vL4w', durationMs:5*60*1000, label:'5 min' },
+  { key:'Zt3€bH8k', durationMs:5*60*1000, label:'5 min' },
+  { key:'Wm5&cY1q', durationMs:5*60*1000, label:'5 min' },
+  { key:'Jx6@dF0s', durationMs:5*60*1000, label:'5 min' },
+  { key:'Pu2!gT7a', durationMs:5*60*1000, label:'5 min' },
+  { key:'Hb4#rE9m', durationMs:5*60*1000, label:'5 min' },
+  { key:'Vc8$kN3p', durationMs:5*60*1000, label:'5 min' },
+  { key:'Sy1€wQ6j', durationMs:5*60*1000, label:'5 min' },
+  { key:'Ld7&uA5x', durationMs:5*60*1000, label:'5 min' },
+  { key:'Mf0@iO2z', durationMs:5*60*1000, label:'5 min' },
+  { key:'Gt9!pS4b', durationMs:5*60*1000, label:'5 min' },
+  { key:'Kw3#hC8v', durationMs:5*60*1000, label:'5 min' },
+  { key:'Rn6$eY1t', durationMs:5*60*1000, label:'5 min' },
+  { key:'Aq2€jM7n', durationMs:5*60*1000, label:'5 min' },
+  { key:'Xe5&lB0w', durationMs:5*60*1000, label:'5 min' },
+  { key:'Ui8@sD3k', durationMs:5*60*1000, label:'5 min' },
+  { key:'Yo4!fG9p', durationMs:5*60*1000, label:'5 min' },
+  // ══ 1 JOUR (20) ══
+  { key:'Dfhre+×1', durationMs:1*24*60*60*1000, label:'1 jour' },
+  { key:'9hfd¥¥£', durationMs:1*24*60*60*1000, label:'1 jour' },
+  { key:'Day#Kp82', durationMs:1*24*60*60*1000, label:'1 jour' },
+  { key:'Jr1$mN47', durationMs:1*24*60*60*1000, label:'1 jour' },
+  { key:'One€Vx93', durationMs:1*24*60*60*1000, label:'1 jour' },
+  { key:'Sol&Bq16', durationMs:1*24*60*60*1000, label:'1 jour' },
+  { key:'Lux@Ht50', durationMs:1*24*60*60*1000, label:'1 jour' },
+  { key:'Zen!Cw28', durationMs:1*24*60*60*1000, label:'1 jour' },
+  { key:'Arc#Pf61', durationMs:1*24*60*60*1000, label:'1 jour' },
+  { key:'Neb$Yl04', durationMs:1*24*60*60*1000, label:'1 jour' },
+  { key:'Orb€Rs37', durationMs:1*24*60*60*1000, label:'1 jour' },
+  { key:'Sky&Dm79', durationMs:1*24*60*60*1000, label:'1 jour' },
+  { key:'Ash@Gk12', durationMs:1*24*60*60*1000, label:'1 jour' },
+  { key:'Ion!Tb85', durationMs:1*24*60*60*1000, label:'1 jour' },
+  { key:'Vex#Nw43', durationMs:1*24*60*60*1000, label:'1 jour' },
+  { key:'Ply$Hu96', durationMs:1*24*60*60*1000, label:'1 jour' },
+  { key:'Qor€Mj20', durationMs:1*24*60*60*1000, label:'1 jour' },
+  { key:'Wiz&Fc58', durationMs:1*24*60*60*1000, label:'1 jour' },
+  { key:'Elm@Zp31', durationMs:1*24*60*60*1000, label:'1 jour' },
+  { key:'Fox!Rd67', durationMs:1*24*60*60*1000, label:'1 jour' },
+  // ══ 8 JOURS (20) ══
+  { key:'ddft%5ber1', durationMs:8*24*60*60*1000, label:'8 jours' },
+  { key:'s$64eci2@', durationMs:8*24*60*60*1000, label:'8 jours' },
+  { key:'6j@×fsqw3', durationMs:8*24*60*60*1000, label:'8 jours' },
+  { key:'Wk8#Tr25x', durationMs:8*24*60*60*1000, label:'8 jours' },
+  { key:'Oct$Lm90q', durationMs:8*24*60*60*1000, label:'8 jours' },
+  { key:'Huit€Bn14', durationMs:8*24*60*60*1000, label:'8 jours' },
+  { key:'Octo&Yk63', durationMs:8*24*60*60*1000, label:'8 jours' },
+  { key:'Hebdo@Ps7', durationMs:8*24*60*60*1000, label:'8 jours' },
+  { key:'Cycle!Vf2', durationMs:8*24*60*60*1000, label:'8 jours' },
+  { key:'Sem8#Dx41', durationMs:8*24*60*60*1000, label:'8 jours' },
+  { key:'Pass$Gh88', durationMs:8*24*60*60*1000, label:'8 jours' },
+  { key:'Acces€Wq5', durationMs:8*24*60*60*1000, label:'8 jours' },
+  { key:'Pro8&Jt36', durationMs:8*24*60*60*1000, label:'8 jours' },
+  { key:'Gold@Nr19', durationMs:8*24*60*60*1000, label:'8 jours' },
+  { key:'Elite!Cm70', durationMs:8*24*60*60*1000, label:'8 jours' },
+  { key:'Boost#Uy4', durationMs:8*24*60*60*1000, label:'8 jours' },
+  { key:'Prime$Kz2', durationMs:8*24*60*60*1000, label:'8 jours' },
+  { key:'Level€Hb9', durationMs:8*24*60*60*1000, label:'8 jours' },
+  { key:'Vault&Rq1', durationMs:8*24*60*60*1000, label:'8 jours' },
+  { key:'Token@Mx8', durationMs:8*24*60*60*1000, label:'8 jours' },
+  // ══ 16 JOURS (20) ══
+  { key:'Amaeon@#1', durationMs:16*24*60*60*1000, label:'16 jours' },
+  { key:'Alias!@#', durationMs:16*24*60*60*1000, label:'16 jours' },
+  { key:'kgf%/mmmv.', durationMs:16*24*60*60*1000, label:'16 jours' },
+  { key:'Hex16#Bp3', durationMs:16*24*60*60*1000, label:'16 jours' },
+  { key:'Dual$Rw71', durationMs:16*24*60*60*1000, label:'16 jours' },
+  { key:'Fort€Ny28', durationMs:16*24*60*60*1000, label:'16 jours' },
+  { key:'Max16&Qs5', durationMs:16*24*60*60*1000, label:'16 jours' },
+  { key:'Long@Vk94', durationMs:16*24*60*60*1000, label:'16 jours' },
+  { key:'Duree!Hj6', durationMs:16*24*60*60*1000, label:'16 jours' },
+  { key:'Span16#Tc', durationMs:16*24*60*60*1000, label:'16 jours' },
+  { key:'Deep$Fm40', durationMs:16*24*60*60*1000, label:'16 jours' },
+  { key:'Wide€Lz17', durationMs:16*24*60*60*1000, label:'16 jours' },
+  { key:'Core16&Xp', durationMs:16*24*60*60*1000, label:'16 jours' },
+  { key:'Axis@Bd53', durationMs:16*24*60*60*1000, label:'16 jours' },
+  { key:'Nova!Gw8', durationMs:16*24*60*60*1000, label:'16 jours' },
+  { key:'Pulse#Kr2', durationMs:16*24*60*60*1000, label:'16 jours' },
+  { key:'Shift$Yn6', durationMs:16*24*60*60*1000, label:'16 jours' },
+  { key:'Orbit€Hj9', durationMs:16*24*60*60*1000, label:'16 jours' },
+  { key:'Crux&Tm1', durationMs:16*24*60*60*1000, label:'16 jours' },
+  { key:'Apex16@Qw', durationMs:16*24*60*60*1000, label:'16 jours' },
+  // ══ 31 JOURS (20) ══
+  { key:'954ggg$%', durationMs:31*24*60*60*1000, label:'31 jours' },
+  { key:'iigdqq6%&', durationMs:31*24*60*60*1000, label:'31 jours' },
+  { key:'t5fddc€£', durationMs:31*24*60*60*1000, label:'31 jours' },
+  { key:'Mois31#Vx', durationMs:31*24*60*60*1000, label:'31 jours' },
+  { key:'Full$Bn48', durationMs:31*24*60*60*1000, label:'31 jours' },
+  { key:'Mens€Kp72', durationMs:31*24*60*60*1000, label:'31 jours' },
+  { key:'Month&Ry3', durationMs:31*24*60*60*1000, label:'31 jours' },
+  { key:'Lunar@Wf9', durationMs:31*24*60*60*1000, label:'31 jours' },
+  { key:'Cycle31!Q', durationMs:31*24*60*60*1000, label:'31 jours' },
+  { key:'ProM#Ht15', durationMs:31*24*60*60*1000, label:'31 jours' },
+  { key:'Elite$Dz6', durationMs:31*24*60*60*1000, label:'31 jours' },
+  { key:'Ultima€N2', durationMs:31*24*60*60*1000, label:'31 jours' },
+  { key:'Master&Jx', durationMs:31*24*60*60*1000, label:'31 jours' },
+  { key:'Crown@Lp4', durationMs:31*24*60*60*1000, label:'31 jours' },
+  { key:'Royal!Sm8', durationMs:31*24*60*60*1000, label:'31 jours' },
+  { key:'Omega#Cv1', durationMs:31*24*60*60*1000, label:'31 jours' },
+  { key:'Sigma$Yw7', durationMs:31*24*60*60*1000, label:'31 jours' },
+  { key:'Titan€Bf3', durationMs:31*24*60*60*1000, label:'31 jours' },
+  { key:'Atlas&Hk5', durationMs:31*24*60*60*1000, label:'31 jours' },
+  { key:'Zenith@M9', durationMs:31*24*60*60*1000, label:'31 jours' }
 ];
-const KEY_SESSION_STORE = 'orgbacc_sub_session_v1';
-const KEY_USED_STORE    = 'orgbacc_sub_used_v1';
+// ── Registre GLOBAL des clés (tous appareils / navigateurs) ──
+// 1) Priorité : /api/redeem-key sur TON serveur (même backend Telegram)
+// 2) Sinon    : Google Apps Script (URL ci-dessous, gratuit, 2 min de config)
+//
+// Colle ici l’URL de ton Apps Script une fois déployé (voir instructions en bas) :
+const KEY_LEDGER_URL = ''; // ex: 'https://script.google.com/macros/s/XXXX/exec'
+
+const KEY_SESSION_STORE = 'orgbacc_sub_session_v2';
 let keyTimerInterval = null;
 let systemUnlocked = false;
 
-function loadUsedKeys(){
-  try{ return JSON.parse(localStorage.getItem(KEY_USED_STORE)||'[]'); }catch(e){ return []; }
-}
-function saveUsedKeys(arr){
-  try{ localStorage.setItem(KEY_USED_STORE, JSON.stringify(arr)); }catch(e){}
-}
 function loadKeySession(){
   try{
     const raw = localStorage.getItem(KEY_SESSION_STORE);
@@ -518,10 +620,14 @@ function clearKeySession(){
 }
 function formatRemain(ms){
   if(ms < 0) ms = 0;
-  const s = Math.floor(ms/1000);
-  const m = Math.floor(s/60);
-  const ss = s % 60;
-  return `${String(m).padStart(2,'0')}:${String(ss).padStart(2,'0')}`;
+  const totalSec = Math.floor(ms/1000);
+  const days = Math.floor(totalSec / 86400);
+  const hours = Math.floor((totalSec % 86400) / 3600);
+  const mins = Math.floor((totalSec % 3600) / 60);
+  const secs = totalSec % 60;
+  if(days > 0) return `${days}j ${String(hours).padStart(2,'0')}h${String(mins).padStart(2,'0')}`;
+  if(hours > 0) return `${hours}h ${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')}`;
+  return `${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')}`;
 }
 function updateKeyTimerUI(){
   const bar = document.getElementById('keyTimerBar');
@@ -549,7 +655,8 @@ function updateKeyTimerUI(){
   if(bar){
     bar.classList.add('active');
     const cls = remain < 60000 ? 'crit' : (remain < 120000 ? 'warn' : '');
-    if(txt) txt.innerHTML = `<span class="${cls}">${formatRemain(remain)}</span> restantes`;
+    const plan = sess.label ? ` · ${sess.label}` : '';
+    if(txt) txt.innerHTML = `<span class="${cls}">${formatRemain(remain)}</span> restantes${plan}`;
   }
 }
 function startKeyTimer(){
@@ -571,9 +678,64 @@ function hideKeyGate(){
   if(main) main.style.pointerEvents = '';
   if(main) main.style.opacity = '';
 }
-function submitKey(){
+
+// Empreinte stable de la clé (on ne stocke jamais la clé en clair sur le registre)
+async function hashKey(str){
+  try{
+    const enc = new TextEncoder().encode('ORG_BACC_KEY_V1:' + str);
+    const buf = await crypto.subtle.digest('SHA-256', enc);
+    return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+  }catch(e){
+    // fallback simple si crypto.subtle indisponible
+    let h = 0;
+    const s = 'ORG_BACC_KEY_V1:' + str;
+    for(let i=0;i<s.length;i++){ h = ((h<<5)-h) + s.charCodeAt(i); h |= 0; }
+    return 'fb_' + Math.abs(h).toString(16) + '_' + s.length;
+  }
+}
+
+// Appel registre global : true = clé consommée avec succès, false = déjà utilisée / erreur
+async function redeemKeyGlobal(keyHash){
+  // 1) Backend maison (recommandé si tu as déjà /api/ pour Telegram)
+  try{
+    const res = await fetch('/api/redeem-key', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hash: keyHash })
+    });
+    if(res.ok){
+      const data = await res.json();
+      if(data && data.ok === true) return { ok: true, source: 'api' };
+      if(data && data.error === 'used') return { ok: false, error: 'used', source: 'api' };
+      return { ok: false, error: data && data.error ? data.error : 'reject', source: 'api' };
+    }
+    // 404 / 501 → pas d’endpoint, on tente le ledger externe
+  }catch(e){ /* réseau ou pas d’API */ }
+
+  // 2) Google Apps Script (registre mondial gratuit)
+  if(KEY_LEDGER_URL && KEY_LEDGER_URL.indexOf('http') === 0){
+    try{
+      const res = await fetch(KEY_LEDGER_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'redeem', hash: keyHash })
+      });
+      const data = await res.json();
+      if(data && data.ok === true) return { ok: true, source: 'gas' };
+      if(data && data.error === 'used') return { ok: false, error: 'used', source: 'gas' };
+      return { ok: false, error: (data && data.error) || 'reject', source: 'gas' };
+    }catch(e){
+      return { ok: false, error: 'network', source: 'gas' };
+    }
+  }
+
+  return { ok: false, error: 'no_ledger', source: 'none' };
+}
+
+async function submitKey(){
   const input = document.getElementById('keyInput');
   const err = document.getElementById('keyError');
+  const btn = document.querySelector('.btn-key');
   const val = (input && input.value || '').trim();
   if(!val){ if(err) err.textContent = 'Entrez une clé.'; return; }
 
@@ -583,30 +745,52 @@ function submitKey(){
     return;
   }
 
-  // Session encore active avec cette clé ?
+  // Session encore active (même appareil, après refresh) → OK sans re-consommer
   const sess = loadKeySession();
-  if(sess && sess.key === val && Date.now() < sess.expiresAt){
+  if(sess && sess.keyHash && Date.now() < sess.expiresAt){
+    // On ne re-teste pas la clé en clair, la session locale suffit jusqu’à expiration
     hideKeyGate();
     startKeyTimer();
     if(err) err.textContent = '';
     return;
   }
 
-  // Clé déjà consommée (même navigateur)
-  const used = loadUsedKeys();
-  if(used.includes(val)){
-    if(err) err.textContent = '✕ Cette clé a déjà été utilisée.';
-    return;
-  }
+  if(err) err.textContent = '⏳ Vérification mondiale de la clé…';
+  if(btn){ btn.disabled = true; btn.textContent = 'Vérification…'; }
 
-  used.push(val);
-  saveUsedKeys(used);
-  const expiresAt = Date.now() + match.durationMs;
-  saveKeySession({ key: val, expiresAt, startedAt: Date.now() });
-  if(input) input.value = '';
-  if(err) err.textContent = '';
-  hideKeyGate();
-  startKeyTimer();
+  try{
+    const keyHash = await hashKey(val);
+    const result = await redeemKeyGlobal(keyHash);
+
+    if(result.error === 'no_ledger'){
+      if(err) err.textContent = '⚠ Registre non configuré. Déploie le script de clés (voir instructions) ou /api/redeem-key.';
+      return;
+    }
+    if(result.error === 'network'){
+      if(err) err.textContent = '⚠ Réseau indisponible — impossible de valider la clé mondialement.';
+      return;
+    }
+    if(result.error === 'used' || result.ok === false){
+      if(err) err.textContent = '✕ Cette clé a déjà été utilisée (autre appareil / navigateur).';
+      return;
+    }
+
+    // Succès mondial → ouvre la session locale jusqu’à expiration
+    const expiresAt = Date.now() + match.durationMs;
+    saveKeySession({
+      keyHash,
+      expiresAt,
+      startedAt: Date.now(),
+      label: match.label || '',
+      durationMs: match.durationMs
+    });
+    if(input) input.value = '';
+    if(err) err.textContent = '';
+    hideKeyGate();
+    startKeyTimer();
+  }finally{
+    if(btn){ btn.disabled = false; btn.textContent = 'Déverrouiller'; }
+  }
 }
 function requireUnlock(){
   const sess = loadKeySession();
@@ -922,11 +1106,14 @@ function setHistoryStatus(id, status){
   entry.status = nextStatus;
   saveHistory(list);
   renderHistory();
-  // Rattrapage : perte → même ALGO + inv couleur (max 3) ; gain → fin
-  if(nextStatus === 'invalid' && entry.algoUsed){
-    onPredictionLost(entry.algoUsed, entry.suitKey);
-  } else if(nextStatus === 'valid' && rattrapage.active){
-    endRattrapage();
+  // Rattrapage uniquement pour les prédictions enseigne (OPT1)
+  const pType = entry.predType || 'suit';
+  if(pType === 'suit'){
+    if(nextStatus === 'invalid' && entry.algoUsed){
+      onPredictionLost(entry.algoUsed, entry.suitKey);
+    } else if(nextStatus === 'valid' && rattrapage.active){
+      endRattrapage();
+    }
   }
 }
 
@@ -936,28 +1123,78 @@ function clearHistory(){
   renderHistory();
 }
 
-// ── Résout automatiquement la prédiction en attente pour ce numéro de jeu ──
-// Compare la couleur prédite aux cartes du côté prédit (P1 ou P2 selon parité du jour).
+// Total baccarat d'une main (mod 10)
+function baccaratHandTotal(cards){
+  if(!cards || !cards.length) return null;
+  let sum = 0;
+  for(const c of cards){
+    const v = c.val;
+    if(v==='A') sum += 1;
+    else if(v==='10'||v==='J'||v==='Q'||v==='K') sum += 0;
+    else sum += (parseInt(v,10)||0);
+  }
+  return sum % 10;
+}
+
+// ── Résout automatiquement TOUTES les prédictions en attente pour ce n° ──
+// OPT1 (suit) : couleur présente dans P1 ou P2 selon side
+// OPT2 (parity) : P1 total pair → OUI / impair → NON
+// OPT3 (total) : somme des totaux P1+P2 ≤10 → -10.5 / ≥11 → +10.5
 function resolvePendingHistory(gameNum, p1Cards, p2Cards){
   const list = loadHistory();
-  const entry = list.find(e=>e.gameNum===gameNum && e.status===null);
-  if(!entry) return null;
-  const side = entry.side || 'P1';
-  const cards = (side === 'P2') ? p2Cards : p1Cards;
-  if(!cards || !cards.length) return null;
-  const actualSuits = new Set(cards.map(c=>c.suit));
-  entry.status = actualSuits.has(entry.suitKey) ? 'valid' : 'invalid';
-  entry.autoResolved = true;
-  entry.actualSuits = [...actualSuits];
+  const pending = list.filter(e=>e.gameNum===gameNum && e.status===null);
+  if(!pending.length) return null;
+
+  let lastEntry = null;
+  for(const entry of pending){
+    const pType = entry.predType || 'suit';
+    let ok = null;
+
+    if(pType === 'parity'){
+      const p1Tot = baccaratHandTotal(p1Cards);
+      if(p1Tot === null) continue;
+      const isEven = (p1Tot % 2 === 0);
+      const pred = entry.suitKey; // 'OUI' | 'NON'
+      ok = (pred === 'OUI' && isEven) || (pred === 'NON' && !isEven);
+      entry.actualTotal = p1Tot;
+    } else if(pType === 'total'){
+      const p1Tot = baccaratHandTotal(p1Cards);
+      const p2Tot = baccaratHandTotal(p2Cards);
+      if(p1Tot === null || p2Tot === null) continue;
+      const combined = p1Tot + p2Tot;
+      const pred = entry.suitKey; // '+10.5' | '-10.5'
+      if(pred === '-10.5') ok = (combined <= 10);
+      else if(pred === '+10.5') ok = (combined >= 11);
+      else ok = false;
+      entry.actualCombined = combined;
+      entry.actualP1 = p1Tot;
+      entry.actualP2 = p2Tot;
+    } else {
+      // suit / OPT1
+      const side = entry.side || 'P1';
+      const cards = (side === 'P2') ? p2Cards : p1Cards;
+      if(!cards || !cards.length) continue;
+      const actualSuits = new Set(cards.map(c=>c.suit));
+      ok = actualSuits.has(entry.suitKey);
+      entry.actualSuits = [...actualSuits];
+    }
+
+    if(ok === null) continue;
+    entry.status = ok ? 'valid' : 'invalid';
+    entry.autoResolved = true;
+    lastEntry = entry;
+
+    if(pType === 'suit'){
+      if(entry.status === 'invalid' && entry.algoUsed){
+        onPredictionLost(entry.algoUsed, entry.suitKey);
+      } else if(entry.status === 'valid' && rattrapage.active){
+        endRattrapage();
+      }
+    }
+  }
   saveHistory(list);
   renderHistory();
-  // Rattrapage auto : perte → même ALGO + inv couleur (max 3) ; gain → fin
-  if(entry.status === 'invalid' && entry.algoUsed){
-    onPredictionLost(entry.algoUsed, entry.suitKey);
-  } else if(entry.status === 'valid' && rattrapage.active){
-    endRattrapage();
-  }
-  return entry;
+  return lastEntry;
 }
 
 function showAutoValidationFeedback(entry){
@@ -965,11 +1202,24 @@ function showAutoValidationFeedback(entry){
   if(!box) return;
   if(!entry){ box.textContent=''; box.style.display='none'; return; }
   const ok = entry.status==='valid';
-  const side = entry.side || 'P1';
-  const sideLabel = side === 'P2' ? 'P2 (Banquier, 2ème parenthèse)' : 'P1 (Joueur, 1ère parenthèse)';
-  box.textContent = ok
-    ? `✓ Auto-validé : #N${entry.gameNum} ${SUIT_EMOJI[entry.suitKey]} ${side} trouvée dans ${sideLabel} — prédiction réussie.`
-    : `✕ Auto-validé : #N${entry.gameNum} ${SUIT_EMOJI[entry.suitKey]} ${side} absente de ${sideLabel} — prédiction échouée.`;
+  const pType = entry.predType || 'suit';
+  let msg;
+  if(pType === 'parity'){
+    msg = ok
+      ? `✓ Auto-validé OPT2 : #N${entry.gameNum} ${entry.suitKey} — P1 total=${entry.actualTotal} (${entry.actualTotal%2===0?'PAIR':'IMPAIR'})`
+      : `✕ Auto-validé OPT2 : #N${entry.gameNum} ${entry.suitKey} — P1 total=${entry.actualTotal} (échec)`;
+  } else if(pType === 'total'){
+    msg = ok
+      ? `✓ Auto-validé OPT3 : #N${entry.gameNum} ${entry.suitKey} — P1=${entry.actualP1} + P2=${entry.actualP2} = ${entry.actualCombined}`
+      : `✕ Auto-validé OPT3 : #N${entry.gameNum} ${entry.suitKey} — P1=${entry.actualP1} + P2=${entry.actualP2} = ${entry.actualCombined} (échec)`;
+  } else {
+    const side = entry.side || 'P1';
+    const sideLabel = side === 'P2' ? 'P2 (Banquier)' : 'P1 (Joueur)';
+    msg = ok
+      ? `✓ Auto-validé : #N${entry.gameNum} ${SUIT_EMOJI[entry.suitKey]||entry.suitKey} ${side} trouvée dans ${sideLabel}`
+      : `✕ Auto-validé : #N${entry.gameNum} ${SUIT_EMOJI[entry.suitKey]||entry.suitKey} ${side} absente de ${sideLabel}`;
+  }
+  box.textContent = msg;
   box.className = 'history-autoval show ' + (ok ? 'ok' : 'ko');
   box.style.display = 'block';
   setTimeout(()=>{ box.style.display='none'; }, 8000);
@@ -1586,39 +1836,40 @@ function runTotalCalc(raw){
   const cardsRed=reduceToDigit(cardsSum);
   const digit=cardsRed.digit;
 
+  const predictedGameNum=num+2;
+  // Heure à laquelle le jeu prédit sera joué
+  const predTime = numToTime(predictedGameNum);
+  const hourOdd = (predTime.h % 2 === 1);
+
   let prediction, baseLabel;
-  if(digit<=5){
-    prediction = '-10.5';
-    baseLabel = `Add&Dec=${digit} ≤5 → TOTAL −10.5`;
+  // Heure PAIR  : ≤5 → −10.5 | >5 → +10.5
+  // Heure IMPAIR: ≤5 → +10.5 | >5 → −10.5  (règle inversée)
+  if(!hourOdd){
+    if(digit<=5){
+      prediction = '-10.5';
+      baseLabel = `H=${predTime.h} PAIR · Add&Dec=${digit} ≤5 → TOTAL −10.5`;
+    } else {
+      prediction = '+10.5';
+      baseLabel = `H=${predTime.h} PAIR · Add&Dec=${digit} >5 → TOTAL +10.5`;
+    }
   } else {
-    prediction = '+10.5';
-    baseLabel = `Add&Dec=${digit} >5 → TOTAL +10.5`;
+    if(digit<=5){
+      prediction = '+10.5';
+      baseLabel = `H=${predTime.h} IMPAIR · Add&Dec=${digit} ≤5 → TOTAL +10.5`;
+    } else {
+      prediction = '-10.5';
+      baseLabel = `H=${predTime.h} IMPAIR · Add&Dec=${digit} >5 → TOTAL −10.5`;
+    }
   }
 
   let inverted=false;
   const invSteps=[];
+  // Si Add&Dec ≤5 ET valeur 1ère P1 > 1ère P2 → inversion −10.5 ↔ +10.5
   if(digit<=5 && valueP1>valueP2){
-    prediction = '+10.5';
-    inverted = true;
-    invSteps.push(`P1(${valueP1})>P2(${valueP2}) + Add&Dec≤5 → −10.5→+10.5`);
-  }
-
-  const predictedGameNum=num+2;
-  const nextStr=String(predictedGameNum);
-  const nextAvantDernier = nextStr.length>=2 ? parseInt(nextStr[nextStr.length-2],10) : parseInt(nextStr[0],10);
-  const nextDernier = parseInt(nextStr[nextStr.length-1],10);
-
-  // INVERSION ULTIME : AV-DERN du n° prédit PAIR → flip ±10.5
-  if(nextAvantDernier % 2 === 0){
+    const before = prediction;
     prediction = (prediction === '+10.5') ? '-10.5' : '+10.5';
     inverted = true;
-    invSteps.push(`AV-DERN=${nextAvantDernier} PAIR → inv ultime ±10.5`);
-  }
-  // Puis : n° prédit termine par 0 ou 9 → flip encore
-  if(nextDernier === 0 || nextDernier === 9){
-    prediction = (prediction === '+10.5') ? '-10.5' : '+10.5';
-    inverted = true;
-    invSteps.push(`termine par ${nextDernier} → inv ±10.5`);
+    invSteps.push(`Add&Dec≤5 + P1(${valueP1})>P2(${valueP2}) → ${before} devient ${prediction}`);
   }
 
   const invDetail = invSteps.length ? invSteps.join(' · ') : 'pas d\'inversion';
@@ -1626,7 +1877,7 @@ function runTotalCalc(raw){
   return {
     mode:'total',
     num, nextNum:predictedGameNum, prediction, inverted, invDetail, baseLabel,
-    valueP1, valueP2, cardsSum, cardsRed, digit,
+    valueP1, valueP2, cardsSum, cardsRed, digit, predTime, hourOdd,
     p1First:p1[0], p2First:p2[0]
   };
 }
@@ -1750,6 +2001,11 @@ function calculate(){
   btn.classList.add('loading');btn.textContent='⟳ CALCUL EN COURS…';
   setTimeout(()=>{
     try{
+      // Toujours résoudre les prédictions en attente pour CE jeu (OPT1/2/3)
+      const parsed = parseGame(raw);
+      const autoVal = resolvePendingHistory(parsed.num, parsed.p1, parsed.p2);
+      showAutoValidationFeedback(autoVal);
+
       if(selectedMode===2){
         const r=runParityCalc(raw);
         lastCalcResult=r;
@@ -1762,10 +2018,6 @@ function calculate(){
         document.getElementById('game-input').value='';
       } else {
         // OPTION 1 — Carte enseigne
-        const parsed = parseGame(raw);
-        const autoVal = resolvePendingHistory(parsed.num, parsed.p1, parsed.p2);
-        showAutoValidationFeedback(autoVal);
-
         const r=runCalc(raw);
         lastCalcResult=r;
 

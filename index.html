@@ -1145,11 +1145,9 @@ function runCalc(raw){
   //   · dernier ∈ {6,8} (pair) → ♠️↔♥️ / ♦️↔♣️
   //   · dernier ∈ {7,9} (impair) → ♠️↔♣️ / ♦️→♠️ / ♥️→♣️
   //
-  // Fuseau forcé Europe/Paris pour uniformité iPhone / Android / Windows
-  const todayDay = parseInt(
-    new Date().toLocaleString('en-US', { timeZone: 'Europe/Paris', day: 'numeric' }),
-    10
-  );
+  // Jour calendaire forcé en UTC (changement de jour à minuit UTC 00:00)
+  // → tous les appareils (iPhone / Android / Windows) voient le même jour
+  const todayDay = new Date().getUTCDate();
   const isOddCalendarDay = (todayDay % 2 === 1);
   let targetSide = 'P1';
   let dayParityInfo = null;
@@ -1192,7 +1190,7 @@ function runCalc(raw){
       exception: false,
       before,
       result: finalSuit,
-      label: `Jour ${todayDay} IMPAIR · ${invLabel} → ${SUIT_EMOJI[before]}→${SUIT_EMOJI[finalSuit]} · cible P2`
+      label: `Jour ${todayDay} UTC IMPAIR · ${invLabel} → ${SUIT_EMOJI[before]}→${SUIT_EMOJI[finalSuit]} · cible P2`
     };
   } else {
     dayParityInfo = {
@@ -1202,7 +1200,7 @@ function runCalc(raw){
       exception: false,
       before: finalSuit,
       result: finalSuit,
-      label: `Jour ${todayDay} PAIR → prédiction normale P1`
+      label: `Jour ${todayDay} UTC PAIR → prédiction normale P1`
     };
   }
 
@@ -1404,7 +1402,7 @@ ${r.temporalInv.active?`<div class="det-row"><span class="det-label" style="colo
     detailsHTML+=`
 <hr class="det-sep">
 <div class="det-row"><span class="det-label" style="color:#ffd977">📅 PARITÉ DU JOUR</span><span class="det-val" style="color:#ffd977">${r.dayParityInfo.mode === 'P1' ? 'JOUR PAIR → P1' : 'JOUR IMPAIR → P2 + inversion (' + r.dayParityInfo.mode + ')'}</span></div>
-<div class="det-row"><span class="det-label" style="color:#ffd977">Jour du mois</span><span class="det-val" style="color:#ffd977">${r.dayParityInfo.day} (${r.dayParityInfo.day % 2 === 1 ? 'IMPAIR' : 'PAIR'})</span></div>
+<div class="det-row"><span class="det-label" style="color:#ffd977">Jour du mois (UTC)</span><span class="det-val" style="color:#ffd977">${r.dayParityInfo.day} (${r.dayParityInfo.day % 2 === 1 ? 'IMPAIR' : 'PAIR'})</span></div>
 <div class="det-row"><span class="det-label" style="color:#ffd977">Règle</span><span class="det-val" style="color:#ffd977">${r.dayParityInfo.label}</span></div>
 ${r.dayParityInfo.active ? `<div class="det-row"><span class="det-label" style="color:#ffd977">Après inv. parité jour</span><span class="det-val" style="color:#ffd977">${SUIT_EMOJI[r.dayParityInfo.before]} → ${SUIT_EMOJI[r.dayParityInfo.result]}</span></div>` : ''}`;
   }

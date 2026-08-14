@@ -1653,44 +1653,55 @@ function checkGameReadiness(raw){
 
 
 
+
 // ══════════════════════════════════════════════════════
-//  RÉGIME INVERSION FORMAT (OPT1 / OPT2 / OPT3)
-//  3-3 = bascule globale  |  2-3 = annule / réactive  |  2-2 = one-shot prochain
-//  OPT1 maps :
-//    inv 3-3 (globale) : ♠️↔♦️ / ♥️↔♣️
-//    inv 2-2 (one-shot): ♠️↔♣️ / ♦️↔♥️
-//  OPT2 : OUI ↔ NON
-//  OPT3 : −10.5 ↔ +10.5
+//  RÉGIME INVERSION FORMAT (OPT1 / OPT2 / OPT3) — DÉTERMINISTE
+//  État recalculé depuis l'historique Telegram → même résultat sur tous les appareils
+//
+//  Maps OPT1 selon PARITÉ du n° de jeu qui a déclenché :
+//    Format à n° IMPAIR :
+//      3-3 → ♠️↔♦️ / ♥️↔♣️
+//      2-2 → ♠️↔♣️ / ♦️↔♥️
+//      2-3 → ♠️↔♥️ / ♦️↔♣️
+//    Format à n° PAIR :
+//      3-3 → ♠️↔♦️ / ♥️↔♣️
+//      2-2 → ♠️↔♥️ / ♦️↔♣️
+//      2-3 → ♠️↔♣️ / ♥️↔♦️
 // ══════════════════════════════════════════════════════
 const FMT_INV_KEY = 'orgbacc_format_inversion_v1';
-const MAP_33 = {'♠️':'♦️','♦️':'♠️','♥️':'♣️','♣️':'♥️'}; // inversion 3-3
-const MAP_22 = {'♠️':'♣️','♣️':'♠️','♦️':'♥️','♥️':'♦️'}; // inversion 2-2
+
+const MAP_33 = {'♠️':'♦️','♦️':'♠️','♥️':'♣️','♣️':'♥️'}; // 3-3 (pair ou impair)
+const MAP_22_ODD  = {'♠️':'♣️','♣️':'♠️','♦️':'♥️','♥️':'♦️'}; // 2-2 n° impair
+const MAP_22_EVEN = {'♠️':'♥️','♥️':'♠️','♦️':'♣️','♣️':'♦️'}; // 2-2 n° pair
+const MAP_23_ODD  = {'♠️':'♥️','♥️':'♠️','♦️':'♣️','♣️':'♦️'}; // 2-3 n° impair
+const MAP_23_EVEN = {'♠️':'♣️','♣️':'♠️','♥️':'♦️','♦️':'♥️'}; // 2-3 n° pair
 
 function emptyFmtInv(){
   return {
     globalOn: false,
     oneShotNext: false,
+    activeMap: null,       // '33' | '22_odd' | '22_even' | '23_odd' | '23_even'
     lastFormat: null,
+    lastTriggerNum: null,
     source: 'Aucune (pas d\'inversion format)'
   };
 }
-function loadFmtInv(){
-  try{
-    const raw = localStorage.getItem(FMT_INV_KEY);
-    if(!raw) return emptyFmtInv();
-    const o = JSON.parse(raw);
-    return {
-      globalOn: !!o.globalOn,
-      oneShotNext: !!o.oneShotNext,
-      lastFormat: o.lastFormat || null,
-      source: o.source || 'Aucune (pas d\'inversion format)'
-    };
-  }catch(e){ return emptyFmtInv(); }
+
+function mapForTrigger(fmt, gameNum){
+  const odd = (gameNum % 2 === 1);
+  if(fmt === '3-3') return { key:'33', map: MAP_33, label: '♠️↔♦️/♥️↔♣️' };
+  if(fmt === '2-2'){
+    return odd
+      ? { key:'22_odd', map: MAP_22_ODD, label: '♠️↔♣️/♦️↔♥️ (2-2 impair)' }
+      : { key:'22_even', map: MAP_22_EVEN, label: '♠️↔♥️/♦️↔♣️ (2-2 pair)' };
+  }
+  if(fmt === '2-3' || fmt === '3-2'){
+    return odd
+      ? { key:'23_odd', map: MAP_23_ODD, label: '♠️↔♥️/♦️↔♣️ (2-3 impair)' }
+      : { key:'23_even', map: MAP_23_EVEN, label: '♠️↔♣️/♥️↔♦️ (2-3 pair)' };
+  }
+  return null;
 }
-function saveFmtInv(s){
-  try{ localStorage.setItem(FMT_INV_KEY, JSON.stringify(s)); }catch(e){}
-}
-let fmtInv = loadFmtInv();
 
 function detectHandFormat(p1, p2){
   const a = (p1 && p1.length) || 0;
@@ -1702,35 +1713,98 @@ function detectHandFormat(p1, p2){
   return a + '-' + b;
 }
 
-function applyFormatInversionFromGame(p1, p2, gameNum){
-  const fmt = detectHandFormat(p1, p2);
-  fmtInv.lastFormat = fmt;
+// Applique UN jeu dans la machine d'état (pur, pas de localStorage)
+function stepFmtInv(state, fmt, gameNum){
+  const s = {
+    globalOn: !!state.globalOn,
+    oneShotNext: !!state.oneShotNext,
+    activeMap: state.activeMap || null,
+    lastFormat: fmt,
+    lastTriggerNum: gameNum,
+    source: state.source || ''
+  };
+  const trig = mapForTrigger(fmt, gameNum);
 
   if(fmt === '3-3'){
-    fmtInv.globalOn = !fmtInv.globalOn;
-    fmtInv.oneShotNext = false;
-    fmtInv.source = `#N${gameNum} format 3-3 → inversion globale ${fmtInv.globalOn ? 'ON (♠️↔♦️/♥️↔♣️)' : 'OFF'}`;
+    s.globalOn = !s.globalOn;
+    s.oneShotNext = false;
+    if(s.globalOn && trig){ s.activeMap = trig.key; }
+    if(!s.globalOn) s.activeMap = null;
+    s.source = `#N${gameNum} 3-3 → inv globale ${s.globalOn ? 'ON '+ (trig?trig.label:'') : 'OFF'}`;
   } else if(fmt === '2-3' || fmt === '3-2'){
-    if(fmtInv.globalOn){
-      fmtInv.globalOn = false;
-      fmtInv.source = `#N${gameNum} format ${fmt} → inversion ANNULÉE`;
+    if(s.globalOn){
+      s.globalOn = false;
+      s.activeMap = null;
+      s.source = `#N${gameNum} ${fmt} → inversion ANNULÉE`;
     } else {
-      fmtInv.globalOn = true;
-      fmtInv.source = `#N${gameNum} format ${fmt} → inversion RÉACTIVÉE (♠️↔♦️/♥️↔♣️)`;
+      s.globalOn = true;
+      if(trig) s.activeMap = trig.key;
+      s.source = `#N${gameNum} ${fmt} → inversion RÉACTIVÉE ` + (trig?trig.label:'');
     }
-    fmtInv.oneShotNext = false;
+    s.oneShotNext = false;
   } else if(fmt === '2-2'){
-    fmtInv.oneShotNext = true;
-    fmtInv.source = `#N${gameNum} format 2-2 → one-shot prochain` +
-      (fmtInv.globalOn ? ' (annule inv globale 1 jeu)' : ' (active inv ♠️↔♣️/♦️↔♥️ 1 jeu)');
+    s.oneShotNext = true;
+    // activeMap pour one-shot stocké séparément via last 2-2
+    s.activeMap = s.activeMap; // garde la map globale
+    s._oneShotMap = trig ? trig.key : null;
+    s.source = `#N${gameNum} 2-2 → one-shot prochain ` + (trig?trig.label:'') +
+      (s.globalOn ? ' (annule globale 1 jeu)' : ' (active 1 jeu)');
   } else {
-    fmtInv.source = `#N${gameNum} format ${fmt} → pas de changement inversion`;
+    s.source = `#N${gameNum} format ${fmt} → inchangé`;
   }
-  saveFmtInv(fmtInv);
+  return s;
+}
+
+// Rebuild déterministe depuis une liste de jeux triée croissant (source Telegram commune)
+function rebuildFmtInvFromHistory(gamesList){
+  let state = emptyFmtInv();
+  if(!gamesList || !gamesList.length) return state;
+  for(const g of gamesList){
+    try{
+      const raw = g.normalized || g.raw_text;
+      if(!raw) continue;
+      const parsed = parseGame(raw);
+      const fmt = detectHandFormat(parsed.p1, parsed.p2);
+      state = stepFmtInv(state, fmt, parsed.num);
+    }catch(e){ continue; }
+  }
+  return state;
+}
+
+// État courant en mémoire (recalculé, pas la source de vérité)
+let fmtInv = emptyFmtInv();
+
+function applyFormatInversionFromGame(p1, p2, gameNum){
+  const fmt = detectHandFormat(p1, p2);
+  // Si on a un cache Telegram, on reconstruit tout pour rester synchrone multi-appareils
+  if(telegramHistoryCache && telegramHistoryCache.length >= 2){
+    // Ajoute le jeu courant s'il n'est pas déjà le dernier
+    const list = telegramHistoryCache.slice();
+    const last = list[list.length-1];
+    const lastNum = last && (last.game_number || 0);
+    if(gameNum !== lastNum){
+      list.push({ game_number: gameNum, normalized: null, _p1:p1, _p2:p2, _fmt:fmt });
+      // step only the extra
+      fmtInv = rebuildFmtInvFromHistory(telegramHistoryCache);
+      fmtInv = stepFmtInv(fmtInv, fmt, gameNum);
+    } else {
+      fmtInv = rebuildFmtInvFromHistory(list);
+    }
+  } else {
+    fmtInv = stepFmtInv(fmtInv, fmt, gameNum);
+  }
   return fmt;
 }
 
-// OPT2 / OPT3 : simple invert yes/no
+function getMapByKey(key){
+  if(key==='33') return MAP_33;
+  if(key==='22_odd') return MAP_22_ODD;
+  if(key==='22_even') return MAP_22_EVEN;
+  if(key==='23_odd') return MAP_23_ODD;
+  if(key==='23_even') return MAP_23_EVEN;
+  return null;
+}
+
 function shouldInvertOpt23(){
   if(fmtInv.oneShotNext){
     const invert = !fmtInv.globalOn;
@@ -1739,38 +1813,43 @@ function shouldInvertOpt23(){
       : '2-2 one-shot : inversion forcée ce jeu' };
   }
   if(fmtInv.globalOn){
-    return { invert: true, reason: 'Inversion globale active (3-3 / 2-3)' };
+    return { invert: true, reason: 'Inversion globale active' };
   }
   return { invert: false, reason: 'Pas d\'inversion format' };
 }
 
-// OPT1 : which suit map to apply as ultimate inversion (after all other inv)
 function shouldInvertOpt1Suit(suit){
   if(!suit) return { invert:false, result:suit, map:null, reason:'pas de couleur' };
-  // 2-2 one-shot prioritaires
+
   if(fmtInv.oneShotNext){
     if(fmtInv.globalOn){
-      // était en inv globale → one-shot annule → pas d'inv ce jeu
       return { invert:false, result:suit, map:null, reason:'2-2 one-shot : annule inv globale (brut ce jeu)' };
     }
-    // pas d'inv globale → one-shot active map 2-2
-    const result = MAP_22[suit] || suit;
-    return { invert: result!==suit, result, map:'22', reason:`2-2 one-shot → ♠️↔♣️/♦️↔♥️ · ${SUIT_EMOJI[suit]}→${SUIT_EMOJI[result]}` };
+    // one-shot active : map selon le 2-2 déclencheur (parité stockée dans activeMap one-shot)
+    // On utilise lastTriggerNum si 2-2, sinon parité courante via activeMap key
+    const key = fmtInv._oneShotMap || (fmtInv.lastTriggerNum!=null && (fmtInv.lastTriggerNum%2===1) ? '22_odd' : '22_even');
+    const m = getMapByKey(key) || MAP_22_ODD;
+    const result = m[suit] || suit;
+    return { invert: result!==suit, result, map:key, reason:`2-2 one-shot → ${SUIT_EMOJI[suit]}→${SUIT_EMOJI[result]}` };
   }
+
   if(fmtInv.globalOn){
-    const result = MAP_33[suit] || suit;
-    return { invert: result!==suit, result, map:'33', reason:`Inv globale 3-3 → ♠️↔♦️/♥️↔♣️ · ${SUIT_EMOJI[suit]}→${SUIT_EMOJI[result]}` };
+    const key = fmtInv.activeMap || '33';
+    const m = getMapByKey(key) || MAP_33;
+    const result = m[suit] || suit;
+    return { invert: result!==suit, result, map:key, reason:`Inv globale (${key}) → ${SUIT_EMOJI[suit]}→${SUIT_EMOJI[result]}` };
   }
+
   return { invert:false, result:suit, map:null, reason:'Pas d\'inversion format' };
 }
 
 function consumeOneShotIfAny(){
   if(fmtInv.oneShotNext){
     fmtInv.oneShotNext = false;
-    fmtInv.source = (fmtInv.globalOn
+    fmtInv._oneShotMap = null;
+    fmtInv.source = fmtInv.globalOn
       ? 'Après 2-2 one-shot → reprise inversion globale ON'
-      : 'Après 2-2 one-shot → reprise sans inversion');
-    saveFmtInv(fmtInv);
+      : 'Après 2-2 one-shot → reprise sans inversion';
   }
 }
 
@@ -2219,6 +2298,9 @@ async function demarrerLive(){
 
     telegramHistoryCache = (data.games||[]).slice().sort((a,b)=>a.game_number-b.game_number);
     if(telegramHistoryCache.length < 2) throw new Error('Pas assez de jeux récupérés depuis Telegram.');
+
+    // État inversion format IDENTIQUE sur tous les appareils (recalcul depuis Telegram)
+    fmtInv = rebuildFmtInvFromHistory(telegramHistoryCache);
 
     // Détection automatique de la dernière RÉVÉLATION (3-3) dans les 150 jeux
     statusBox.textContent = `${telegramHistoryCache.length} jeux chargés · détection des révélations…`;

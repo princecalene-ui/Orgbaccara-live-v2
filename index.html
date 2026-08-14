@@ -286,6 +286,25 @@
   .live-source{margin-top:12px;padding:10px 12px;background:#0a0f14;border:1px solid #1a2735;border-radius:3px;font-family:'Courier Prime',monospace;font-size:.8rem;line-height:1.5;color:#d7ecff;word-break:break-word}
   .live-source small{display:block;color:#7ea6cc;margin-bottom:6px;font-family:'Rajdhani',sans-serif;letter-spacing:.12em;text-transform:uppercase}
 
+  /* Mode OPTION 1 / OPTION 2 */
+  .mode-select{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+  .mode-btn{
+    padding:14px 10px;background:#0d0a0a;border:1px solid var(--border);border-radius:4px;
+    color:var(--ivory-dim);font-family:'Cinzel',serif;font-size:.68rem;letter-spacing:.1em;
+    text-transform:uppercase;cursor:pointer;transition:all .2s;text-align:center;
+  }
+  .mode-btn:hover{border-color:var(--gold-dim);color:var(--gold)}
+  .mode-btn.active{
+    border-color:var(--gold);color:var(--gold);background:linear-gradient(135deg,#1a1400,#2a1c00);
+    box-shadow:0 0 14px #c9a84c44;
+  }
+  .mode-btn .mode-title{display:block;font-size:.78rem;margin-bottom:4px;color:inherit}
+  .mode-btn .mode-desc{display:block;font-family:'Rajdhani',sans-serif;font-size:.72rem;font-weight:400;letter-spacing:.04em;opacity:.85;text-transform:none}
+  .mode-hint{font-size:.75rem;color:var(--ivory-dim);text-align:center;margin-bottom:12px;min-height:1.2em}
+  .mode-hint.ready{color:var(--green-ok)}
+  .prediction-oui{color:#80e080!important;text-shadow:0 0 20px #2d6a4f88}
+  .prediction-non{color:#e08080!important;text-shadow:0 0 20px #8b1e3588}
+
 </style>
 </head>
 <body>
@@ -296,7 +315,7 @@
     <h1>ORG BACC — RÉVÉLATION</h1>
     <span class="suit-deco">♣️ ♦️</span>
   </div>
-  <div class="subtitle">Système RÉVÉLATION · Routage ALGO1/ALGO2 · Inv. temporelle · Parité du jour (P1/P2)</div>
+  <div class="subtitle">OPTION 1 Carte enseigne · OPTION 2 Parité OUI/NON · Jour UTC</div>
   <div class="author">AUTEUR : X_Code</div>
 </header>
 
@@ -343,6 +362,19 @@
   </div>
 
   <div class="input-card">
+    <label>Choisissez le mode de prédiction</label>
+    <div class="mode-select">
+      <button type="button" class="mode-btn" id="opt1Btn" onclick="selectMode(1)">
+        <span class="mode-title">OPTION 1</span>
+        <span class="mode-desc">Carte enseigne (couleur)</span>
+      </button>
+      <button type="button" class="mode-btn" id="opt2Btn" onclick="selectMode(2)">
+        <span class="mode-title">OPTION 2</span>
+        <span class="mode-desc">Parité — Total pair OUI / NON</span>
+      </button>
+    </div>
+    <div class="mode-hint" id="modeHint">Sélectionnez OPTION 1 ou OPTION 2</div>
+
     <label for="game-input">Entrez le jeu précédent</label>
     <textarea id="game-input"
       placeholder="Ex: #N1283. ✅8(7♠️A♣️) - 6(6♦️Q♣️) #T14 🔵 #R"></textarea>
@@ -392,6 +424,26 @@ let lastCalcResult   = null;
 let telegramHistoryCache = [];  // 150 derniers jeux chargés depuis Telegram (source commune, identique sur tous les appareils)
 let globalBacktestStats  = null; // stats de fiabilité recalculées à partir de cette source commune
 let liveLastUsableGameNum = null; // dernier n° de jeu réellement TERMINÉ et déjà traité (évite de recalculer en boucle)
+
+// OPTION 1 = Carte enseigne | OPTION 2 = Parité OUI/NON
+let selectedMode = null;
+function selectMode(mode){
+  selectedMode = mode;
+  const b1 = document.getElementById('opt1Btn');
+  const b2 = document.getElementById('opt2Btn');
+  const hint = document.getElementById('modeHint');
+  if(b1) b1.classList.toggle('active', mode===1);
+  if(b2) b2.classList.toggle('active', mode===2);
+  if(hint){
+    if(mode===1){
+      hint.textContent = '✓ Mode actif : OPTION 1 — Carte enseigne (couleur P1/P2)';
+      hint.className = 'mode-hint ready';
+    } else {
+      hint.textContent = '✓ Mode actif : OPTION 2 — Parité (Total du jeu pair → OUI / NON)';
+      hint.className = 'mode-hint ready';
+    }
+  }
+}
 
 // ══════════════════════════════════════════════════════
 //  CONSTANTES
@@ -1238,9 +1290,110 @@ function checkGameReadiness(raw){
   return {usable:false, reason:'ambiguous', detail:'Position du symbole ▶ ambiguë — en attente de confirmation.'};
 }
 
+// ── OPTION 2 : Parité (Total pair → OUI / NON) — logique REVOLUTION TWO ──
+function getCardValueParity(v){
+  if(v==='A') return 1;
+  if(v==='10') return 10;
+  if(v==='J'||v==='Q'||v==='K') return 0;
+  const n=parseInt(v,10);
+  return (!isNaN(n)&&n>=2&&n<=9)?n:0;
+}
+function runParityCalc(raw){
+  const {num,p1,p2}=parseGame(raw);
+  if(!p1.length||!p2.length) throw new Error('Cartes P1/P2 introuvables');
+  const valueP1=getCardValueParity(p1[0].val);
+  const valueP2=getCardValueParity(p2[0].val);
+  const cardsSum=valueP1+valueP2;
+  const cardsRed=reduceToDigit(cardsSum);
+  const cardsSign=(cardsRed.digit%2===0)?'+':'-';
+
+  const numStr=String(num);
+  const is4Digit=numStr.length===4;
+  let gameNumToProcess, gameNumRuleText;
+  if(is4Digit){
+    const d1=parseInt(numStr[numStr.length-2],10);
+    const d2=parseInt(numStr[numStr.length-1],10);
+    gameNumToProcess=d1+d2;
+    gameNumRuleText=`4 chiffres → derniers 2: ${d1}+${d2}=${gameNumToProcess}`;
+  } else {
+    gameNumToProcess=parseInt(numStr[numStr.length-1],10);
+    gameNumRuleText=`3 chiffres → dernier: ${gameNumToProcess}`;
+  }
+  const gameNumRed=reduceToDigit(gameNumToProcess);
+  const gameNumSign=(gameNumRed.digit%2===0)?'+':'-';
+
+  const intermediateSign=(cardsSign===gameNumSign)?'+':'-';
+
+  const time=numToTime(num);
+  const minuteRed=reduceToDigit(time.m);
+  const minuteSign=(minuteRed.digit%2===0)?'+':'-';
+
+  const finalSign=(intermediateSign===minuteSign)?'+':'-';
+  const prediction=finalSign==='+'?'OUI':'NON';
+  const predictedGameNum=num+2;
+
+  return {
+    mode:'parity',
+    num, nextNum:predictedGameNum, prediction, finalSign,
+    is4Digit, time, valueP1, valueP2, cardsSum, cardsRed, cardsSign,
+    gameNumRuleText, gameNumRed, gameNumSign, intermediateSign, minuteRed, minuteSign,
+    p1First:p1[0], p2First:p2[0]
+  };
+}
+
+function renderParityResult(r){
+  document.getElementById('res-num').textContent=`#N${r.nextNum}`;
+  document.getElementById('res-suit-emoji').innerHTML=
+    `<span class="${r.prediction==='OUI'?'prediction-oui':'prediction-non'}" style="font-size:clamp(2.8rem,12vw,4.5rem);font-family:'Cinzel',serif;font-weight:900">${r.prediction}</span>`;
+  document.getElementById('res-suit-label').textContent=r.prediction==='OUI'?'TOTAL PAIR':'TOTAL IMPAIR';
+  document.getElementById('res-side').innerHTML=`<span class="side-tag">OPTION 2</span>`;
+
+  lastCalcResult={...r, targetSide:'PARITY', algoUsed:'PARITÉ', finalSuit:null};
+
+  const badges=[
+    `<div class="badge badge-engine">◆ OPTION 2 — PARITÉ · Total du jeu pair → OUI / NON</div>`,
+    `<div class="badge badge-parity">◈ CARTES 1ères — P1 ${r.p1First.val}${SUIT_EMOJI[r.p1First.suit]||''}(${r.valueP1}) + P2 ${r.p2First.val}${SUIT_EMOJI[r.p2First.suit]||''}(${r.valueP2}) = ${r.cardsSum} → ${r.cardsRed.digit} ${r.cardsSign==='+'?'PAIR':'IMPAIR'}</div>`,
+    `<div class="badge badge-algo">⚙ NUMÉRO — ${r.gameNumRuleText} → ${r.gameNumRed.digit} ${r.gameNumSign==='+'?'PAIR':'IMPAIR'}</div>`,
+    `<div class="badge badge-transform">⚡ INTERMÉDIAIRE — ${r.cardsSign} × ${r.gameNumSign} = ${r.intermediateSign}</div>`,
+    `<div class="badge badge-temporal">⏱ MINUTE — ${String(r.time.h).padStart(2,'0')}h${String(r.time.m).padStart(2,'0')} → ${r.minuteRed.digit} ${r.minuteSign==='+'?'PAIR':'IMPAIR'}</div>`,
+    `<div class="badge badge-finalinv">✦ FINAL — ${r.intermediateSign} × ${r.minuteSign} = ${r.finalSign} → <b>${r.prediction}</b></div>`
+  ];
+  document.getElementById('badge-zone').innerHTML=badges.join('');
+
+  document.getElementById('details-body').innerHTML=`
+<div class="det-row"><span class="det-label">Mode</span><span class="det-val">OPTION 2 — Parité</span></div>
+<div class="det-row"><span class="det-label">Jeu fourni</span><span class="det-val">#N${r.num}</span></div>
+<div class="det-row"><span class="det-label">Jeu prédit</span><span class="det-val">#N${r.nextNum} (N+2)</span></div>
+<hr class="det-sep">
+<div class="det-row"><span class="det-label">1ère carte P1</span><span class="det-val">${r.p1First.val}${SUIT_EMOJI[r.p1First.suit]||''} = ${r.valueP1}</span></div>
+<div class="det-row"><span class="det-label">1ère carte P2</span><span class="det-val">${r.p2First.val}${SUIT_EMOJI[r.p2First.suit]||''} = ${r.valueP2}</span></div>
+<div class="det-row"><span class="det-label">Somme cartes</span><span class="det-val">${r.cardsSum} → ${r.cardsRed.steps.join(' → ')} → ${r.cardsSign}</span></div>
+<hr class="det-sep">
+<div class="det-row"><span class="det-label">Règle numéro</span><span class="det-val">${r.gameNumRuleText}</span></div>
+<div class="det-row"><span class="det-label">Signe numéro</span><span class="det-val">${r.gameNumRed.digit} → ${r.gameNumSign}</span></div>
+<div class="det-row"><span class="det-label">Intermédiaire</span><span class="det-val">${r.cardsSign} × ${r.gameNumSign} = ${r.intermediateSign}</span></div>
+<hr class="det-sep">
+<div class="det-row"><span class="det-label">Heure / Minute</span><span class="det-val">${String(r.time.h).padStart(2,'0')}h${String(r.time.m).padStart(2,'0')} → min ${r.minuteRed.digit} → ${r.minuteSign}</span></div>
+<div class="det-row"><span class="det-label">Calcul final</span><span class="det-val">${r.intermediateSign} × ${r.minuteSign} = ${r.finalSign}</span></div>
+<hr class="det-sep">
+<div class="det-row"><span class="det-label">RÉSULTAT</span><span class="det-val det-result">#N${r.nextNum} — ${r.prediction} (${r.prediction==='OUI'?'TOTAL PAIR':'TOTAL IMPAIR'})</span></div>`;
+
+  const zone=document.getElementById('result-zone');
+  zone.style.display='block';
+  document.getElementById('details-body').classList.remove('open');
+  document.getElementById('chevron').classList.remove('open');
+  setTimeout(()=>zone.scrollIntoView({behavior:'smooth',block:'start'}),100);
+}
+
 function calculate(){
   hideError();
   hideWaiting();
+
+  if(!selectedMode){
+    showError("Choisissez d'abord OPTION 1 (Carte enseigne) ou OPTION 2 (Parité).");
+    return;
+  }
+
   const raw=document.getElementById('game-input').value.trim();
   if(!raw){showError("Veuillez saisir les données du jeu précédent.");return;}
 
@@ -1254,23 +1407,29 @@ function calculate(){
   btn.classList.add('loading');btn.textContent='⟳ CALCUL EN COURS…';
   setTimeout(()=>{
     try{
-      // 1) Valider d'abord la prédiction en attente pour CE jeu (peut activer le rattrapage)
-      const parsed = parseGame(raw);
-      const autoVal = resolvePendingHistory(parsed.num, parsed.p1, parsed.p2);
-      showAutoValidationFeedback(autoVal);
+      if(selectedMode===2){
+        // OPTION 2 — Parité OUI/NON
+        const r=runParityCalc(raw);
+        lastCalcResult=r;
+        renderParityResult(r);
+        document.getElementById('game-input').value='';
+      } else {
+        // OPTION 1 — Carte enseigne (moteur RÉVÉLATION existant)
+        const parsed = parseGame(raw);
+        const autoVal = resolvePendingHistory(parsed.num, parsed.p1, parsed.p2);
+        showAutoValidationFeedback(autoVal);
 
-      // 2) Calculer la prédiction suivante (prend en compte un rattrapage éventuellement activé)
-      const r=runCalc(raw);
-      lastCalcResult=r;
+        const r=runCalc(raw);
+        lastCalcResult=r;
 
-      // 3) Consommer une tentative de rattrapage si cette prédiction a été forcée
-      if(r.rattrapageForced){
-        consumeRattrapageAttempt();
+        if(r.rattrapageForced){
+          consumeRattrapageAttempt();
+        }
+        updateRegimeDisplay();
+
+        renderResult(r);
+        document.getElementById('game-input').value='';
       }
-      updateRegimeDisplay();
-
-      renderResult(r);
-      document.getElementById('game-input').value='';
     }catch(e){showError(e.message);}
     btn.classList.remove('loading');btn.textContent='⬡ CALCULER LA PRÉDICTION ⬡';
   },300);
@@ -1423,10 +1582,16 @@ ${r.dayParityInfo.active ? `<div class="det-row"><span class="det-label" style="
 
 function copyPrediction(){
   const num=document.getElementById('res-num').textContent;
-  const emoji=document.getElementById('res-suit-emoji').textContent;
-  const side = (lastCalcResult && lastCalcResult.targetSide) ? lastCalcResult.targetSide : 'P1';
-  const engineTag = lastCalcResult ? ` [${lastCalcResult.algoUsed}]` : '';
-  navigator.clipboard.writeText(`${num} ${emoji} ${side}${engineTag}`).then(()=>{
+  let text;
+  if(lastCalcResult && lastCalcResult.mode==='parity'){
+    text = `${num}: ${lastCalcResult.prediction}`;
+  } else {
+    const emoji=document.getElementById('res-suit-emoji').textContent;
+    const side = (lastCalcResult && lastCalcResult.targetSide) ? lastCalcResult.targetSide : 'P1';
+    const engineTag = lastCalcResult ? ` [${lastCalcResult.algoUsed}]` : '';
+    text = `${num} ${emoji} ${side}${engineTag}`;
+  }
+  navigator.clipboard.writeText(text).then(()=>{
     const btn=document.getElementById('btn-copy');
     btn.textContent='✓ COPIÉ';btn.classList.add('copied');
     setTimeout(()=>{btn.textContent='⧉ COPIER LA PRÉDICTION';btn.classList.remove('copied');},1800);

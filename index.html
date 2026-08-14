@@ -306,9 +306,57 @@
   .prediction-oui{color:#80e080!important;text-shadow:0 0 20px #2d6a4f88}
   .prediction-non{color:#e08080!important;text-shadow:0 0 20px #8b1e3588}
 
+  /* ── Clé d'abonnement ── */
+  .key-gate{
+    position:fixed;inset:0;z-index:9999;background:rgba(5,3,3,.94);
+    display:flex;align-items:center;justify-content:center;padding:20px;
+  }
+  .key-gate.hidden{display:none}
+  .key-box{
+    background:var(--card-bg);border:1px solid var(--gold-dim);border-top:3px solid var(--gold);
+    border-radius:6px;padding:28px 24px;max-width:400px;width:100%;text-align:center;
+  }
+  .key-box h2{font-family:'Cinzel',serif;color:var(--gold);font-size:1.1rem;letter-spacing:.12em;margin-bottom:8px}
+  .key-box p{font-size:.82rem;color:var(--ivory-dim);margin-bottom:16px;line-height:1.5}
+  .key-box input{
+    width:100%;padding:12px 14px;background:#0d0a0a;border:1px solid #2e1c1c;border-radius:3px;
+    color:var(--ivory);font-family:'Courier Prime',monospace;font-size:1rem;outline:none;margin-bottom:12px;
+    text-align:center;letter-spacing:.08em;
+  }
+  .key-box input:focus{border-color:var(--gold)}
+  .key-box .btn-key{
+    width:100%;padding:12px;background:linear-gradient(135deg,var(--bordeaux),#8b1e35);
+    border:1px solid var(--gold-dim);color:var(--gold);font-family:'Cinzel',serif;
+    font-size:.85rem;letter-spacing:.15em;cursor:pointer;border-radius:3px;text-transform:uppercase;
+  }
+  .key-box .btn-key:hover{box-shadow:0 0 16px #6b1a2a88}
+  .key-error{color:#e06060;font-size:.8rem;min-height:1.2em;margin-top:8px}
+  .key-timer-bar{
+    position:fixed;top:0;left:0;right:0;z-index:100;background:linear-gradient(90deg,#1a1400,#2a1c00);
+    border-bottom:1px solid var(--gold-dim);padding:6px 16px;display:none;
+    font-family:'Courier Prime',monospace;font-size:.78rem;color:var(--gold);
+    text-align:center;letter-spacing:.08em;
+  }
+  .key-timer-bar.active{display:block}
+  .key-timer-bar .warn{color:#ffbf80}
+  .key-timer-bar .crit{color:#ff6666}
+  .hist-btn.copy-btn{font-size:.7rem;width:auto;min-width:30px;padding:0 6px}
+  .hist-btn.copy-btn:hover{border-color:var(--gold);color:var(--gold)}
+
 </style>
 </head>
 <body>
+
+<div class="key-gate" id="keyGate">
+  <div class="key-box">
+    <h2>🔐 ACCÈS ABONNÉ</h2>
+    <p>Entrez votre clé d’abonnement pour débloquer le système.<br>Durée : <b style="color:var(--gold)">5 minutes</b> · une clé = une utilisation.</p>
+    <input type="password" id="keyInput" placeholder="Clé d’abonnement" autocomplete="off" onkeydown="if(event.key==='Enter')submitKey()">
+    <button class="btn-key" onclick="submitKey()">Déverrouiller</button>
+    <div class="key-error" id="keyError"></div>
+  </div>
+</div>
+<div class="key-timer-bar" id="keyTimerBar">⏱ Session : <span id="keyTimerText">--:--</span></div>
 
 <header>
   <div class="title-suite">
@@ -430,9 +478,153 @@ let telegramHistoryCache = [];  // 150 derniers jeux chargés depuis Telegram (s
 let globalBacktestStats  = null; // stats de fiabilité recalculées à partir de cette source commune
 let liveLastUsableGameNum = null; // dernier n° de jeu réellement TERMINÉ et déjà traité (évite de recalculer en boucle)
 
+// ══════════════════════════════════════════════════════
+//  CLÉS D'ABONNEMENT (facile d'en ajouter)
+// ══════════════════════════════════════════════════════
+const SUB_KEYS = [
+  { key: 'Ber€Ye%#', durationMs: 5 * 60 * 1000 },
+  { key: '5minY<#',  durationMs: 5 * 60 * 1000 }
+  // Ajouter ici : { key: 'NOUVELLE', durationMs: 10*60*1000 }
+];
+const KEY_SESSION_STORE = 'orgbacc_sub_session_v1';
+const KEY_USED_STORE    = 'orgbacc_sub_used_v1';
+let keyTimerInterval = null;
+let systemUnlocked = false;
+
+function loadUsedKeys(){
+  try{ return JSON.parse(localStorage.getItem(KEY_USED_STORE)||'[]'); }catch(e){ return []; }
+}
+function saveUsedKeys(arr){
+  try{ localStorage.setItem(KEY_USED_STORE, JSON.stringify(arr)); }catch(e){}
+}
+function loadKeySession(){
+  try{
+    const raw = localStorage.getItem(KEY_SESSION_STORE);
+    if(!raw) return null;
+    const o = JSON.parse(raw);
+    if(!o || !o.expiresAt) return null;
+    if(Date.now() >= o.expiresAt){
+      localStorage.removeItem(KEY_SESSION_STORE);
+      return null;
+    }
+    return o;
+  }catch(e){ return null; }
+}
+function saveKeySession(sess){
+  try{ localStorage.setItem(KEY_SESSION_STORE, JSON.stringify(sess)); }catch(e){}
+}
+function clearKeySession(){
+  try{ localStorage.removeItem(KEY_SESSION_STORE); }catch(e){}
+}
+function formatRemain(ms){
+  if(ms < 0) ms = 0;
+  const s = Math.floor(ms/1000);
+  const m = Math.floor(s/60);
+  const ss = s % 60;
+  return `${String(m).padStart(2,'0')}:${String(ss).padStart(2,'0')}`;
+}
+function updateKeyTimerUI(){
+  const bar = document.getElementById('keyTimerBar');
+  const txt = document.getElementById('keyTimerText');
+  const sess = loadKeySession();
+  if(!sess){
+    systemUnlocked = false;
+    if(bar) bar.classList.remove('active');
+    if(keyTimerInterval){ clearInterval(keyTimerInterval); keyTimerInterval=null; }
+    showKeyGate();
+    return;
+  }
+  const remain = sess.expiresAt - Date.now();
+  if(remain <= 0){
+    clearKeySession();
+    systemUnlocked = false;
+    if(bar) bar.classList.remove('active');
+    if(keyTimerInterval){ clearInterval(keyTimerInterval); keyTimerInterval=null; }
+    showKeyGate();
+    const err = document.getElementById('keyError');
+    if(err) err.textContent = '⏱ Session expirée — entrez une nouvelle clé.';
+    return;
+  }
+  systemUnlocked = true;
+  if(bar){
+    bar.classList.add('active');
+    const cls = remain < 60000 ? 'crit' : (remain < 120000 ? 'warn' : '');
+    if(txt) txt.innerHTML = `<span class="${cls}">${formatRemain(remain)}</span> restantes`;
+  }
+}
+function startKeyTimer(){
+  if(keyTimerInterval) clearInterval(keyTimerInterval);
+  updateKeyTimerUI();
+  keyTimerInterval = setInterval(updateKeyTimerUI, 1000);
+}
+function showKeyGate(){
+  const gate = document.getElementById('keyGate');
+  if(gate) gate.classList.remove('hidden');
+  const main = document.querySelector('main');
+  if(main) main.style.pointerEvents = 'none';
+  if(main) main.style.opacity = '0.35';
+}
+function hideKeyGate(){
+  const gate = document.getElementById('keyGate');
+  if(gate) gate.classList.add('hidden');
+  const main = document.querySelector('main');
+  if(main) main.style.pointerEvents = '';
+  if(main) main.style.opacity = '';
+}
+function submitKey(){
+  const input = document.getElementById('keyInput');
+  const err = document.getElementById('keyError');
+  const val = (input && input.value || '').trim();
+  if(!val){ if(err) err.textContent = 'Entrez une clé.'; return; }
+
+  const match = SUB_KEYS.find(k => k.key === val);
+  if(!match){
+    if(err) err.textContent = '✕ Clé invalide.';
+    return;
+  }
+
+  // Session encore active avec cette clé ?
+  const sess = loadKeySession();
+  if(sess && sess.key === val && Date.now() < sess.expiresAt){
+    hideKeyGate();
+    startKeyTimer();
+    if(err) err.textContent = '';
+    return;
+  }
+
+  // Clé déjà consommée (même navigateur)
+  const used = loadUsedKeys();
+  if(used.includes(val)){
+    if(err) err.textContent = '✕ Cette clé a déjà été utilisée.';
+    return;
+  }
+
+  used.push(val);
+  saveUsedKeys(used);
+  const expiresAt = Date.now() + match.durationMs;
+  saveKeySession({ key: val, expiresAt, startedAt: Date.now() });
+  if(input) input.value = '';
+  if(err) err.textContent = '';
+  hideKeyGate();
+  startKeyTimer();
+}
+function requireUnlock(){
+  const sess = loadKeySession();
+  if(sess && Date.now() < sess.expiresAt){
+    systemUnlocked = true;
+    hideKeyGate();
+    startKeyTimer();
+    return true;
+  }
+  systemUnlocked = false;
+  showKeyGate();
+  return false;
+}
+
 // OPTION 1 = Carte enseigne | OPTION 2 = P1 total pair OUI/NON | OPTION 3 = Total ±10.5
 let selectedMode = null;
 function selectMode(mode){
+  if(!requireUnlock()) return;
   selectedMode = mode;
   const b1 = document.getElementById('opt1Btn');
   const b2 = document.getElementById('opt2Btn');
@@ -871,11 +1063,32 @@ function renderHistory(){
       <span class="hist-suit" style="color:${color};font-size:${pType==='suit'?'1rem':'.78rem'};min-width:${pType==='suit'?'22px':'48px'}">${displayVal}</span>
       <span class="hist-label">${typeTag}${e.algoUsed?` <span class="hist-tag">[${e.algoUsed}]</span>`:''}${e.rattrapage?` <span class="hist-tag" style="color:#ffbf80">⏱ RATTR</span>`:''}${e.source==='live-seed'?` <span class="hist-tag hist-live">🔴 LIVE</span>`:(e.autoResolved?` <span class="hist-tag">auto</span>`:'')}</span>
       <div class="hist-actions">
+        <button class="hist-btn copy-btn" title="Copier" onclick="copyHistoryEntry('${e.id}')">⧉</button>
         <button class="hist-btn valid-btn ${e.status==='valid'?'active':''}" title="Validée" onclick="setHistoryStatus('${e.id}','valid')">✓</button>
         <button class="hist-btn invalid-btn ${e.status==='invalid'?'active':''}" title="Non passée" onclick="setHistoryStatus('${e.id}','invalid')">✕</button>
       </div>
     </div>`;
   }).join('');
+}
+
+function copyHistoryEntry(id){
+  const list = loadHistory();
+  const e = list.find(x=>x.id===id);
+  if(!e) return;
+  const pType = e.predType || 'suit';
+  let val;
+  if(pType==='parity' || pType==='total') val = e.suitKey;
+  else val = (SUIT_EMOJI[e.suitKey]||e.suitKey||'') + ' ' + (e.side||'P1');
+  let text = `#N${e.gameNum} ${val}`;
+  if(e.status==='valid') text += ' ✅';
+  else if(e.status==='invalid') text += ' ❌';
+  navigator.clipboard.writeText(text.trim()).then(()=>{
+    // flash feedback via title
+  }).catch(()=>{
+    const ta=document.createElement('textarea');
+    ta.value=text.trim(); document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); document.body.removeChild(ta);
+  });
 }
 
 // ══════════════════════════════════════════════════════
@@ -1211,18 +1424,11 @@ function runCalc(raw){
       }
     : { forced:false, algo:null, remainingBefore:0, remainingAfter:0, lostSuit:null, lostColor:null };
 
-  // ── PARITÉ DU JOUR (calendrier) ──────────────────────────────────────
-  // Jour PAIR  → prédiction normale P1
-  // Jour IMPAIR → cible P2 avec inversions selon chiffres du n° de jeu
-  //
-  // Inversion par défaut (jour impair) : ♦️↔♠️ / ♣️↔♥️
-  // Si avant-dernier chiffre IMPAIR :
-  //   · dernier ∈ 0-5          → ♠️↔♥️ / ♦️↔♣️
-  //   · dernier ∈ {6,8} (pair) → ♠️↔♥️ / ♦️↔♣️
-  //   · dernier ∈ {7,9} (impair) → ♠️↔♣️ / ♦️→♠️ / ♥️→♣️
-  //
-  // Jour calendaire forcé en UTC (changement de jour à minuit UTC 00:00)
-  // → tous les appareils (iPhone / Android / Windows) voient le même jour
+  // ── PARITÉ DU JOUR (calendrier UTC) ──────────────────────────────────
+  // Jour PAIR  → P1 normal
+  // Jour IMPAIR → P2 :
+  //   - défaut : inv couleur ♦️↔♥️ / ♣️↔♠️
+  //   - exception : AV-DERN IMPAIR + dernier ∈ {0,6,7,8,9} → copie exacte P1 (sans inv)
   const todayDay = new Date().getUTCDate();
   const isOddCalendarDay = (todayDay % 2 === 1);
   let targetSide = 'P1';
@@ -1230,44 +1436,31 @@ function runCalc(raw){
 
   if (isOddCalendarDay) {
     targetSide = 'P2';
-    const avantDernierImp = (avantDernier % 2 === 1);
-    let invMap, invLabel, mode;
-
-    if (avantDernierImp) {
-      if (dernierDigit >= 0 && dernierDigit <= 5) {
-        // 0-5 → ♠️↔♥️ / ♦️↔♣️
-        invMap = { '♠️': '♥️', '♥️': '♠️', '♦️': '♣️', '♣️': '♦️' };
-        invLabel = `AV-DERN=${avantDernier}(IMPAIR) + DERNIER=${dernierDigit} (0-5) → ♠️↔♥️ / ♦️↔♣️`;
-        mode = 'P2_INV_A';
-      } else if (dernierDigit === 6 || dernierDigit === 8) {
-        // 6 ou 8 (pair 6-9) → ♠️↔♥️ / ♦️↔♣️
-        invMap = { '♠️': '♥️', '♥️': '♠️', '♦️': '♣️', '♣️': '♦️' };
-        invLabel = `AV-DERN=${avantDernier}(IMPAIR) + DERNIER=${dernierDigit} (pair 6-9) → ♠️↔♥️ / ♦️↔♣️`;
-        mode = 'P2_INV_B';
-      } else {
-        // 7 ou 9 (impair 6-9) → ♠️↔♣️ / ♦️→♠️ / ♥️→♣️
-        invMap = { '♠️': '♣️', '♣️': '♠️', '♦️': '♠️', '♥️': '♣️' };
-        invLabel = `AV-DERN=${avantDernier}(IMPAIR) + DERNIER=${dernierDigit} (impair 6-9) → ♠️↔♣️ / ♦️→♠️ / ♥️→♣️`;
-        mode = 'P2_INV_C';
-      }
+    const exceptionNoInv = (avantDernier % 2 === 1) && [0, 6, 7, 8, 9].includes(dernierDigit);
+    if (exceptionNoInv) {
+      dayParityInfo = {
+        mode: 'P2_COPY',
+        day: todayDay,
+        active: false,
+        exception: true,
+        before: finalSuit,
+        result: finalSuit,
+        label: `Jour ${todayDay} UTC IMPAIR · AV-DERN=${avantDernier}(IMPAIR) + DERNIER=${dernierDigit} (0/6-9) → P2 SANS inversion (copie P1)`
+      };
     } else {
-      // Défaut jour impair : ♦️↔♠️ / ♣️↔♥️
-      invMap = { '♦️': '♠️', '♠️': '♦️', '♣️': '♥️', '♥️': '♣️' };
-      invLabel = `AV-DERN=${avantDernier}(PAIR) → inv défaut ♦️↔♠️ / ♣️↔♥️`;
-      mode = 'P2_INV_DEFAULT';
+      const colorInvMap = { '♦️': '♥️', '♥️': '♦️', '♣️': '♠️', '♠️': '♣️' };
+      const before = finalSuit;
+      finalSuit = colorInvMap[finalSuit] || finalSuit;
+      dayParityInfo = {
+        mode: 'P2_INV',
+        day: todayDay,
+        active: true,
+        exception: false,
+        before,
+        result: finalSuit,
+        label: `Jour ${todayDay} UTC IMPAIR → inv ♦️↔♥️ / ♣️↔♠️ → ${SUIT_EMOJI[before]}→${SUIT_EMOJI[finalSuit]} · cible P2`
+      };
     }
-
-    const before = finalSuit;
-    finalSuit = invMap[finalSuit] || finalSuit;
-    dayParityInfo = {
-      mode,
-      day: todayDay,
-      active: true,
-      exception: false,
-      before,
-      result: finalSuit,
-      label: `Jour ${todayDay} UTC IMPAIR · ${invLabel} → ${SUIT_EMOJI[before]}→${SUIT_EMOJI[finalSuit]} · cible P2`
-    };
   } else {
     dayParityInfo = {
       mode: 'P1',
@@ -1403,14 +1596,33 @@ function runTotalCalc(raw){
   }
 
   let inverted=false;
-  let invDetail='pas d\'inversion';
+  const invSteps=[];
   if(digit<=5 && valueP1>valueP2){
     prediction = '+10.5';
     inverted = true;
-    invDetail = `INV OPT3 : Add&Dec=${digit}≤5 mais P1(${valueP1})>P2(${valueP2}) → −10.5 devient +10.5`;
+    invSteps.push(`P1(${valueP1})>P2(${valueP2}) + Add&Dec≤5 → −10.5→+10.5`);
   }
 
   const predictedGameNum=num+2;
+  const nextStr=String(predictedGameNum);
+  const nextAvantDernier = nextStr.length>=2 ? parseInt(nextStr[nextStr.length-2],10) : parseInt(nextStr[0],10);
+  const nextDernier = parseInt(nextStr[nextStr.length-1],10);
+
+  // INVERSION ULTIME : AV-DERN du n° prédit PAIR → flip ±10.5
+  if(nextAvantDernier % 2 === 0){
+    prediction = (prediction === '+10.5') ? '-10.5' : '+10.5';
+    inverted = true;
+    invSteps.push(`AV-DERN=${nextAvantDernier} PAIR → inv ultime ±10.5`);
+  }
+  // Puis : n° prédit termine par 0 ou 9 → flip encore
+  if(nextDernier === 0 || nextDernier === 9){
+    prediction = (prediction === '+10.5') ? '-10.5' : '+10.5';
+    inverted = true;
+    invSteps.push(`termine par ${nextDernier} → inv ±10.5`);
+  }
+
+  const invDetail = invSteps.length ? invSteps.join(' · ') : 'pas d\'inversion';
+
   return {
     mode:'total',
     num, nextNum:predictedGameNum, prediction, inverted, invDetail, baseLabel,
@@ -1517,6 +1729,8 @@ ${r.inverted?`<div class="det-row"><span class="det-label" style="color:#ffd977"
 function calculate(){
   hideError();
   hideWaiting();
+
+  if(!requireUnlock()) return;
 
   if(!selectedMode){
     showError("Choisissez d'abord OPTION 1, 2 ou 3.");
@@ -1693,7 +1907,7 @@ ${r.temporalInv.active?`<div class="det-row"><span class="det-label" style="colo
   if(r.dayParityInfo){
     detailsHTML+=`
 <hr class="det-sep">
-<div class="det-row"><span class="det-label" style="color:#ffd977">📅 PARITÉ DU JOUR</span><span class="det-val" style="color:#ffd977">${r.dayParityInfo.mode === 'P1' ? 'JOUR PAIR → P1' : 'JOUR IMPAIR → P2 + inversion (' + r.dayParityInfo.mode + ')'}</span></div>
+<div class="det-row"><span class="det-label" style="color:#ffd977">📅 PARITÉ DU JOUR</span><span class="det-val" style="color:#ffd977">${r.dayParityInfo.mode === 'P1' ? 'JOUR PAIR → P1' : (r.dayParityInfo.mode === 'P2_COPY' ? 'JOUR IMPAIR → P2 sans inversion (exception)' : 'JOUR IMPAIR → P2 + inversion')}</span></div>
 <div class="det-row"><span class="det-label" style="color:#ffd977">Jour du mois (UTC)</span><span class="det-val" style="color:#ffd977">${r.dayParityInfo.day} (${r.dayParityInfo.day % 2 === 1 ? 'IMPAIR' : 'PAIR'})</span></div>
 <div class="det-row"><span class="det-label" style="color:#ffd977">Règle</span><span class="det-val" style="color:#ffd977">${r.dayParityInfo.label}</span></div>
 ${r.dayParityInfo.active ? `<div class="det-row"><span class="det-label" style="color:#ffd977">Après inv. parité jour</span><span class="det-val" style="color:#ffd977">${SUIT_EMOJI[r.dayParityInfo.before]} → ${SUIT_EMOJI[r.dayParityInfo.result]}</span></div>` : ''}`;
@@ -1924,6 +2138,7 @@ window.addEventListener('pageshow', (e)=>{
 });
 
 window.addEventListener('load', ()=>{
+  requireUnlock();
   updateRegimeDisplay();
   fetchLatestTelegramGame(true);
   renderHistory();

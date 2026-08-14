@@ -6,8 +6,8 @@ import os
 from pathlib import Path
 from contextlib import contextmanager
 
-import psycopg2
-from psycopg2.extras import RealDictCursor
+import psycopg
+from psycopg.rows import dict_row
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -23,7 +23,7 @@ def get_connection():
     url = DATABASE_URL
     if url.startswith("postgres://"):
         url = url.replace("postgres://", "postgresql://", 1)
-    return psycopg2.connect(url, cursor_factory=RealDictCursor)
+    return psycopg.connect(url, row_factory=dict_row)
 
 @contextmanager
 def db_cursor():

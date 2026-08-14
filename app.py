@@ -2,11 +2,53 @@ from flask import Flask, jsonify, send_from_directory, request
 from bs4 import BeautifulSoup
 import requests
 import re
+import os
 from pathlib import Path
+from contextlib import contextmanager
+
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
 BASE_DIR = Path(__file__).resolve().parent
 
-# Canal principal + canal relais statistique (fallback si le principal échoue)
+# ══════════════════════════════════════════════════════════════
+#  CONNEXION POSTGRESQL (persistant même après redeploy)
+# ══════════════════════════════════════════════════════════════
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
+def get_connection():
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL manquante — lie une base PostgreSQL sur Render")
+    # Render utilise parfois postgres:// → on force postgresql://
+    url = DATABASE_URL
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql://", 1)
+    return psycopg2.connect(url, cursor_factory=RealDictCursor)
+
+@contextmanager
+def db_cursor():
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            yield cur
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+def init_db():
+    """Crée la table des clés utilisées si elle n'existe pas encore."""
+    with db_cursor() as cur:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS used_keys (
+                key_hash TEXT PRIMARY KEY,
+                used_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+
+# Canal principal + canal relais
 CHANNELS = [
     {
         'name': 'statistika_baccara',
@@ -123,7 +165,6 @@ def _parse_latest_from_channel(channel):
 
 
 def fetch_latest_game():
-    """Essaie le canal principal, puis le relais en cas d'échec."""
     errors = []
     for channel in CHANNELS:
         try:
@@ -146,7 +187,6 @@ def api_latest_game():
 
 
 def _fetch_history_from_channel(channel, limit=150):
-    """Récupère jusqu'à `limit` jeux passés en paginant sur t.me/s/<canal>?before=<id>."""
     games = []
     seen_ids = set()
     before = None
@@ -200,6 +240,7 @@ def _fetch_history_from_channel(channel, limit=150):
 
         if not page_numeric_ids:
             break
+
         oldest_on_page = min(page_numeric_ids)
         if before is not None and oldest_on_page >= before:
             break
@@ -214,7 +255,6 @@ def _fetch_history_from_channel(channel, limit=150):
 
 
 def fetch_history(limit=150):
-    """Essaie le canal principal, puis le relais si pas assez de jeux ou erreur."""
     errors = []
     for channel in CHANNELS:
         try:
@@ -261,6 +301,43 @@ def api_channels():
     })
 
 
+# ══════════════════════════════════════════════════════════════
+#  ENDPOINT CLÉS D'ABONNEMENT (PostgreSQL persistant)
+# ══════════════════════════════════════════════════════════════
+@app.post('/api/redeem-key')
+def api_redeem_key():
+    """
+    Reçoit { "hash": "..." }
+    Réponses :
+      { "ok": true }                    → clé acceptée et consommée
+      { "ok": false, "error": "used" }  → déjà utilisée
+    """
+    data = request.get_json(silent=True) or {}
+    key_hash = data.get('hash')
+
+    if not key_hash or not isinstance(key_hash, str):
+        return jsonify({'ok': False, 'error': 'missing_hash'}), 400
+
+    try:
+        with db_cursor() as cur:
+            # Tentative d'insertion (UNIQUE constraint)
+            cur.execute(
+                "INSERT INTO used_keys (key_hash) VALUES (%s) ON CONFLICT (key_hash) DO NOTHING RETURNING key_hash;",
+                (key_hash,)
+            )
+            row = cur.fetchone()
+
+            if row is None:
+                # Déjà existante
+                return jsonify({'ok': False, 'error': 'used'})
+
+            # Première utilisation
+            return jsonify({'ok': True})
+
+    except Exception as e:
+        return jsonify({'ok': False, 'error': 'server_error', 'message': str(e)}), 500
+
+
 @app.get('/')
 def index():
     return send_from_directory(BASE_DIR, 'index.html')
@@ -271,7 +348,15 @@ def health():
     return jsonify({'ok': True, 'channels': [c['name'] for c in CHANNELS]})
 
 
+# ── Création automatique de la table au démarrage ──
+with app.app_context():
+    try:
+        init_db()
+        print("✅ Table used_keys prête")
+    except Exception as e:
+        print(f"⚠ Impossible d'initialiser la table used_keys : {e}")
+
+
 if __name__ == '__main__':
-    import os
     port = int(os.environ.get('PORT', 8000))
     app.run(host='0.0.0.0', port=port, debug=False)

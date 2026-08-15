@@ -392,10 +392,10 @@
         🟢 LIVE AUTO ACTIF
       </button>
       <div class="demarrer-desc">
-        Sync <b style="color:var(--gold)">permanente</b> · scan <b style="color:var(--gold)">2 s</b> ·
-        IA anti-2-pertes active · tendances unanimes multi-téléphones.
+        Sync <b style="color:var(--gold)">permanente</b> · scan <b style="color:var(--gold)">chaque seconde</b> ·
+        pas de rechargement de page — mise à jour instantanée des données.
       </div>
-      <div class="demarrer-status" id="demarrer-status">LIVE permanent + IA — démarrage auto…</div>
+      <div class="demarrer-status" id="demarrer-status">LIVE rapide — démarrage…</div>
     </div>
   </div>
 
@@ -773,105 +773,6 @@ let globalBacktestStats  = null; // stats de fiabilité recalculées à partir d
 let liveLastUsableGameNum = null; // dernier n° de jeu réellement TERMINÉ et déjà traité (évite de recalculer en boucle)
 
 // ══════════════════════════════════════════════════════
-//  IA ANTICIPATRICE — anti 2 pertes consécutives (OPT1→4)
-//  Apprend des erreurs, inverse la pred suivante (IA-FLIP)
-//  Sync optionnelle via /api/learn pour unanimité multi-téléphones
-// ══════════════════════════════════════════════════════
-const LEARN_KEY = 'orgbacc_learn_v1';
-function emptyLearn(){
-  return { streaks:{}, forceFlip:{}, totalResolved:0, totalWins:0, updatedAt:null, version:0, source:'local' };
-}
-function loadLearnLocal(){
-  try{ const raw=localStorage.getItem(LEARN_KEY); return raw?Object.assign(emptyLearn(),JSON.parse(raw)):emptyLearn(); }
-  catch(e){ return emptyLearn(); }
-}
-function saveLearnLocal(L){
-  try{ L.updatedAt=new Date().toISOString(); localStorage.setItem(LEARN_KEY, JSON.stringify(L)); }catch(e){}
-}
-let learnState = loadLearnLocal();
-let learnSyncTimer = null;
-function learnKeyForAlgo(algoUsed){
-  if(!algoUsed) return 'OPT1';
-  const a=String(algoUsed).toUpperCase();
-  if(a.indexOf('3CARTES')>=0||a==='OPT2') return 'OPT2';
-  if(a.indexOf('TOTAL')>=0||a==='OPT3') return 'OPT3';
-  if(a.indexOf('ALLINV')>=0||a.indexOf('PARITÉ')>=0||a.indexOf('PARITE')>=0||a==='OPT4') return 'OPT4';
-  if(a.indexOf('ALGO')>=0||a==='OPT1') return 'OPT1';
-  return a.slice(0,12);
-}
-function applyLearnLocally(option, win){
-  const k=learnKeyForAlgo(option);
-  if(!learnState.streaks[k]) learnState.streaks[k]={loss:0,win:0};
-  learnState.totalResolved=(learnState.totalResolved||0)+1;
-  if(win){
-    learnState.totalWins=(learnState.totalWins||0)+1;
-    learnState.streaks[k].win=(learnState.streaks[k].win||0)+1;
-    learnState.streaks[k].loss=0;
-    learnState.forceFlip[k]=false;
-  } else {
-    learnState.streaks[k].loss=(learnState.streaks[k].loss||0)+1;
-    learnState.streaks[k].win=0;
-    if(learnState.streaks[k].loss>=2) learnState.forceFlip[k]=true; // ★ anti 2 pertes
-  }
-  learnState.source='local'; saveLearnLocal(learnState);
-}
-function mergeLearnFromServer(s){
-  if(!s) return;
-  learnState=Object.assign(emptyLearn(),{
-    streaks:s.streaks||{}, forceFlip:s.forceFlip||{},
-    totalResolved:s.totalResolved||0, totalWins:s.totalWins||0,
-    updatedAt:s.updatedAt||null, version:s.version||0, source:'server'
-  });
-  saveLearnLocal(learnState);
-}
-async function pullLearnFromServer(){
-  try{
-    const res=await fetch('/api/learn',{method:'GET',cache:'no-store'});
-    if(!res.ok) return null;
-    const data=await res.json();
-    if(data&&data.ok&&data.learn){ mergeLearnFromServer(data.learn); return data.learn; }
-  }catch(e){}
-  return null;
-}
-async function pushLearnOutcome(option, win, gameNum){
-  applyLearnLocally(option, win);
-  try{
-    const res=await fetch('/api/learn',{
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ option:learnKeyForAlgo(option), win:!!win, gameNum: gameNum!=null?gameNum:undefined })
-    });
-    if(res.ok){ const data=await res.json(); if(data&&data.ok&&data.learn) mergeLearnFromServer(data.learn); return true; }
-  }catch(e){}
-  return false;
-}
-async function consumeForceFlipRemote(optKey){
-  const had=!!(learnState.forceFlip&&learnState.forceFlip[optKey]);
-  if(had){
-    learnState.forceFlip[optKey]=false;
-    if(learnState.streaks[optKey]) learnState.streaks[optKey].loss=0;
-    saveLearnLocal(learnState);
-  }
-  try{
-    const res=await fetch('/api/learn/consume-flip',{
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ option:optKey })
-    });
-    if(res.ok){ const data=await res.json(); if(data&&data.ok&&data.learn) mergeLearnFromServer(data.learn); }
-  }catch(e){}
-  return had;
-}
-function shouldForceFlip(optKey){ return !!(learnState.forceFlip&&learnState.forceFlip[optKey]); }
-function recordOutcomeForLearning(algoUsed, isWin, gameNum){ pushLearnOutcome(algoUsed, isWin, gameNum); }
-function flipSuitColor(suit){ const m={'♦️':'♥️','♥️':'♦️','♣️':'♠️','♠️':'♣️'}; return m[suit]||suit; }
-function flipOuiNon(v){ return v==='OUI'?'NON':(v==='NON'?'OUI':v); }
-function flipTotal(v){ return v==='+10.5'?'-10.5':(v==='-10.5'?'+10.5':v); }
-function startLearnSyncLoop(){
-  if(learnSyncTimer) clearInterval(learnSyncTimer);
-  pullLearnFromServer();
-  learnSyncTimer=setInterval(()=>pullLearnFromServer(), 8000);
-}
-
-// ══════════════════════════════════════════════════════
 //  CONSTANTES
 // ══════════════════════════════════════════════════════
 const SUIT_EMOJI = {'♠️':'♠️','♥️':'♥️','♦️':'♦️','♣️':'♣️'};
@@ -938,7 +839,7 @@ function scanHistoryForLatestRevelation(history){
 
 // ── RATTRAPAGE : si un ALGO perd, on le réutilise jusqu'à 3 fois, puis retour au routage normal ──
 const RATTRAPAGE_KEY = 'orgbacc_rattrapage_v1';
-const RATTRAPAGE_MAX = 3; // max 3 rattrapages OPT1 puis retour au routage normal
+const RATTRAPAGE_MAX = 2; // max 2 rattrapages puis retour à zéro
 function emptyRattrapage(){
   return { active:false, algo:null, remaining:0, startedAt:null, lostSuit:null, lostColor:null };
 }
@@ -1160,15 +1061,11 @@ function setHistoryStatus(id, status){
   const list = loadHistory();
   const entry = list.find(e=>e.id===id);
   if(!entry) return;
-  const nextStatus = (entry.status === status) ? null : status;
+  const nextStatus = (entry.status === status) ? null : status; // re-cliquer annule
   entry.status = nextStatus;
   saveHistory(list);
   renderHistory();
-  // IA apprend du résultat (streaks → forceFlip après 2 pertes)
-  if(nextStatus === 'valid' || nextStatus === 'invalid'){
-    recordOutcomeForLearning(entry.algoUsed || entry.side || 'OPT1', nextStatus==='valid', entry.gameNum);
-  }
-  // Rattrapage OPT1 : perte → même ALGO (max 3) ; gain → fin
+  // Rattrapage : perte → même ALGO + inv couleur (max 2) ; gain → fin ; rattr2 perdu → brut
   if(nextStatus === 'invalid' && entry.algoUsed){
     onPredictionLost(entry.algoUsed, entry.suitKey, !!entry.rattrapage);
   } else if(nextStatus === 'valid' && rattrapage.active){
@@ -1182,33 +1079,21 @@ function clearHistory(){
   renderHistory();
 }
 
-function parseTotalTag(raw){
-  if(!raw) return null;
-  const m = String(raw).match(/#T(\d+)/i);
-  return m ? parseInt(m[1], 10) : null;
-}
-
-// ── Feedback auto : UNIQUEMENT quand la main P1 est finale ──
-// Si ▶️ encore devant P1 → on n'écrit PAS encore ✅/❌ (on attend la fin).
-function resolvePendingHistory(gameNum, p1Cards, p2Cards, rawText){
-  // Bloquer toute confirmation tant que le jeu n'est pas final côté P1
-  if(rawText){
-    const ready = checkGameReadiness(rawText);
-    if(!ready.usable) return null;
-  }
+// ── Résout automatiquement la prédiction en attente pour ce numéro de jeu ──
+// en comparant la couleur prédite aux cartes réellement sorties côté P1 (Joueur).
+function resolvePendingHistory(gameNum, p1Cards, p2Cards){
   const list = loadHistory();
   const pending = list.filter(e=>e.gameNum===gameNum && e.status===null);
   if(!pending.length) return null;
-  const totalTag = rawText ? parseTotalTag(rawText) : null;
   let lastEntry = null;
   for(const entry of pending){
     const sk = entry.suitKey;
     let ok = null;
     if(sk==='OUI' || sk==='NON'){
       if(!p1Cards || !p1Cards.length) continue;
-      const has3 = p1Cards.length >= 3;
       const algo = entry.algoUsed || '';
       if(algo.indexOf('PARITÉ') >= 0 || algo.indexOf('ALLINV') >= 0){
+        // OPT4 : total P1 pair ?
         let sum = 0;
         for(const c of p1Cards){
           const v = c.val;
@@ -1217,19 +1102,20 @@ function resolvePendingHistory(gameNum, p1Cards, p2Cards, rawText){
           else sum += (parseInt(v,10)||0);
         }
         const tot = sum % 10;
-        ok = (sk==='OUI' && (tot%2===0)) || (sk==='NON' && (tot%2!==0));
+        const isEven = (tot % 2 === 0);
+        ok = (sk==='OUI' && isEven) || (sk==='NON' && !isEven);
         entry.actualTotal = tot;
-        entry.actualP1Count = p1Cards.length;
       } else {
-        // OPT2 : 3 cartes P1 — confirmé seulement ici car readiness déjà OK
+        // OPT2 : P1 aura 3 cartes ?
+        const has3 = p1Cards.length >= 3;
         ok = (sk==='OUI' && has3) || (sk==='NON' && !has3);
         entry.actualP1Count = p1Cards.length;
       }
     } else if(sk==='+10.5' || sk==='-10.5'){
-      if(totalTag == null) continue;
-      entry.actualGameTotal = totalTag;
-      ok = (sk === '+10.5') ? (totalTag >= 11) : (totalTag <= 10);
+      // OPT3 totals — needs both hands; skip if incomplete
+      continue;
     } else {
+      // OPT1 suit
       if(!p1Cards || !p1Cards.length) continue;
       const actualSuits = new Set(p1Cards.map(c=>c.suit));
       ok = actualSuits.has(sk);
@@ -1239,8 +1125,6 @@ function resolvePendingHistory(gameNum, p1Cards, p2Cards, rawText){
     entry.status = ok ? 'valid' : 'invalid';
     entry.autoResolved = true;
     lastEntry = entry;
-    // IA apprend aussi des validations auto
-    recordOutcomeForLearning(entry.algoUsed || entry.side || 'OPT1', entry.status==='valid', entry.gameNum);
     if(entry.status === 'invalid' && entry.algoUsed && SUIT_EMOJI[sk]){
       onPredictionLost(entry.algoUsed, entry.suitKey, !!entry.rattrapage);
     } else if(entry.status === 'valid' && rattrapage.active && SUIT_EMOJI[sk]){
@@ -1813,17 +1697,11 @@ function hideError(){document.getElementById('error-box').style.display='none';}
 function showWaiting(msg){const b=document.getElementById('waiting-box');b.textContent='⏳ '+msg;b.style.display='block';}
 function hideWaiting(){document.getElementById('waiting-box').style.display='none';}
 
-// ── Exploitable UNIQUEMENT quand la main P1 est finale ──
-// Règle stricte (demandée) :
-//   • Si ▶️ / ▶ est encore devant P1 → on ATTEND (3e carte possible)
-//   • Si P1 a déjà 3 cartes → GO (tir max, plus de 3e carte possible)
-//   • Si plus de ▶️ devant P1 et P1 a ≥2 cartes → GO (manche stabilisée)
-// Interdit de confirmer feedback / prédire sur le "1er résultat" partiel.
-function hasPlayMarkerBeforeP1(raw, idxP1Open){
-  // Cherche ▶️ ou ▶ uniquement dans la zone AVANT la 1ère parenthèse P1
-  const before = raw.slice(0, idxP1Open);
-  return before.indexOf('▶️') !== -1 || before.indexOf('▶') !== -1;
-}
+// ── Exploitable dès que P1 a sa main finale (max 3 cartes) ──
+// Sur le canal, le ▶️ peut rester affiché devant P1 même quand P1 a déjà 3 cartes.
+// Règle : si P1 a déjà 3 cartes → on IGNORE le ▶️ / ⏰ et on prédit.
+// Exemple : ⏰ #N144. ▶️2(K♠️J♦️2♠️) - ▶️0(8♦️2♣️)
+//   → filtré mentalement : #N144. 2(K♠️J♦️2♠️) - ▶️0(8♦️2♣️) → GO
 function checkGameReadiness(raw){
   if(!raw) return {usable:false, reason:'empty', detail:'Aucune donnée.'};
   const parenIdxs=[];
@@ -1846,30 +1724,35 @@ function checkGameReadiness(raw){
     p2Count = (g2.match(/(?:10|[2-9AJQK])/gi)||[]).length;
   }
 
-  // P1 a déjà 3 cartes = tir max → main finale, on peut confirmer même si ▶️ traîne
+  // PRIORITÉ : P1 a déjà 3 cartes (tir max) → GO, même si ▶️/⏰ encore affichés
   if(p1Count >= 3){
-    return {usable:true, reason:'p1-3-done', detail:'P1 a 3 cartes (max) — main finale confirmée.'};
+    return {usable:true, reason:'p1-3-done', detail:'P1 a 3 cartes (max) — ▶️/⏰ ignorés — pred/correction immédiates.'};
+  }
+
+  // P1 a 2 cartes : GO si le ▶️ n'est plus sur P1, OU si aucune 3e carte n'est attendue côté score 2-2
+  const chevronIdx=raw.indexOf('▶');
+  const playIdx = raw.indexOf('▶️') !== -1 ? raw.indexOf('▶️') : raw.indexOf('▶');
+  const markerIdx = (function(){
+    const a = raw.indexOf('▶️');
+    const b = raw.indexOf('▶');
+    if(a===-1) return b;
+    if(b===-1) return a;
+    return Math.min(a,b);
+  })();
+
+  // ▶️ encore strictement avant P1 et P1 n'a que 2 cartes → possible 3e carte en cours
+  // Mais si on a déjà 2 cartes P1 + 2 P2 et format clair, on autorise quand même le 2-2
+  if(p1Count >= 2 && p2Count >= 1){
+    // Si ▶️ est AVANT la parenthèse P1 et P1 n'a que 2 cartes, le canal affiche souvent
+    // encore le marqueur par erreur — on GO quand même dès que 2 cartes P1 sont lisibles
+    // (la 3e arrivera dans un message suivant si besoin, et on recalculera)
+    return {usable:true, reason:'p1-2-done', detail:'P1 a 2+ cartes — pred/correction (▶️ canal ignoré si cartes déjà là).'};
   }
 
   if(p1Count < 2){
     return {usable:false, reason:'p1-short', detail:"P1 n'a pas encore 2 cartes — en attente."};
   }
-  if(p2Count < 1){
-    return {usable:false, reason:'p2-display', detail:'Données P2 pas encore affichées — en attente.'};
-  }
-
-  // ★ RÈGLE CLÉ : ▶️ encore devant P1 + P1 à 2 cartes seulement → ATTENDRE la fin
-  //   (le canal peut encore ajouter la 3e carte Joueur)
-  if(hasPlayMarkerBeforeP1(raw, idxP1Open)){
-    return {
-      usable:false,
-      reason:'play-p1-active',
-      detail:'▶️ encore actif devant P1 — attente fin de manche avant feedback / prédiction.'
-    };
-  }
-
-  // Plus de ▶️ devant P1, P1 a 2 cartes, P2 affiché → main stabilisée
-  return {usable:true, reason:'p1-final', detail:'Plus de ▶️ devant P1 — main P1 finale, confirmation OK.'};
+  return {usable:false, reason:'p2-display', detail:'Donne initiale P2 pas encore affichée — en attente.'};
 }
 
 
@@ -2210,18 +2093,16 @@ function runTotalCalc(raw){
 }
 
 function renderParityResult(r){
-  let learnFlip=false;
-  if(shouldForceFlip('OPT2')){ r.prediction=flipOuiNon(r.prediction); learnFlip=true; consumeForceFlipRemote('OPT2'); }
   document.getElementById('res-num').textContent=`#N${r.nextNum}`;
   document.getElementById('res-suit-emoji').innerHTML=
     `<span class="${r.prediction==='OUI'?'prediction-oui':'prediction-non'}" style="font-size:clamp(2.8rem,12vw,4.5rem);font-family:'Cinzel',serif;font-weight:900">${r.prediction}</span>`;
   document.getElementById('res-suit-label').textContent=r.prediction==='OUI'?'OUI — P1 aura 3 cartes':'NON — P1 n\'aura pas 3 cartes';
-  document.getElementById('res-side').innerHTML=`<span class="side-tag">OPTION 2${learnFlip?' · IA-FLIP':''}</span>`;
-  lastCalcResult={...r, targetSide:'3CARTES', algoUsed:'3CARTES', finalSuit:null, learnFlip};
+  document.getElementById('res-side').innerHTML=`<span class="side-tag">OPTION 2</span>`;
+  lastCalcResult={...r, targetSide:'3CARTES', algoUsed:'3CARTES', finalSuit:null};
   upsertHistoryEntry(r.nextNum, r.prediction, '3CARTES', false);
 
   const badges=[
-    `<div class="badge badge-engine">◆ OPTION 2 — P1 aura 3 cartes ? → ${r.prediction}${learnFlip?' · 🧠 IA-FLIP':''}</div>`,
+    `<div class="badge badge-engine">◆ OPTION 2 — P1 aura 3 cartes ? → ${r.prediction}</div>`,
     r.formatInverted ? `<div class="badge badge-temporal">🔄 INV FORMAT — ${r.formatReason} → résultat inversé</div>` : `<div class="badge badge-temporal" style="opacity:.6">INV FORMAT — ${r.formatReason}</div>`,
     `<div class="badge badge-parity">◈ TENDANCE 15 JEUX — ${r.trendDetail}</div>`,
     `<div class="badge badge-finalinv">✦ FINAL — <b>${r.prediction}</b></div>`
@@ -2243,19 +2124,17 @@ function renderParityResult(r){
 }
 
 function renderTotalResult(r){
-  let learnFlip=false;
-  if(shouldForceFlip('OPT3')){ r.prediction=flipTotal(r.prediction); learnFlip=true; consumeForceFlipRemote('OPT3'); }
   document.getElementById('res-num').textContent=`#N${r.nextNum}`;
   const isPlus = r.prediction==='+10.5';
   document.getElementById('res-suit-emoji').innerHTML=
     `<span class="${isPlus?'prediction-oui':'prediction-non'}" style="font-size:clamp(2.4rem,11vw,3.8rem);font-family:'Cinzel',serif;font-weight:900">${r.prediction}</span>`;
   document.getElementById('res-suit-label').textContent=isPlus?'TOTAL ≥ 11':'TOTAL ≤ 10';
-  document.getElementById('res-side').innerHTML=`<span class="side-tag">OPTION 3${learnFlip?' · IA-FLIP':''}</span>`;
-  lastCalcResult={...r, targetSide:'TOTAL', algoUsed:'TOTAL±10.5', finalSuit:null, learnFlip};
+  document.getElementById('res-side').innerHTML=`<span class="side-tag">OPTION 3</span>`;
+  lastCalcResult={...r, targetSide:'TOTAL', algoUsed:'TOTAL±10.5', finalSuit:null};
   upsertHistoryEntry(r.nextNum, r.prediction, 'TOTAL±10.5', false);
 
   const badges=[
-    `<div class="badge badge-engine">◆ OPTION 3 — Total combiné → ${r.prediction}${learnFlip?' · 🧠 IA-FLIP':''}</div>`,
+    `<div class="badge badge-engine">◆ OPTION 3 — Total combiné → ${r.prediction}</div>`,
     r.formatInverted ? `<div class="badge badge-temporal">🔄 INV FORMAT — ${r.formatReason} → résultat inversé</div>` : `<div class="badge badge-temporal" style="opacity:.6">INV FORMAT — ${r.formatReason}</div>`,
     r.inverted ? `<div class="badge badge-temporal">🔄 INV MOTEUR OPT3 — ${r.invDetail}</div>` : '',
     `<div class="badge badge-algo">⚙ ${r.baseLabel}</div>`,
@@ -2350,19 +2229,17 @@ function runParityAllInvCalc(raw){
 }
 
 function renderParity4Result(r){
-  let learnFlip=false;
-  if(shouldForceFlip('OPT4')){ r.prediction=flipOuiNon(r.prediction); learnFlip=true; consumeForceFlipRemote('OPT4'); }
   document.getElementById('res-num').textContent=`#N${r.nextNum}`;
   document.getElementById('res-suit-emoji').innerHTML=
     `<span class="${r.prediction==='OUI'?'prediction-oui':'prediction-non'}" style="font-size:clamp(2.8rem,12vw,4.5rem);font-family:'Cinzel',serif;font-weight:900">${r.prediction}</span>`;
   document.getElementById('res-suit-label').textContent =
     r.prediction==='OUI' ? 'OUI — total P1 PAIR' : 'NON — total P1 pas PAIR';
-  document.getElementById('res-side').innerHTML=`<span class="side-tag">OPTION 4 · ALL-INV${learnFlip?' · IA-FLIP':''}</span>`;
-  lastCalcResult={...r, targetSide:'PARITY4', algoUsed:'PARITÉ-ALLINV', finalSuit:null, learnFlip};
+  document.getElementById('res-side').innerHTML=`<span class="side-tag">OPTION 4 · ALL-INV</span>`;
+  lastCalcResult={...r, targetSide:'PARITY4', algoUsed:'PARITÉ-ALLINV', finalSuit:null};
   upsertHistoryEntry(r.nextNum, r.prediction, 'PARITÉ-ALLINV', false);
 
   const badges=[
-    `<div class="badge badge-engine">◆ OPTION 4 — P1 total PAIR ? (ALL-INVERSE) → ${r.prediction}${learnFlip?' · 🧠 IA-FLIP':''}</div>`,
+    `<div class="badge badge-engine">◆ OPTION 4 — P1 total PAIR ? (ALL-INVERSE) → ${r.prediction}</div>`,
     `<div class="badge badge-transform">⇄ ${r.allInvDetail}</div>`,
     r.formatInverted ? `<div class="badge badge-temporal">🔄 INV FORMAT — ${r.formatReason}</div>` : '',
     `<div class="badge badge-finalinv">✦ FINAL — <b>${r.prediction}</b></div>`
@@ -2401,7 +2278,7 @@ function calculate(){
   setTimeout(()=>{
     try{
       const parsed = parseGame(raw);
-      const autoVal = resolvePendingHistory(parsed.num, parsed.p1, parsed.p2, raw);
+      const autoVal = resolvePendingHistory(parsed.num, parsed.p1, parsed.p2);
       showAutoValidationFeedback(autoVal);
 
       if(selectedMode===2){
@@ -2434,16 +2311,14 @@ function calculate(){
 
 function renderResult(r){
   const ar=r.algoResult;
-  let displaySuit = r.finalSuit;
-  let learnFlip=false;
-  if(shouldForceFlip('OPT1')){ displaySuit=flipSuitColor(displaySuit); r.finalSuit=displaySuit; learnFlip=true; consumeForceFlipRemote('OPT1'); }
+  const displaySuit = r.finalSuit; // calcul brut du système RÉVÉLATION, cible fixe P1
 
   document.getElementById('res-num').textContent=`#N${r.nextNum}`;
   const red=isRed(displaySuit);
   document.getElementById('res-suit-emoji').innerHTML=
     `<span style="color:${red?'#cc4444':'var(--ivory)'}">${SUIT_EMOJI[displaySuit]||displaySuit}</span>`;
   document.getElementById('res-suit-label').textContent=SUIT_NAMES[displaySuit]||'';
-  document.getElementById('res-side').innerHTML=`<span class="side-tag">P1${learnFlip?' · IA-FLIP':''}</span>`;
+  document.getElementById('res-side').innerHTML=`<span class="side-tag">P1</span>`;
 
   upsertHistoryEntry(r.nextNum, displaySuit, r.algoUsed, r.rattrapageForced);
 
@@ -2631,12 +2506,11 @@ function setLiveSource(payload){
 async function demarrerLive(silent){
   const btn = document.getElementById('btn-demarrer-live');
   const statusBox = document.getElementById('demarrer-status');
-  const origText = btn ? btn.textContent : '';
   if(!silent && btn){
     btn.disabled = true;
     btn.textContent = '⏳ CHARGEMENT…';
   }
-  if(statusBox && !silent) statusBox.textContent = 'Connexion au canal Telegram…';
+  if(statusBox && !silent) statusBox.textContent = 'Connexion Telegram…';
 
   try{
     const res = await fetch('/api/history?limit=150');
@@ -2715,7 +2589,7 @@ async function demarrerLive(silent){
         + `${skipped?` (${skipped} ign.)`:''}${revelInfo}${chInfo}`;
     }
   }catch(e){
-    if(statusBox) statusBox.textContent = '✕ Sync histo : '+e.message;
+    if(statusBox) statusBox.textContent = '✕ Sync : '+e.message;
   }finally{
     if(btn){
       btn.disabled = false;
@@ -2728,7 +2602,8 @@ async function fetchLatestTelegramGame(silent=false){
   const btn = document.getElementById('btn-live-fetch');
   try{
     if(btn && !silent){ btn.classList.add('loading'); btn.textContent='⟳ SYNCHRO…'; }
-    setLiveStatus('Connexion au canal Telegram en cours…');
+    // En mode silent (LIVE auto 1s) : pas de message "Connexion…" à chaque tick
+    if(!silent) setLiveStatus('Connexion au canal Telegram en cours…');
     const res = await fetch('/api/latest-game');
     let data = null;
     try{ data = await res.json(); }catch(parseErr){ /* réponse non-JSON (page d'erreur du serveur/proxy) */ }
@@ -2740,17 +2615,16 @@ async function fetchLatestTelegramGame(silent=false){
     liveLastMessageId = data.message_id;
     setLiveSource(data);
 
-    // ── Ne jamais confirmer ni prédire tant que ▶️ est encore devant P1 ──
-    const rawFull = data.raw_text || data.normalized;
-    const readiness = checkGameReadiness(rawFull);
+    // ── Le message Telegram peut être édité en cours de manche (⏰/▶) : on ne
+    //    calcule que lorsque les données sont réellement finalisées et exploitables ──
+    const readiness = checkGameReadiness(data.raw_text || data.normalized);
     if(!readiness.usable){
-      // Affiche le jeu en cours mais BLOQUE feedback + prédiction
-      document.getElementById('game-input').value = data.normalized || '';
-      setLiveStatus(`⏳ #N${data.game_number} · ${readiness.detail || '▶️ P1 actif — attente fin…'}`);
+      setLiveStatus(`⏳ #N${data.game_number} · ${readiness.detail || 'en attente de P1 final…'}`);
       return;
     }
 
     document.getElementById('game-input').value = data.normalized;
+    // Détection auto révélation 3-3 sur le dernier jeu (régime mis à jour sans saisie manuelle)
     applyRevelationFromGameRaw(data.normalized || data.raw_text, `#N${data.game_number} (détectée auto via Telegram)`);
     const isNewUsable = liveLastUsableGameNum !== data.game_number;
     liveLastUsableGameNum = data.game_number;
@@ -2758,8 +2632,7 @@ async function fetchLatestTelegramGame(silent=false){
     const chTag = data.channel_name
       ? ` · @${data.channel_name}${data.fallback_used || data.channel_label==='relais' ? ' [RELAIS]' : ' [PRINCIPAL]'}`
       : '';
-    setLiveStatus(`Canal sync · ${isNewUsable ? 'main P1 finale' : 'déjà traité'} · #N${data.game_number}${revelTag}${chTag}`);
-    // Feedback + prédiction suivante UNIQUEMENT sur main finale
+    setLiveStatus(`Canal synchronisé · ${isNewUsable ? 'jeu terminé détecté' : 'dernier jeu (déjà traité) confirmé'} · #N${data.game_number}${revelTag}${chTag}`);
     if(isNewUsable || !silent){
       calculate();
     }
@@ -2770,24 +2643,10 @@ async function fetchLatestTelegramGame(silent=false){
   }
 }
 
-function toggleLiveAutoRefresh(){
-  const btn = document.getElementById('btn-live-auto');
-  if(liveAutoTimer){
-    clearInterval(liveAutoTimer);
-    liveAutoTimer = null;
-    btn.textContent = 'AUTO REFRESH OFF';
-    setLiveStatus('Auto-refresh désactivé.');
-    return;
-  }
-  liveAutoTimer = setInterval(()=>fetchLatestTelegramGame(true), 2000);
-  btn.textContent = 'AUTO REFRESH ON';
-  setLiveStatus('Auto-refresh activé : toutes les 2 secondes.');
-  fetchLatestTelegramGame(true);
-}
-
 let permanentLiveOn = true;
 let permanentLiveTimer = null;
 let historySyncTimer = null;
+let liveFetchInFlight = false; // évite les appels qui se chevauchent
 
 function setPermanentLiveUI(on){
   const btn = document.getElementById('btn-demarrer-live');
@@ -2807,7 +2666,7 @@ function togglePermanentLive(){
     if(liveAutoTimer){ clearInterval(liveAutoTimer); liveAutoTimer=null; }
     setPermanentLiveUI(false);
     const s=document.getElementById('demarrer-status');
-    if(s) s.textContent='LIVE auto arrêté.';
+    if(s) s.textContent='LIVE arrêté.';
     return;
   }
   startPermanentLive();
@@ -2816,28 +2675,36 @@ function togglePermanentLive(){
 function startPermanentLive(){
   permanentLiveOn = true;
   setPermanentLiveUI(true);
+  // Historique 150 jeux (léger) toutes les 15s
   demarrerLive(true);
   if(historySyncTimer) clearInterval(historySyncTimer);
-  historySyncTimer = setInterval(()=>demarrerLive(true), 20000);
+  historySyncTimer = setInterval(()=>demarrerLive(true), 15000);
+  // ★ Scan RAPIDE : 1 seconde — sans recharger la page
   if(permanentLiveTimer) clearInterval(permanentLiveTimer);
-  permanentLiveTimer = setInterval(()=>fetchLatestTelegramGame(true), 2000);
+  permanentLiveTimer = setInterval(()=>{
+    if(liveFetchInFlight) return; // skip si précédent pas fini
+    liveFetchInFlight = true;
+    Promise.resolve(fetchLatestTelegramGame(true))
+      .finally(()=>{ liveFetchInFlight = false; });
+  }, 1000);
   liveAutoTimer = permanentLiveTimer;
   const autoBtn=document.getElementById('btn-live-auto');
   if(autoBtn) autoBtn.textContent='AUTO REFRESH ON';
   fetchLatestTelegramGame(true);
   const s=document.getElementById('demarrer-status');
-  if(s) s.textContent='🟢 LIVE auto + IA · scan 2s';
+  if(s) s.textContent='🟢 LIVE rapide · scan 1s (sans reload page)';
 }
 
-// Adapter demarrerLive pour mode silencieux si appelé avec true
-const _demarrerLiveOrig = typeof demarrerLive === 'function' ? demarrerLive : null;
+function toggleLiveAutoRefresh(){
+  togglePermanentLive();
+}
 
 window.addEventListener('load', ()=>{
   requireUnlock();
   updateRegimeDisplay();
-  startLearnSyncLoop(); // IA active dès le chargement
   renderHistory();
-  setTimeout(()=>{ startPermanentLive(); }, 400);
+  // Démarre immédiatement le scan 1s — zéro clic requis
+  setTimeout(()=>{ startPermanentLive(); }, 200);
 });
 
 </script>

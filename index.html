@@ -773,6 +773,103 @@ let globalBacktestStats  = null; // stats de fiabilité recalculées à partir d
 let liveLastUsableGameNum = null; // dernier n° de jeu réellement TERMINÉ et déjà traité (évite de recalculer en boucle)
 
 // ══════════════════════════════════════════════════════
+//  APPRENTISSAGE PARTAGÉ — /api/learn (unanimité multi-clients)
+// ══════════════════════════════════════════════════════
+const LEARN_KEY = 'orgbacc_learn_v1';
+function emptyLearn(){
+  return { streaks:{}, forceFlip:{}, totalResolved:0, totalWins:0, updatedAt:null, version:0, source:'local' };
+}
+function loadLearnLocal(){
+  try{ const raw=localStorage.getItem(LEARN_KEY); return raw?Object.assign(emptyLearn(),JSON.parse(raw)):emptyLearn(); }
+  catch(e){ return emptyLearn(); }
+}
+function saveLearnLocal(L){
+  try{ L.updatedAt=new Date().toISOString(); localStorage.setItem(LEARN_KEY, JSON.stringify(L)); }catch(e){}
+}
+let learnState = loadLearnLocal();
+let learnSyncTimer = null;
+function learnKeyForAlgo(algoUsed){
+  if(!algoUsed) return 'OPT1';
+  const a=String(algoUsed).toUpperCase();
+  if(a.indexOf('3CARTES')>=0||a==='OPT2') return 'OPT2';
+  if(a.indexOf('TOTAL')>=0||a==='OPT3') return 'OPT3';
+  if(a.indexOf('ALLINV')>=0||a.indexOf('PARITÉ')>=0||a.indexOf('PARITE')>=0||a==='OPT4') return 'OPT4';
+  if(a.indexOf('ALGO')>=0||a==='OPT1'||a.indexOf('ENSEIGNE')>=0) return 'OPT1';
+  return a.slice(0,12);
+}
+function applyLearnLocally(option, win){
+  const k=learnKeyForAlgo(option);
+  if(!learnState.streaks[k]) learnState.streaks[k]={loss:0,win:0};
+  learnState.totalResolved=(learnState.totalResolved||0)+1;
+  if(win){
+    learnState.totalWins=(learnState.totalWins||0)+1;
+    learnState.streaks[k].win=(learnState.streaks[k].win||0)+1;
+    learnState.streaks[k].loss=0;
+    learnState.forceFlip[k]=false;
+  } else {
+    learnState.streaks[k].loss=(learnState.streaks[k].loss||0)+1;
+    learnState.streaks[k].win=0;
+    if(learnState.streaks[k].loss>=2) learnState.forceFlip[k]=true;
+  }
+  learnState.source='local'; saveLearnLocal(learnState);
+}
+function mergeLearnFromServer(serverLearn){
+  if(!serverLearn) return;
+  learnState=Object.assign(emptyLearn(),{
+    streaks:serverLearn.streaks||{}, forceFlip:serverLearn.forceFlip||{},
+    totalResolved:serverLearn.totalResolved||0, totalWins:serverLearn.totalWins||0,
+    updatedAt:serverLearn.updatedAt||null, version:serverLearn.version||0, source:'server'
+  });
+  saveLearnLocal(learnState);
+}
+async function pullLearnFromServer(){
+  try{
+    const res=await fetch('/api/learn',{method:'GET',cache:'no-store'});
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    const data=await res.json();
+    if(data&&data.ok&&data.learn){ mergeLearnFromServer(data.learn); return data.learn; }
+  }catch(e){}
+  return null;
+}
+async function pushLearnOutcome(option, win, gameNum){
+  applyLearnLocally(option, win);
+  try{
+    const res=await fetch('/api/learn',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ option:learnKeyForAlgo(option), win:!!win, gameNum: gameNum!=null?gameNum:undefined })
+    });
+    if(res.ok){ const data=await res.json(); if(data&&data.ok&&data.learn) mergeLearnFromServer(data.learn); return true; }
+  }catch(e){}
+  return false;
+}
+async function consumeForceFlipRemote(optKey){
+  const had=!!(learnState.forceFlip&&learnState.forceFlip[optKey]);
+  if(had){
+    learnState.forceFlip[optKey]=false;
+    if(learnState.streaks[optKey]) learnState.streaks[optKey].loss=0;
+    saveLearnLocal(learnState);
+  }
+  try{
+    const res=await fetch('/api/learn/consume-flip',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ option:optKey })
+    });
+    if(res.ok){ const data=await res.json(); if(data&&data.ok&&data.learn) mergeLearnFromServer(data.learn); }
+  }catch(e){}
+  return had;
+}
+function shouldForceFlip(optKey){ return !!(learnState.forceFlip&&learnState.forceFlip[optKey]); }
+function recordOutcomeForLearning(algoUsed, isWin, gameNum){ pushLearnOutcome(algoUsed, isWin, gameNum); }
+function flipSuitColor(suit){ const m={'♦️':'♥️','♥️':'♦️','♣️':'♠️','♠️':'♣️'}; return m[suit]||suit; }
+function flipOuiNon(v){ return v==='OUI'?'NON':(v==='NON'?'OUI':v); }
+function flipTotal(v){ return v==='+10.5'?'-10.5':(v==='-10.5'?'+10.5':v); }
+function startLearnSyncLoop(){
+  if(learnSyncTimer) clearInterval(learnSyncTimer);
+  pullLearnFromServer();
+  learnSyncTimer=setInterval(()=>pullLearnFromServer(), 8000);
+}
+
+// ══════════════════════════════════════════════════════
 //  CONSTANTES
 // ══════════════════════════════════════════════════════
 const SUIT_EMOJI = {'♠️':'♠️','♥️':'♥️','♦️':'♦️','♣️':'♣️'};
@@ -1065,7 +1162,10 @@ function setHistoryStatus(id, status){
   entry.status = nextStatus;
   saveHistory(list);
   renderHistory();
-  // Rattrapage : perte → même ALGO + inv couleur (max 2) ; gain → fin ; rattr2 perdu → brut
+  if(nextStatus === 'valid' || nextStatus === 'invalid'){
+    recordOutcomeForLearning(entry.algoUsed || entry.side || 'OPT1', nextStatus==='valid', entry.gameNum);
+  }
+  // Rattrapage : perte → même ALGO + inv couleur (max 2) ; gain → fin
   if(nextStatus === 'invalid' && entry.algoUsed){
     onPredictionLost(entry.algoUsed, entry.suitKey, !!entry.rattrapage);
   } else if(nextStatus === 'valid' && rattrapage.active){
@@ -1079,21 +1179,33 @@ function clearHistory(){
   renderHistory();
 }
 
-// ── Résout automatiquement la prédiction en attente pour ce numéro de jeu ──
-// en comparant la couleur prédite aux cartes réellement sorties côté P1 (Joueur).
-function resolvePendingHistory(gameNum, p1Cards, p2Cards){
+function parseTotalTag(raw){
+  if(!raw) return null;
+  const m = String(raw).match(/#T(\d+)/i);
+  return m ? parseInt(m[1], 10) : null;
+}
+function isGameFullyFinished(raw){
+  if(!raw) return false;
+  return raw.indexOf('⏰')===-1 && raw.indexOf('▶')===-1 && raw.indexOf('▶️')===-1;
+}
+
+// ── Résout auto : OPT1 enseigne · OPT2 3 cartes · OPT3 #T · OPT4 pair P1 ──
+function resolvePendingHistory(gameNum, p1Cards, p2Cards, rawText){
   const list = loadHistory();
   const pending = list.filter(e=>e.gameNum===gameNum && e.status===null);
   if(!pending.length) return null;
+  const finished = rawText ? isGameFullyFinished(rawText) : true;
+  const totalTag = rawText ? parseTotalTag(rawText) : null;
   let lastEntry = null;
   for(const entry of pending){
     const sk = entry.suitKey;
     let ok = null;
     if(sk==='OUI' || sk==='NON'){
       if(!p1Cards || !p1Cards.length) continue;
+      const has3 = p1Cards.length >= 3;
+      if(!has3 && !finished) continue;
       const algo = entry.algoUsed || '';
       if(algo.indexOf('PARITÉ') >= 0 || algo.indexOf('ALLINV') >= 0){
-        // OPT4 : total P1 pair ?
         let sum = 0;
         for(const c of p1Cards){
           const v = c.val;
@@ -1102,21 +1214,20 @@ function resolvePendingHistory(gameNum, p1Cards, p2Cards){
           else sum += (parseInt(v,10)||0);
         }
         const tot = sum % 10;
-        const isEven = (tot % 2 === 0);
-        ok = (sk==='OUI' && isEven) || (sk==='NON' && !isEven);
+        ok = (sk==='OUI' && (tot%2===0)) || (sk==='NON' && (tot%2!==0));
         entry.actualTotal = tot;
+        entry.actualP1Count = p1Cards.length;
       } else {
-        // OPT2 : P1 aura 3 cartes ?
-        const has3 = p1Cards.length >= 3;
         ok = (sk==='OUI' && has3) || (sk==='NON' && !has3);
         entry.actualP1Count = p1Cards.length;
       }
     } else if(sk==='+10.5' || sk==='-10.5'){
-      // OPT3 totals — needs both hands; skip if incomplete
-      continue;
+      if(!finished || totalTag==null) continue;
+      entry.actualGameTotal = totalTag;
+      ok = (sk==='+10.5') ? (totalTag>=11) : (totalTag<=10);
     } else {
-      // OPT1 suit
       if(!p1Cards || !p1Cards.length) continue;
+      if(p1Cards.length<3 && !finished) continue;
       const actualSuits = new Set(p1Cards.map(c=>c.suit));
       ok = actualSuits.has(sk);
       entry.actualSuits = [...actualSuits];
@@ -1125,6 +1236,7 @@ function resolvePendingHistory(gameNum, p1Cards, p2Cards){
     entry.status = ok ? 'valid' : 'invalid';
     entry.autoResolved = true;
     lastEntry = entry;
+    recordOutcomeForLearning(entry.algoUsed || entry.side || 'OPT1', entry.status==='valid', entry.gameNum);
     if(entry.status === 'invalid' && entry.algoUsed && SUIT_EMOJI[sk]){
       onPredictionLost(entry.algoUsed, entry.suitKey, !!entry.rattrapage);
     } else if(entry.status === 'valid' && rattrapage.active && SUIT_EMOJI[sk]){
@@ -1143,14 +1255,18 @@ function showAutoValidationFeedback(entry){
   const ok = entry.status==='valid';
   const sk = entry.suitKey;
   let msg;
-  if(sk==='OUI'||sk==='NON'){
+  if(sk==='+10.5'||sk==='-10.5'){
     msg = ok
-      ? `✓ Auto-validé OPT2 : #N${entry.gameNum} ${sk} — P1 avait ${entry.actualP1Count||'?'} carte(s)`
-      : `✕ Auto-validé OPT2 : #N${entry.gameNum} ${sk} — P1 avait ${entry.actualP1Count||'?'} carte(s) (échec)`;
+      ? `✓ Auto-validé OPT3 : #N${entry.gameNum} ${sk} — total #T${entry.actualGameTotal}`
+      : `✕ Auto-validé OPT3 : #N${entry.gameNum} ${sk} — total #T${entry.actualGameTotal} (échec)`;
+  } else if(sk==='OUI'||sk==='NON'){
+    msg = ok
+      ? `✓ Auto-validé : #N${entry.gameNum} ${sk}`
+      : `✕ Auto-validé : #N${entry.gameNum} ${sk} (échec)`;
   } else {
     msg = ok
-      ? `✓ Auto-validé : #N${entry.gameNum} ${SUIT_EMOJI[sk]||sk} P1 trouvée — prédiction réussie.`
-      : `✕ Auto-validé : #N${entry.gameNum} ${SUIT_EMOJI[sk]||sk} P1 absente — prédiction échouée.`;
+      ? `✓ Auto-validé OPT1 : #N${entry.gameNum} ${SUIT_EMOJI[sk]||sk} — réussie`
+      : `✕ Auto-validé OPT1 : #N${entry.gameNum} ${SUIT_EMOJI[sk]||sk} — échouée`;
   }
   box.textContent = msg;
   box.className = 'history-autoval show ' + (ok ? 'ok' : 'ko');
@@ -2093,16 +2209,18 @@ function runTotalCalc(raw){
 }
 
 function renderParityResult(r){
+  let learnFlip=false;
+  if(shouldForceFlip('OPT2')){ r.prediction=flipOuiNon(r.prediction); learnFlip=true; consumeForceFlipRemote('OPT2'); }
   document.getElementById('res-num').textContent=`#N${r.nextNum}`;
   document.getElementById('res-suit-emoji').innerHTML=
     `<span class="${r.prediction==='OUI'?'prediction-oui':'prediction-non'}" style="font-size:clamp(2.8rem,12vw,4.5rem);font-family:'Cinzel',serif;font-weight:900">${r.prediction}</span>`;
   document.getElementById('res-suit-label').textContent=r.prediction==='OUI'?'OUI — P1 aura 3 cartes':'NON — P1 n\'aura pas 3 cartes';
-  document.getElementById('res-side').innerHTML=`<span class="side-tag">OPTION 2</span>`;
-  lastCalcResult={...r, targetSide:'3CARTES', algoUsed:'3CARTES', finalSuit:null};
+  document.getElementById('res-side').innerHTML=`<span class="side-tag">OPTION 2${learnFlip?' · IA-FLIP':''}</span>`;
+  lastCalcResult={...r, targetSide:'3CARTES', algoUsed:'3CARTES', finalSuit:null, learnFlip};
   upsertHistoryEntry(r.nextNum, r.prediction, '3CARTES', false);
 
   const badges=[
-    `<div class="badge badge-engine">◆ OPTION 2 — P1 aura 3 cartes ? → ${r.prediction}</div>`,
+    `<div class="badge badge-engine">◆ OPTION 2 — P1 aura 3 cartes ? → ${r.prediction}${learnFlip?' · IA-FLIP':''}</div>`,
     r.formatInverted ? `<div class="badge badge-temporal">🔄 INV FORMAT — ${r.formatReason} → résultat inversé</div>` : `<div class="badge badge-temporal" style="opacity:.6">INV FORMAT — ${r.formatReason}</div>`,
     `<div class="badge badge-parity">◈ TENDANCE 15 JEUX — ${r.trendDetail}</div>`,
     `<div class="badge badge-finalinv">✦ FINAL — <b>${r.prediction}</b></div>`
@@ -2124,17 +2242,19 @@ function renderParityResult(r){
 }
 
 function renderTotalResult(r){
+  let learnFlip=false;
+  if(shouldForceFlip('OPT3')){ r.prediction=flipTotal(r.prediction); learnFlip=true; consumeForceFlipRemote('OPT3'); }
   document.getElementById('res-num').textContent=`#N${r.nextNum}`;
   const isPlus = r.prediction==='+10.5';
   document.getElementById('res-suit-emoji').innerHTML=
     `<span class="${isPlus?'prediction-oui':'prediction-non'}" style="font-size:clamp(2.4rem,11vw,3.8rem);font-family:'Cinzel',serif;font-weight:900">${r.prediction}</span>`;
   document.getElementById('res-suit-label').textContent=isPlus?'TOTAL ≥ 11':'TOTAL ≤ 10';
-  document.getElementById('res-side').innerHTML=`<span class="side-tag">OPTION 3</span>`;
-  lastCalcResult={...r, targetSide:'TOTAL', algoUsed:'TOTAL±10.5', finalSuit:null};
+  document.getElementById('res-side').innerHTML=`<span class="side-tag">OPTION 3${learnFlip?' · IA-FLIP':''}</span>`;
+  lastCalcResult={...r, targetSide:'TOTAL', algoUsed:'TOTAL±10.5', finalSuit:null, learnFlip};
   upsertHistoryEntry(r.nextNum, r.prediction, 'TOTAL±10.5', false);
 
   const badges=[
-    `<div class="badge badge-engine">◆ OPTION 3 — Total combiné → ${r.prediction}</div>`,
+    `<div class="badge badge-engine">◆ OPTION 3 — Total combiné → ${r.prediction}${learnFlip?' · IA-FLIP':''}</div>`,
     r.formatInverted ? `<div class="badge badge-temporal">🔄 INV FORMAT — ${r.formatReason} → résultat inversé</div>` : `<div class="badge badge-temporal" style="opacity:.6">INV FORMAT — ${r.formatReason}</div>`,
     r.inverted ? `<div class="badge badge-temporal">🔄 INV MOTEUR OPT3 — ${r.invDetail}</div>` : '',
     `<div class="badge badge-algo">⚙ ${r.baseLabel}</div>`,
@@ -2229,17 +2349,19 @@ function runParityAllInvCalc(raw){
 }
 
 function renderParity4Result(r){
+  let learnFlip=false;
+  if(shouldForceFlip('OPT4')){ r.prediction=flipOuiNon(r.prediction); learnFlip=true; consumeForceFlipRemote('OPT4'); }
   document.getElementById('res-num').textContent=`#N${r.nextNum}`;
   document.getElementById('res-suit-emoji').innerHTML=
     `<span class="${r.prediction==='OUI'?'prediction-oui':'prediction-non'}" style="font-size:clamp(2.8rem,12vw,4.5rem);font-family:'Cinzel',serif;font-weight:900">${r.prediction}</span>`;
   document.getElementById('res-suit-label').textContent =
     r.prediction==='OUI' ? 'OUI — total P1 PAIR' : 'NON — total P1 pas PAIR';
-  document.getElementById('res-side').innerHTML=`<span class="side-tag">OPTION 4 · ALL-INV</span>`;
-  lastCalcResult={...r, targetSide:'PARITY4', algoUsed:'PARITÉ-ALLINV', finalSuit:null};
+  document.getElementById('res-side').innerHTML=`<span class="side-tag">OPTION 4 · ALL-INV${learnFlip?' · IA-FLIP':''}</span>`;
+  lastCalcResult={...r, targetSide:'PARITY4', algoUsed:'PARITÉ-ALLINV', finalSuit:null, learnFlip};
   upsertHistoryEntry(r.nextNum, r.prediction, 'PARITÉ-ALLINV', false);
 
   const badges=[
-    `<div class="badge badge-engine">◆ OPTION 4 — P1 total PAIR ? (ALL-INVERSE) → ${r.prediction}</div>`,
+    `<div class="badge badge-engine">◆ OPTION 4 — P1 total PAIR ? (ALL-INVERSE) → ${r.prediction}${learnFlip?' · IA-FLIP':''}</div>`,
     `<div class="badge badge-transform">⇄ ${r.allInvDetail}</div>`,
     r.formatInverted ? `<div class="badge badge-temporal">🔄 INV FORMAT — ${r.formatReason}</div>` : '',
     `<div class="badge badge-finalinv">✦ FINAL — <b>${r.prediction}</b></div>`
@@ -2278,7 +2400,7 @@ function calculate(){
   setTimeout(()=>{
     try{
       const parsed = parseGame(raw);
-      const autoVal = resolvePendingHistory(parsed.num, parsed.p1, parsed.p2);
+      const autoVal = resolvePendingHistory(parsed.num, parsed.p1, parsed.p2, raw);
       showAutoValidationFeedback(autoVal);
 
       if(selectedMode===2){
@@ -2311,14 +2433,16 @@ function calculate(){
 
 function renderResult(r){
   const ar=r.algoResult;
-  const displaySuit = r.finalSuit; // calcul brut du système RÉVÉLATION, cible fixe P1
+  let displaySuit = r.finalSuit;
+  let learnFlip=false;
+  if(shouldForceFlip('OPT1')){ displaySuit=flipSuitColor(displaySuit); r.finalSuit=displaySuit; learnFlip=true; consumeForceFlipRemote('OPT1'); }
 
   document.getElementById('res-num').textContent=`#N${r.nextNum}`;
   const red=isRed(displaySuit);
   document.getElementById('res-suit-emoji').innerHTML=
     `<span style="color:${red?'#cc4444':'var(--ivory)'}">${SUIT_EMOJI[displaySuit]||displaySuit}</span>`;
   document.getElementById('res-suit-label').textContent=SUIT_NAMES[displaySuit]||'';
-  document.getElementById('res-side').innerHTML=`<span class="side-tag">P1</span>`;
+  document.getElementById('res-side').innerHTML=`<span class="side-tag">P1${learnFlip?' · IA-FLIP':''}</span>`;
 
   upsertHistoryEntry(r.nextNum, displaySuit, r.algoUsed, r.rattrapageForced);
 
@@ -2656,6 +2780,7 @@ function toggleLiveAutoRefresh(){
 window.addEventListener('load', ()=>{
   requireUnlock();
   updateRegimeDisplay();
+  startLearnSyncLoop(); // /api/learn toutes les 8s — unanimité multi-téléphones
   fetchLatestTelegramGame(true);
   renderHistory();
 });

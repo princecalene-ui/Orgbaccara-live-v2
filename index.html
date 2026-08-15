@@ -388,14 +388,14 @@
     <div class="live-source" id="live-source"><small>Dernière donnée chargée</small>Aucune donnée récupérée pour le moment.</div>
 
     <div class="demarrer-wrap">
-      <button class="btn-demarrer" id="btn-demarrer-live" onclick="togglePermanentLive()">
-        🟢 LIVE AUTO ACTIF
+      <button class="btn-demarrer" id="btn-demarrer-live" onclick="demarrerLive()">
+        🔴 DÉMARRER LIVE
       </button>
       <div class="demarrer-desc">
-        Sync <b style="color:var(--gold)">permanente</b> · scan toutes les <b style="color:var(--gold)">2 s</b> ·
-        accumulation auto 150 jeux Telegram · tendances unanimes sur tous les téléphones.
+        Charge les 150 derniers jeux du canal et affiche les 15 dernières parties comme si elles avaient
+        déjà été jouées.
       </div>
-      <div class="demarrer-status" id="demarrer-status">LIVE permanent — démarrage auto…</div>
+      <div class="demarrer-status" id="demarrer-status"></div>
     </div>
   </div>
 
@@ -773,103 +773,6 @@ let globalBacktestStats  = null; // stats de fiabilité recalculées à partir d
 let liveLastUsableGameNum = null; // dernier n° de jeu réellement TERMINÉ et déjà traité (évite de recalculer en boucle)
 
 // ══════════════════════════════════════════════════════
-//  APPRENTISSAGE PARTAGÉ (/api/learn) — anti 2 pertes d'affilée
-// ══════════════════════════════════════════════════════
-const LEARN_KEY = 'orgbacc_learn_v1';
-function emptyLearn(){
-  return { streaks:{}, forceFlip:{}, totalResolved:0, totalWins:0, updatedAt:null, version:0, source:'local' };
-}
-function loadLearnLocal(){
-  try{ const raw=localStorage.getItem(LEARN_KEY); return raw?Object.assign(emptyLearn(),JSON.parse(raw)):emptyLearn(); }
-  catch(e){ return emptyLearn(); }
-}
-function saveLearnLocal(L){
-  try{ L.updatedAt=new Date().toISOString(); localStorage.setItem(LEARN_KEY, JSON.stringify(L)); }catch(e){}
-}
-let learnState = loadLearnLocal();
-let learnSyncTimer = null;
-function learnKeyForAlgo(algoUsed){
-  if(!algoUsed) return 'OPT1';
-  const a=String(algoUsed).toUpperCase();
-  if(a.indexOf('3CARTES')>=0||a==='OPT2') return 'OPT2';
-  if(a.indexOf('TOTAL')>=0||a==='OPT3') return 'OPT3';
-  if(a.indexOf('ALLINV')>=0||a.indexOf('PARITÉ')>=0||a.indexOf('PARITE')>=0||a==='OPT4') return 'OPT4';
-  if(a.indexOf('ALGO')>=0||a==='OPT1') return 'OPT1';
-  return a.slice(0,12);
-}
-function applyLearnLocally(option, win){
-  const k=learnKeyForAlgo(option);
-  if(!learnState.streaks[k]) learnState.streaks[k]={loss:0,win:0};
-  learnState.totalResolved=(learnState.totalResolved||0)+1;
-  if(win){
-    learnState.totalWins=(learnState.totalWins||0)+1;
-    learnState.streaks[k].win=(learnState.streaks[k].win||0)+1;
-    learnState.streaks[k].loss=0;
-    learnState.forceFlip[k]=false;
-  } else {
-    learnState.streaks[k].loss=(learnState.streaks[k].loss||0)+1;
-    learnState.streaks[k].win=0;
-    if(learnState.streaks[k].loss>=2) learnState.forceFlip[k]=true;
-  }
-  learnState.source='local'; saveLearnLocal(learnState);
-}
-function mergeLearnFromServer(s){
-  if(!s) return;
-  learnState=Object.assign(emptyLearn(),{
-    streaks:s.streaks||{}, forceFlip:s.forceFlip||{},
-    totalResolved:s.totalResolved||0, totalWins:s.totalWins||0,
-    updatedAt:s.updatedAt||null, version:s.version||0, source:'server'
-  });
-  saveLearnLocal(learnState);
-}
-async function pullLearnFromServer(){
-  try{
-    const res=await fetch('/api/learn',{method:'GET',cache:'no-store'});
-    if(!res.ok) return null;
-    const data=await res.json();
-    if(data&&data.ok&&data.learn){ mergeLearnFromServer(data.learn); return data.learn; }
-  }catch(e){}
-  return null;
-}
-async function pushLearnOutcome(option, win, gameNum){
-  applyLearnLocally(option, win);
-  try{
-    const res=await fetch('/api/learn',{
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ option:learnKeyForAlgo(option), win:!!win, gameNum: gameNum!=null?gameNum:undefined })
-    });
-    if(res.ok){ const data=await res.json(); if(data&&data.ok&&data.learn) mergeLearnFromServer(data.learn); return true; }
-  }catch(e){}
-  return false;
-}
-async function consumeForceFlipRemote(optKey){
-  const had=!!(learnState.forceFlip&&learnState.forceFlip[optKey]);
-  if(had){
-    learnState.forceFlip[optKey]=false;
-    if(learnState.streaks[optKey]) learnState.streaks[optKey].loss=0;
-    saveLearnLocal(learnState);
-  }
-  try{
-    const res=await fetch('/api/learn/consume-flip',{
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ option:optKey })
-    });
-    if(res.ok){ const data=await res.json(); if(data&&data.ok&&data.learn) mergeLearnFromServer(data.learn); }
-  }catch(e){}
-  return had;
-}
-function shouldForceFlip(optKey){ return !!(learnState.forceFlip&&learnState.forceFlip[optKey]); }
-function recordOutcomeForLearning(algoUsed, isWin, gameNum){ pushLearnOutcome(algoUsed, isWin, gameNum); }
-function flipSuitColor(suit){ const m={'♦️':'♥️','♥️':'♦️','♣️':'♠️','♠️':'♣️'}; return m[suit]||suit; }
-function flipOuiNon(v){ return v==='OUI'?'NON':(v==='NON'?'OUI':v); }
-function flipTotal(v){ return v==='+10.5'?'-10.5':(v==='-10.5'?'+10.5':v); }
-function startLearnSyncLoop(){
-  if(learnSyncTimer) clearInterval(learnSyncTimer);
-  pullLearnFromServer();
-  learnSyncTimer=setInterval(()=>pullLearnFromServer(), 8000);
-}
-
-// ══════════════════════════════════════════════════════
 //  CONSTANTES
 // ══════════════════════════════════════════════════════
 const SUIT_EMOJI = {'♠️':'♠️','♥️':'♥️','♦️':'♦️','♣️':'♣️'};
@@ -936,7 +839,7 @@ function scanHistoryForLatestRevelation(history){
 
 // ── RATTRAPAGE : si un ALGO perd, on le réutilise jusqu'à 3 fois, puis retour au routage normal ──
 const RATTRAPAGE_KEY = 'orgbacc_rattrapage_v1';
-const RATTRAPAGE_MAX = 2; // max 2 rattrapages puis retour à zéro
+const RATTRAPAGE_MAX = 3; // max 3 rattrapages OPT1 puis retour au routage normal
 function emptyRattrapage(){
   return { active:false, algo:null, remaining:0, startedAt:null, lostSuit:null, lostColor:null };
 }
@@ -996,7 +899,7 @@ function applyRattrapageInv(predSuit, lostColor, lostSuit){
 }
 
 // Déclenché à chaque perte :
-// - 1ère perte (pred normale) → démarre cycle max 2
+// - 1ère perte (pred normale) → démarre cycle max 3
 // - perte rattr1 (encore remaining) → met à jour la réf pour rattr2
 // - perte rattr2 (cycle terminé) → PAS de rattr3 : prochain = brut
 function onPredictionLost(algo, suitKey, wasRattrapageEntry){
@@ -1018,7 +921,7 @@ function onPredictionLost(algo, suitKey, wasRattrapageEntry){
     updateRegimeDisplay();
     return;
   }
-  // Nouvelle série de rattrapage (max 2) — uniquement après une perte hors rattrapage
+  // Nouvelle série de rattrapage (max 3) — uniquement après une perte hors rattrapage
   rattrapage = {
     active: true,
     algo: algo,
@@ -1162,9 +1065,7 @@ function setHistoryStatus(id, status){
   entry.status = nextStatus;
   saveHistory(list);
   renderHistory();
-  if(nextStatus === 'valid' || nextStatus === 'invalid'){
-    recordOutcomeForLearning(entry.algoUsed || entry.side || 'OPT1', nextStatus==='valid', entry.gameNum);
-  }
+  // Rattrapage OPT1 : perte → même ALGO (max 3) ; gain → fin
   if(nextStatus === 'invalid' && entry.algoUsed){
     onPredictionLost(entry.algoUsed, entry.suitKey, !!entry.rattrapage);
   } else if(nextStatus === 'valid' && rattrapage.active){
@@ -1183,8 +1084,15 @@ function parseTotalTag(raw){
   const m = String(raw).match(/#T(\d+)/i);
   return m ? parseInt(m[1], 10) : null;
 }
+function isGameFullyFinished(raw){
+  if(!raw) return false;
+  const s = String(raw);
+  return s.indexOf('⏰')===-1 && s.indexOf('▶')===-1 && s.indexOf('▶️')===-1;
+}
 
-// ── Validation auto OPT1–4 + apprentissage ──
+// ── Validation auto OPT1–4 ──
+// OPT1 enseigne P1 · OPT2 3 cartes · OPT3 #T total · OPT4 total P1 pair
+// Ne valide que si le jeu est terminé (sauf P1 déjà à 3 cartes).
 function resolvePendingHistory(gameNum, p1Cards, p2Cards, rawText){
   const list = loadHistory();
   const pending = list.filter(e=>e.gameNum===gameNum && e.status===null);
@@ -1198,6 +1106,7 @@ function resolvePendingHistory(gameNum, p1Cards, p2Cards, rawText){
     if(sk==='OUI' || sk==='NON'){
       if(!p1Cards || !p1Cards.length) continue;
       const has3 = p1Cards.length >= 3;
+      // 2 cartes seulement : attendre fin de manche (▶ peut encore arriver)
       if(!has3 && !finished) continue;
       const algo = entry.algoUsed || '';
       if(algo.indexOf('PARITÉ') >= 0 || algo.indexOf('ALLINV') >= 0){
@@ -1217,12 +1126,15 @@ function resolvePendingHistory(gameNum, p1Cards, p2Cards, rawText){
         entry.actualP1Count = p1Cards.length;
       }
     } else if(sk==='+10.5' || sk==='-10.5'){
-      if(!finished || totalTag==null) continue;
+      // OPT3 : #Txx obligatoire + jeu terminé
+      if(!finished) continue;
+      if(totalTag == null) continue;
       entry.actualGameTotal = totalTag;
-      ok = (sk==='+10.5') ? (totalTag>=11) : (totalTag<=10);
+      ok = (sk === '+10.5') ? (totalTag >= 11) : (totalTag <= 10);
     } else {
+      // OPT1 enseigne
       if(!p1Cards || !p1Cards.length) continue;
-      if(p1Cards.length<3 && !finished) continue;
+      if(p1Cards.length < 3 && !finished) continue;
       const actualSuits = new Set(p1Cards.map(c=>c.suit));
       ok = actualSuits.has(sk);
       entry.actualSuits = [...actualSuits];
@@ -1231,7 +1143,6 @@ function resolvePendingHistory(gameNum, p1Cards, p2Cards, rawText){
     entry.status = ok ? 'valid' : 'invalid';
     entry.autoResolved = true;
     lastEntry = entry;
-    recordOutcomeForLearning(entry.algoUsed || entry.side || 'OPT1', entry.status==='valid', entry.gameNum);
     if(entry.status === 'invalid' && entry.algoUsed && SUIT_EMOJI[sk]){
       onPredictionLost(entry.algoUsed, entry.suitKey, !!entry.rattrapage);
     } else if(entry.status === 'valid' && rattrapage.active && SUIT_EMOJI[sk]){
@@ -1254,7 +1165,10 @@ function showAutoValidationFeedback(entry){
   if(sk==='+10.5'||sk==='-10.5'){
     msg = `${mark} OPT3 #N${entry.gameNum} ${sk} — total #T${entry.actualGameTotal}`;
   } else if(sk==='OUI'||sk==='NON'){
-    msg = `${mark} #N${entry.gameNum} ${sk} — ${entry.actualP1Count!=null?entry.actualP1Count+' carte(s) P1':''}`;
+    const is4 = (entry.algoUsed||'').indexOf('ALLINV')>=0 || (entry.algoUsed||'').indexOf('PARITÉ')>=0;
+    msg = `${mark} ${is4?'OPT4':'OPT2'} #N${entry.gameNum} ${sk}` +
+      (entry.actualP1Count!=null ? ` — ${entry.actualP1Count} carte(s) P1` : '') +
+      (entry.actualTotal!=null ? ` · total P1=${entry.actualTotal}` : '');
   } else {
     msg = `${mark} OPT1 #N${entry.gameNum} ${SUIT_EMOJI[sk]||sk}`;
   }
@@ -1372,17 +1286,27 @@ function renderHistory(){
       color = 'var(--ivory)';
       typeTag = e.side || 'P1';
     }
-    const fb = e.status==='valid' ? '✅' : (e.status==='invalid' ? '❌' : '⏳');
+    // Feedback : un seul logo selon le statut (pas les deux en même temps)
+    let feedbackHtml = '';
+    let actionsHtml = `<button class="hist-btn copy-btn" title="Copier" onclick="copyHistoryEntry('${e.id}')">⧉</button>`;
+    if(e.status === 'valid'){
+      feedbackHtml = `<span style="color:var(--green-ok);font-weight:700;margin-right:4px">✅</span>`;
+      // déjà validé : bouton pour annuler uniquement
+      actionsHtml += `<button class="hist-btn valid-btn active" title="Annuler validation" onclick="setHistoryStatus('${e.id}','valid')">✅</button>`;
+    } else if(e.status === 'invalid'){
+      feedbackHtml = `<span style="color:var(--red);font-weight:700;margin-right:4px">❌</span>`;
+      actionsHtml += `<button class="hist-btn invalid-btn active" title="Annuler" onclick="setHistoryStatus('${e.id}','invalid')">❌</button>`;
+    } else {
+      // En attente : boutons texte neutres (pas de logo ✅❌ affichés ensemble)
+      actionsHtml += `<button class="hist-btn valid-btn" title="Marquer gagnée" onclick="setHistoryStatus('${e.id}','valid')">OK</button>`;
+      actionsHtml += `<button class="hist-btn invalid-btn" title="Marquer perdue" onclick="setHistoryStatus('${e.id}','invalid')">KO</button>`;
+    }
     return `
     <div class="history-item ${statusClass}">
       <span class="hist-num">#N${e.gameNum}</span>
       <span class="hist-suit" style="color:${color};font-size:${isSuit?'1rem':'.78rem'};min-width:${isSuit?'22px':'52px'};font-weight:700">${displayVal}</span>
-      <span class="hist-label">${fb} ${typeTag}${e.algoUsed?` <span class="hist-tag">[${e.algoUsed}]</span>`:''}${e.rattrapage?` <span class="hist-tag" style="color:#ffbf80">⏱ RATTR</span>`:''}${e.source==='live-seed'?` <span class="hist-tag hist-live">🔴 LIVE</span>`:(e.autoResolved?` <span class="hist-tag">auto</span>`:'')}</span>
-      <div class="hist-actions">
-        <button class="hist-btn copy-btn" title="Copier" onclick="copyHistoryEntry('${e.id}')">⧉</button>
-        <button class="hist-btn valid-btn ${e.status==='valid'?'active':''}" title="✅ Validée" onclick="setHistoryStatus('${e.id}','valid')">✅</button>
-        <button class="hist-btn invalid-btn ${e.status==='invalid'?'active':''}" title="❌ Non validée" onclick="setHistoryStatus('${e.id}','invalid')">❌</button>
-      </div>
+      <span class="hist-label">${feedbackHtml}${typeTag}${e.algoUsed?` <span class="hist-tag">[${e.algoUsed}]</span>`:''}${e.rattrapage?` <span class="hist-tag" style="color:#ffbf80">⏱ RATTR</span>`:''}${e.source==='live-seed'?` <span class="hist-tag hist-live">🔴 LIVE</span>`:(e.autoResolved?` <span class="hist-tag">auto</span>`:'')}</span>
+      <div class="hist-actions">${actionsHtml}</div>
     </div>`;
   }).join('');
 }
@@ -1636,7 +1560,7 @@ function runCalc(raw){
       : `2 derniers chiffres ${String(lastTwo).padStart(2,'0')} (${digitZone}) → NORMAL (pas de bascule)`
   };
 
-  // RATTRAPAGE : si actif, on force le même ALGO qui a perdu (max 2 tentatives) — prioritaire sur la bascule
+  // RATTRAPAGE : si actif, on force le même ALGO qui a perdu (max 3 tentatives) — prioritaire sur la bascule
   const normalAlgo = baseAlgo;
   const inRattrapage = rattrapage.active && rattrapage.algo && rattrapage.remaining > 0;
   const algoUsed = inRattrapage ? rattrapage.algo : normalAlgo;
@@ -2075,20 +1999,13 @@ function getCardValueParity(v){
 
 // ── OPTION 2 : P1 aura-t-il 3 cartes ? OUI / NON ──
 // Basé sur la tendance des 15 derniers jeux (historique Telegram commun)
-function isGameFullyFinished(raw){
-  if(!raw) return false;
-  return String(raw).indexOf('⏰')===-1 && String(raw).indexOf('▶')===-1 && String(raw).indexOf('▶️')===-1;
-}
-
-// OPT2 — 100% déterministe depuis Telegram (même résultat sur tous les téléphones)
-// N'utilise JAMAIS le contenu local partiel du jeu en cours comme heuristique.
 function runParityCalc(raw){
   const {num,p1,p2}=parseGame(raw);
   if(!p1.length||!p2.length) throw new Error('Cartes P1/P2 introuvables');
 
   applyFormatInversionFromGame(p1, p2, num);
 
-  // Source UNIQUE : cache Telegram (rempli par LIVE auto 2s) — identique partout
+  // Collecte les 15 derniers jeux exploitables (cache Telegram ou historique local)
   const samples = [];
   const srcList = (telegramHistoryCache && telegramHistoryCache.length)
     ? telegramHistoryCache.slice().sort((a,b)=>a.game_number-b.game_number)
@@ -2097,39 +2014,37 @@ function runParityCalc(raw){
   for(let i = srcList.length - 1; i >= 0 && samples.length < 15; i--){
     const g = srcList[i];
     try{
-      const txt = g.raw_text || g.normalized || '';
-      // Uniquement jeux TERMINÉS (pas ⏰ / ▶) pour éviter divergences mid-manche
-      if(!isGameFullyFinished(txt)) continue;
+      const readiness = checkGameReadiness(g.raw_text || g.normalized);
+      if(!readiness.usable) continue;
       const parsed = parseGame(g.normalized || g.raw_text);
       if(!parsed.p1 || !parsed.p1.length) continue;
-      // Exclure le jeu courant (num) pour ne pas biaiser
-      if(parsed.num === num) continue;
       samples.push({
         gameNum: parsed.num,
         p1Three: parsed.p1.length >= 3
       });
     }catch(e){ continue; }
   }
+  // ordre chronologique pour affichage
   samples.reverse();
 
   const withThree = samples.filter(s=>s.p1Three).length;
   const total = samples.length;
+  const rate = total > 0 ? withThree / total : 0.5;
 
-  // Comparaison ENTIÈRE (unanime) : OUI si withThree*2 >= total
+  // Tendance : si >= 50% des 15 derniers ont eu 3 cartes P1 → OUI, sinon NON
+  // Si < 5 échantillons → neutre basé sur le jeu courant (si P1 déjà 3 sur le précédent souvent continue)
   let prediction;
   let trendDetail;
   if(total < 5){
-    // Fallback DÉTERMINISTE (pas basé sur cartes locales) : parité du prochain N°
-    // PAIR → NON · IMPAIR → OUI  (règle fixe, même partout)
-    const nextN = num + 1;
-    prediction = (nextN % 2 === 1) ? 'OUI' : 'NON';
-    trendDetail = `Échantillon faible (${total}/15) · fallback unanime N°${nextN} ${nextN%2?'IMPAIR→OUI':'PAIR→NON'} · LIVE auto recharge…`;
+    // peu de data : heuristique légère sur le jeu fourni
+    prediction = (p1.length >= 3) ? 'OUI' : 'NON';
+    trendDetail = `Échantillon faible (${total}/15) — lancez DÉMARRER LIVE pour synchroniser Telegram`;
   } else {
-    prediction = (withThree * 2 >= total) ? 'OUI' : 'NON';
-    trendDetail = `${withThree}/${total} jeux P1=3 cartes (${Math.round(withThree/total*100)}%) → ${prediction}`;
+    prediction = (rate >= 0.5) ? 'OUI' : 'NON';
+    trendDetail = `${withThree}/${total} jeux avec P1 à 3 cartes (${Math.round(rate*100)}%) → ${prediction}`;
   }
 
-  // Inversion format (3-3 / 2-3 / 2-2) — état reconstruit depuis Telegram → unanime
+  // Inversion format (3-3 / 2-3 / 2-2)
   const fmtDec = shouldInvertOpt23();
   let formatInverted = false;
   if(fmtDec.invert){
@@ -2138,7 +2053,7 @@ function runParityCalc(raw){
   }
   consumeOneShotIfAny();
 
-  const predictedGameNum = num + 1;
+  const predictedGameNum = num + 1; // prochain jeu (cohérent avec OPT1)
 
   return {
     mode: 'parity',
@@ -2151,7 +2066,7 @@ function runParityCalc(raw){
     samples,
     withThree,
     sampleTotal: total,
-    rate: total>0 ? withThree/total : 0,
+    rate,
     trendDetail,
     p1First: p1[0],
     p2First: p2[0]
@@ -2209,14 +2124,12 @@ function runTotalCalc(raw){
 }
 
 function renderParityResult(r){
-  let learnFlip=false;
-  if(shouldForceFlip('OPT2')){ r.prediction=flipOuiNon(r.prediction); learnFlip=true; consumeForceFlipRemote('OPT2'); }
   document.getElementById('res-num').textContent=`#N${r.nextNum}`;
   document.getElementById('res-suit-emoji').innerHTML=
     `<span class="${r.prediction==='OUI'?'prediction-oui':'prediction-non'}" style="font-size:clamp(2.8rem,12vw,4.5rem);font-family:'Cinzel',serif;font-weight:900">${r.prediction}</span>`;
   document.getElementById('res-suit-label').textContent=r.prediction==='OUI'?'OUI — P1 aura 3 cartes':'NON — P1 n\'aura pas 3 cartes';
-  document.getElementById('res-side').innerHTML=`<span class="side-tag">OPTION 2${learnFlip?' · IA-FLIP':''}</span>`;
-  lastCalcResult={...r, targetSide:'3CARTES', algoUsed:'3CARTES', finalSuit:null, learnFlip};
+  document.getElementById('res-side').innerHTML=`<span class="side-tag">OPTION 2</span>`;
+  lastCalcResult={...r, targetSide:'3CARTES', algoUsed:'3CARTES', finalSuit:null};
   upsertHistoryEntry(r.nextNum, r.prediction, '3CARTES', false);
 
   const badges=[
@@ -2242,15 +2155,13 @@ function renderParityResult(r){
 }
 
 function renderTotalResult(r){
-  let learnFlip=false;
-  if(shouldForceFlip('OPT3')){ r.prediction=flipTotal(r.prediction); learnFlip=true; consumeForceFlipRemote('OPT3'); }
   document.getElementById('res-num').textContent=`#N${r.nextNum}`;
   const isPlus = r.prediction==='+10.5';
   document.getElementById('res-suit-emoji').innerHTML=
     `<span class="${isPlus?'prediction-oui':'prediction-non'}" style="font-size:clamp(2.4rem,11vw,3.8rem);font-family:'Cinzel',serif;font-weight:900">${r.prediction}</span>`;
   document.getElementById('res-suit-label').textContent=isPlus?'TOTAL ≥ 11':'TOTAL ≤ 10';
-  document.getElementById('res-side').innerHTML=`<span class="side-tag">OPTION 3${learnFlip?' · IA-FLIP':''}</span>`;
-  lastCalcResult={...r, targetSide:'TOTAL', algoUsed:'TOTAL±10.5', finalSuit:null, learnFlip};
+  document.getElementById('res-side').innerHTML=`<span class="side-tag">OPTION 3</span>`;
+  lastCalcResult={...r, targetSide:'TOTAL', algoUsed:'TOTAL±10.5', finalSuit:null};
   upsertHistoryEntry(r.nextNum, r.prediction, 'TOTAL±10.5', false);
 
   const badges=[
@@ -2349,15 +2260,13 @@ function runParityAllInvCalc(raw){
 }
 
 function renderParity4Result(r){
-  let learnFlip=false;
-  if(shouldForceFlip('OPT4')){ r.prediction=flipOuiNon(r.prediction); learnFlip=true; consumeForceFlipRemote('OPT4'); }
   document.getElementById('res-num').textContent=`#N${r.nextNum}`;
   document.getElementById('res-suit-emoji').innerHTML=
     `<span class="${r.prediction==='OUI'?'prediction-oui':'prediction-non'}" style="font-size:clamp(2.8rem,12vw,4.5rem);font-family:'Cinzel',serif;font-weight:900">${r.prediction}</span>`;
   document.getElementById('res-suit-label').textContent =
     r.prediction==='OUI' ? 'OUI — total P1 PAIR' : 'NON — total P1 pas PAIR';
-  document.getElementById('res-side').innerHTML=`<span class="side-tag">OPTION 4 · ALL-INV${learnFlip?' · IA-FLIP':''}</span>`;
-  lastCalcResult={...r, targetSide:'PARITY4', algoUsed:'PARITÉ-ALLINV', finalSuit:null, learnFlip};
+  document.getElementById('res-side').innerHTML=`<span class="side-tag">OPTION 4 · ALL-INV</span>`;
+  lastCalcResult={...r, targetSide:'PARITY4', algoUsed:'PARITÉ-ALLINV', finalSuit:null};
   upsertHistoryEntry(r.nextNum, r.prediction, 'PARITÉ-ALLINV', false);
 
   const badges=[
@@ -2433,16 +2342,14 @@ function calculate(){
 
 function renderResult(r){
   const ar=r.algoResult;
-  let displaySuit = r.finalSuit;
-  let learnFlip=false;
-  if(shouldForceFlip('OPT1')){ displaySuit=flipSuitColor(displaySuit); r.finalSuit=displaySuit; learnFlip=true; consumeForceFlipRemote('OPT1'); }
+  const displaySuit = r.finalSuit; // calcul brut du système RÉVÉLATION, cible fixe P1
 
   document.getElementById('res-num').textContent=`#N${r.nextNum}`;
   const red=isRed(displaySuit);
   document.getElementById('res-suit-emoji').innerHTML=
     `<span style="color:${red?'#cc4444':'var(--ivory)'}">${SUIT_EMOJI[displaySuit]||displaySuit}</span>`;
   document.getElementById('res-suit-label').textContent=SUIT_NAMES[displaySuit]||'';
-  document.getElementById('res-side').innerHTML=`<span class="side-tag">P1${learnFlip?' · IA-FLIP':''}</span>`;
+  document.getElementById('res-side').innerHTML=`<span class="side-tag">P1</span>`;
 
   upsertHistoryEntry(r.nextNum, displaySuit, r.algoUsed, r.rattrapageForced);
 
@@ -2627,15 +2534,13 @@ function setLiveSource(payload){
 // 2) Rejoue les 15 dernières parties comme si elles avaient déjà été jouées : si une
 //    prédiction avait déjà été faite pour ce numéro, on la valide avec le vrai résultat ;
 //    sinon on comble rétroactivement avec la prédiction déterministe du système.
-async function demarrerLive(silent){
+async function demarrerLive(){
   const btn = document.getElementById('btn-demarrer-live');
   const statusBox = document.getElementById('demarrer-status');
-  const origText = btn ? btn.textContent : '';
-  if(!silent && btn){
-    btn.disabled = true;
-    btn.textContent = '⏳ CHARGEMENT DES 150 DERNIERS JEUX…';
-  }
-  if(statusBox && !silent) statusBox.textContent = 'Connexion au canal Telegram…';
+  const origText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '⏳ CHARGEMENT DES 150 DERNIERS JEUX…';
+  statusBox.textContent = 'Connexion au canal Telegram…';
 
   try{
     const res = await fetch('/api/history?limit=150');
@@ -2709,19 +2614,14 @@ async function demarrerLive(silent){
     const chInfo = data.channel_name
       ? ` · source @${data.channel_name}${data.fallback_used || data.channel_label==='relais' ? ' [RELAIS]' : ' [PRINCIPAL]'}`
       : '';
-    if(statusBox){
-      statusBox.textContent = `✅ LIVE · ${telegramHistoryCache.length} jeux · `
-        + `${validCount}✅ / ${invalidCount}❌`
-        + `${skipped?` (${skipped} ign.)`:''}${revelInfo}${chInfo}`;
-    }
+    statusBox.textContent = `✅ LIVE démarré · ${telegramHistoryCache.length} jeux Telegram analysés · `
+      + `15 dernières parties : ${validCount} validées / ${invalidCount} ratées`
+      + `${skipped?` (${skipped} ignorées)`:''}${revelInfo}${chInfo}`;
   }catch(e){
-    if(statusBox) statusBox.textContent = '✕ Sync histo : '+e.message;
+    statusBox.textContent = '✕ Erreur : '+e.message;
   }finally{
-    if(btn){
-      btn.disabled = false;
-      if(!silent) btn.textContent = permanentLiveOn ? '🟢 LIVE AUTO ACTIF' : '🔴 LIVE AUTO OFF';
-      else setPermanentLiveUI(permanentLiveOn);
-    }
+    btn.disabled = false;
+    btn.textContent = origText;
   }
 }
 
@@ -2769,10 +2669,6 @@ async function fetchLatestTelegramGame(silent=false){
   }
 }
 
-let permanentLiveOn = true;
-let permanentLiveTimer = null;
-let historySyncTimer = null;
-
 function toggleLiveAutoRefresh(){
   const btn = document.getElementById('btn-live-auto');
   if(liveAutoTimer){
@@ -2782,66 +2678,17 @@ function toggleLiveAutoRefresh(){
     setLiveStatus('Auto-refresh désactivé.');
     return;
   }
-  liveAutoTimer = setInterval(()=>fetchLatestTelegramGame(true), 2000);
+  liveAutoTimer = setInterval(()=>fetchLatestTelegramGame(true), 5000);
   btn.textContent = 'AUTO REFRESH ON';
-  setLiveStatus('Auto-refresh activé : toutes les 2 secondes.');
+  setLiveStatus('Auto-refresh activé : vérification toutes les 5 secondes.');
   fetchLatestTelegramGame(true);
-}
-
-function setPermanentLiveUI(on){
-  const btn = document.getElementById('btn-demarrer-live');
-  if(!btn) return;
-  btn.textContent = on ? '🟢 LIVE AUTO ACTIF' : '🔴 LIVE AUTO OFF';
-  btn.style.borderColor = on ? '#33cc66' : '#ff3333';
-  btn.style.background = on
-    ? 'linear-gradient(135deg,#003a10,#005c20)'
-    : 'linear-gradient(135deg,#3a0000,#5c0000)';
-  btn.style.animation = on ? '' : 'none';
-}
-
-function togglePermanentLive(){
-  if(permanentLiveOn){
-    permanentLiveOn = false;
-    if(permanentLiveTimer){ clearInterval(permanentLiveTimer); permanentLiveTimer=null; }
-    if(historySyncTimer){ clearInterval(historySyncTimer); historySyncTimer=null; }
-    if(liveAutoTimer){ clearInterval(liveAutoTimer); liveAutoTimer=null; }
-    setPermanentLiveUI(false);
-    const s=document.getElementById('demarrer-status');
-    if(s) s.textContent='LIVE auto arrêté.';
-    setLiveStatus('LIVE permanent désactivé.');
-    return;
-  }
-  startPermanentLive();
-}
-
-function startPermanentLive(){
-  permanentLiveOn = true;
-  setPermanentLiveUI(true);
-  // Historique 150 jeux (unanime OPT2) + refresh périodique
-  demarrerLive(true);
-  if(historySyncTimer) clearInterval(historySyncTimer);
-  historySyncTimer = setInterval(()=>demarrerLive(true), 20000);
-  // Scan dernier jeu toutes les 2s
-  if(permanentLiveTimer) clearInterval(permanentLiveTimer);
-  permanentLiveTimer = setInterval(()=>fetchLatestTelegramGame(true), 2000);
-  liveAutoTimer = permanentLiveTimer;
-  const autoBtn=document.getElementById('btn-live-auto');
-  if(autoBtn) autoBtn.textContent='AUTO REFRESH ON';
-  fetchLatestTelegramGame(true);
-  setLiveStatus('LIVE permanent actif · scan 2s · historique unanime.');
-  const s=document.getElementById('demarrer-status');
-  if(s) s.textContent='🟢 LIVE auto · accumulation toutes les 2s';
 }
 
 window.addEventListener('load', ()=>{
   requireUnlock();
   updateRegimeDisplay();
-  startLearnSyncLoop();
+  fetchLatestTelegramGame(true);
   renderHistory();
-  setTimeout(()=>{
-    if(typeof systemUnlocked!=='undefined' && systemUnlocked) startPermanentLive();
-    else { fetchLatestTelegramGame(true); demarrerLive(true); }
-  }, 500);
 });
 
 </script>

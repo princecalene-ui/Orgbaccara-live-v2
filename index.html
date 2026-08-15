@@ -392,8 +392,8 @@
         🟢 LIVE AUTO ACTIF
       </button>
       <div class="demarrer-desc">
-        Sync <b style="color:var(--gold)">permanente</b> · scan <b style="color:var(--gold)">chaque seconde</b> ·
-        pas de rechargement de page — mise à jour instantanée des données.
+        Scan <b style="color:var(--gold)">1 s</b> · dès que ▶ P1 disparaît → ✅/❌ + pred suivante <b style="color:var(--gold)">immédiate</b>
+        (▶ P2 ignoré).
       </div>
       <div class="demarrer-status" id="demarrer-status">LIVE rapide — démarrage…</div>
     </div>
@@ -1079,21 +1079,32 @@ function clearHistory(){
   renderHistory();
 }
 
-// ── Résout automatiquement la prédiction en attente pour ce numéro de jeu ──
-// en comparant la couleur prédite aux cartes réellement sorties côté P1 (Joueur).
-function resolvePendingHistory(gameNum, p1Cards, p2Cards){
+function parseTotalTag(raw){
+  if(!raw) return null;
+  const m = String(raw).match(/#T(\d+)/i);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+// Feedback UNIQUEMENT si main P1 finale (plus de ▶ côté P1).
+// OPT1 : dès ▶ P1 disparu → ✅/❌ immédiat puis pred du tour suivant.
+function resolvePendingHistory(gameNum, p1Cards, p2Cards, rawText){
+  if(rawText){
+    const ready = checkGameReadiness(rawText);
+    if(!ready.usable) return null; // encore ▶ côté P1 → pas de feedback
+  }
   const list = loadHistory();
   const pending = list.filter(e=>e.gameNum===gameNum && e.status===null);
   if(!pending.length) return null;
+  const totalTag = rawText ? parseTotalTag(rawText) : null;
   let lastEntry = null;
   for(const entry of pending){
     const sk = entry.suitKey;
     let ok = null;
     if(sk==='OUI' || sk==='NON'){
       if(!p1Cards || !p1Cards.length) continue;
+      const has3 = p1Cards.length >= 3;
       const algo = entry.algoUsed || '';
       if(algo.indexOf('PARITÉ') >= 0 || algo.indexOf('ALLINV') >= 0){
-        // OPT4 : total P1 pair ?
         let sum = 0;
         for(const c of p1Cards){
           const v = c.val;
@@ -1102,20 +1113,19 @@ function resolvePendingHistory(gameNum, p1Cards, p2Cards){
           else sum += (parseInt(v,10)||0);
         }
         const tot = sum % 10;
-        const isEven = (tot % 2 === 0);
-        ok = (sk==='OUI' && isEven) || (sk==='NON' && !isEven);
+        ok = (sk==='OUI' && (tot%2===0)) || (sk==='NON' && (tot%2!==0));
         entry.actualTotal = tot;
+        entry.actualP1Count = p1Cards.length;
       } else {
-        // OPT2 : P1 aura 3 cartes ?
-        const has3 = p1Cards.length >= 3;
         ok = (sk==='OUI' && has3) || (sk==='NON' && !has3);
         entry.actualP1Count = p1Cards.length;
       }
     } else if(sk==='+10.5' || sk==='-10.5'){
-      // OPT3 totals — needs both hands; skip if incomplete
-      continue;
+      if(totalTag == null) continue;
+      entry.actualGameTotal = totalTag;
+      ok = (sk === '+10.5') ? (totalTag >= 11) : (totalTag <= 10);
     } else {
-      // OPT1 suit
+      // OPT1 enseigne P1 — confirmable dès que ▶ P1 est parti
       if(!p1Cards || !p1Cards.length) continue;
       const actualSuits = new Set(p1Cards.map(c=>c.suit));
       ok = actualSuits.has(sk);
@@ -1697,11 +1707,18 @@ function hideError(){document.getElementById('error-box').style.display='none';}
 function showWaiting(msg){const b=document.getElementById('waiting-box');b.textContent='⏳ '+msg;b.style.display='block';}
 function hideWaiting(){document.getElementById('waiting-box').style.display='none';}
 
-// ── Exploitable dès que P1 a sa main finale (max 3 cartes) ──
-// Sur le canal, le ▶️ peut rester affiché devant P1 même quand P1 a déjà 3 cartes.
-// Règle : si P1 a déjà 3 cartes → on IGNORE le ▶️ / ⏰ et on prédit.
-// Exemple : ⏰ #N144. ▶️2(K♠️J♦️2♠️) - ▶️0(8♦️2♣️)
-//   → filtré mentalement : #N144. 2(K♠️J♦️2♠️) - ▶️0(8♦️2♣️) → GO
+// ── Règle P1 UNIQUEMENT (pas P2) ──
+// • ▶ encore côté JOUEUR (P1) → ATTENDRE (pas de feedback, pas de pred)
+// • ▶ disparaît côté P1 → IMMÉDIAT : confirmer ✅/❌ + prédire le tour suivant
+// • On n'attend JAMAIS la disparition du ▶ côté BANQUIER (P2)
+// Ex: "▶️2(K♠️J♦️) - ▶️0(8♦️2♣️)" → ATTENTE
+// Ex: "2(K♠️J♦️) - ▶️0(8♦️2♣️)"   → GO immédiat (▶ P2 ignoré)
+function playMarkerOnP1Side(raw){
+  // Zone P1 = tout avant le séparateur " - " (P2 est à droite)
+  const dash = raw.search(/\s-\s/);
+  const p1Side = dash === -1 ? raw : raw.slice(0, dash);
+  return p1Side.indexOf('▶️') !== -1 || p1Side.indexOf('▶') !== -1;
+}
 function checkGameReadiness(raw){
   if(!raw) return {usable:false, reason:'empty', detail:'Aucune donnée.'};
   const parenIdxs=[];
@@ -1724,35 +1741,29 @@ function checkGameReadiness(raw){
     p2Count = (g2.match(/(?:10|[2-9AJQK])/gi)||[]).length;
   }
 
-  // PRIORITÉ : P1 a déjà 3 cartes (tir max) → GO, même si ▶️/⏰ encore affichés
-  if(p1Count >= 3){
-    return {usable:true, reason:'p1-3-done', detail:'P1 a 3 cartes (max) — ▶️/⏰ ignorés — pred/correction immédiates.'};
-  }
-
-  // P1 a 2 cartes : GO si le ▶️ n'est plus sur P1, OU si aucune 3e carte n'est attendue côté score 2-2
-  const chevronIdx=raw.indexOf('▶');
-  const playIdx = raw.indexOf('▶️') !== -1 ? raw.indexOf('▶️') : raw.indexOf('▶');
-  const markerIdx = (function(){
-    const a = raw.indexOf('▶️');
-    const b = raw.indexOf('▶');
-    if(a===-1) return b;
-    if(b===-1) return a;
-    return Math.min(a,b);
-  })();
-
-  // ▶️ encore strictement avant P1 et P1 n'a que 2 cartes → possible 3e carte en cours
-  // Mais si on a déjà 2 cartes P1 + 2 P2 et format clair, on autorise quand même le 2-2
-  if(p1Count >= 2 && p2Count >= 1){
-    // Si ▶️ est AVANT la parenthèse P1 et P1 n'a que 2 cartes, le canal affiche souvent
-    // encore le marqueur par erreur — on GO quand même dès que 2 cartes P1 sont lisibles
-    // (la 3e arrivera dans un message suivant si besoin, et on recalculera)
-    return {usable:true, reason:'p1-2-done', detail:'P1 a 2+ cartes — pred/correction (▶️ canal ignoré si cartes déjà là).'};
-  }
-
   if(p1Count < 2){
     return {usable:false, reason:'p1-short', detail:"P1 n'a pas encore 2 cartes — en attente."};
   }
-  return {usable:false, reason:'p2-display', detail:'Donne initiale P2 pas encore affichée — en attente.'};
+  if(p2Count < 1){
+    return {usable:false, reason:'p2-display', detail:'Données P2 pas encore affichées — en attente.'};
+  }
+
+  // P1 a 3 cartes = main max → GO immédiat (même si ▶ traîne encore)
+  if(p1Count >= 3){
+    return {usable:true, reason:'p1-3-done', detail:'P1=3 cartes → confirmation + pred immédiates.'};
+  }
+
+  // ★ Seul le ▶ côté P1 compte. ▶ côté P2 = ignoré.
+  if(playMarkerOnP1Side(raw)){
+    return {
+      usable:false,
+      reason:'play-p1-active',
+      detail:'▶️ encore côté P1 — attente fin Joueur (P2 ignoré).'
+    };
+  }
+
+  // Plus de ▶ côté P1 → GO immédiat (confirm + pred suivante)
+  return {usable:true, reason:'p1-play-gone', detail:'▶️ P1 disparu → confirm + pred immédiates (P2 ignoré).'};
 }
 
 
@@ -2274,39 +2285,40 @@ function calculate(){
   }
 
   const btn=document.getElementById('btn-calc');
-  btn.classList.add('loading');btn.textContent='⟳ CALCUL EN COURS…';
-  setTimeout(()=>{
-    try{
-      const parsed = parseGame(raw);
-      const autoVal = resolvePendingHistory(parsed.num, parsed.p1, parsed.p2);
-      showAutoValidationFeedback(autoVal);
+  btn.classList.add('loading');btn.textContent='⟳ CALCUL…';
+  // Exécution IMMÉDIATE (0 ms) : confirm ✅/❌ puis pred suivante en enchaînement
+  try{
+    const parsed = parseGame(raw);
+    // 1) Feedback d'abord (dès que ▶ P1 est parti)
+    const autoVal = resolvePendingHistory(parsed.num, parsed.p1, parsed.p2, raw);
+    showAutoValidationFeedback(autoVal);
 
-      if(selectedMode===2){
-        const r=runParityCalc(raw);
-        lastCalcResult=r;
-        renderParityResult(r);
-        document.getElementById('game-input').value='';
-      } else if(selectedMode===3){
-        const r=runTotalCalc(raw);
-        lastCalcResult=r;
-        renderTotalResult(r);
-        document.getElementById('game-input').value='';
-      } else if(selectedMode===4){
-        const r=runParityAllInvCalc(raw);
-        lastCalcResult=r;
-        renderParity4Result(r);
-        document.getElementById('game-input').value='';
-      } else {
-        const r=runCalc(raw);
-        lastCalcResult=r;
-        if(r.rattrapageForced){ consumeRattrapageAttempt(); }
-        updateRegimeDisplay();
-        renderResult(r);
-        document.getElementById('game-input').value='';
-      }
-    }catch(e){showError(e.message);}
-    btn.classList.remove('loading');btn.textContent='⬡ CALCULER LA PRÉDICTION ⬡';
-  },50);
+    // 2) Pred du tour suivant direct
+    if(selectedMode===2){
+      const r=runParityCalc(raw);
+      lastCalcResult=r;
+      renderParityResult(r);
+      document.getElementById('game-input').value='';
+    } else if(selectedMode===3){
+      const r=runTotalCalc(raw);
+      lastCalcResult=r;
+      renderTotalResult(r);
+      document.getElementById('game-input').value='';
+    } else if(selectedMode===4){
+      const r=runParityAllInvCalc(raw);
+      lastCalcResult=r;
+      renderParity4Result(r);
+      document.getElementById('game-input').value='';
+    } else {
+      const r=runCalc(raw);
+      lastCalcResult=r;
+      if(r.rattrapageForced){ consumeRattrapageAttempt(); }
+      updateRegimeDisplay();
+      renderResult(r);
+      document.getElementById('game-input').value='';
+    }
+  }catch(e){showError(e.message);}
+  btn.classList.remove('loading');btn.textContent='⬡ CALCULER LA PRÉDICTION ⬡';
 }
 
 function renderResult(r){
@@ -2602,11 +2614,10 @@ async function fetchLatestTelegramGame(silent=false){
   const btn = document.getElementById('btn-live-fetch');
   try{
     if(btn && !silent){ btn.classList.add('loading'); btn.textContent='⟳ SYNCHRO…'; }
-    // En mode silent (LIVE auto 1s) : pas de message "Connexion…" à chaque tick
-    if(!silent) setLiveStatus('Connexion au canal Telegram en cours…');
+    if(!silent) setLiveStatus('Connexion Telegram…');
     const res = await fetch('/api/latest-game');
     let data = null;
-    try{ data = await res.json(); }catch(parseErr){ /* réponse non-JSON (page d'erreur du serveur/proxy) */ }
+    try{ data = await res.json(); }catch(parseErr){}
     if(!res.ok){
       const serverMsg = data && data.error ? data.error : `HTTP ${res.status}`;
       throw new Error(serverMsg);
@@ -2615,29 +2626,27 @@ async function fetchLatestTelegramGame(silent=false){
     liveLastMessageId = data.message_id;
     setLiveSource(data);
 
-    // ── Le message Telegram peut être édité en cours de manche (⏰/▶) : on ne
-    //    calcule que lorsque les données sont réellement finalisées et exploitables ──
-    const readiness = checkGameReadiness(data.raw_text || data.normalized);
+    const rawFull = data.raw_text || data.normalized;
+    const readiness = checkGameReadiness(rawFull);
+    // ▶ encore côté P1 → affiche le jeu mais BLOQUE feedback+pred
     if(!readiness.usable){
-      setLiveStatus(`⏳ #N${data.game_number} · ${readiness.detail || 'en attente de P1 final…'}`);
+      document.getElementById('game-input').value = data.normalized || '';
+      setLiveStatus(`⏳ #N${data.game_number} · ${readiness.detail || '▶️ P1 actif…'}`);
       return;
     }
 
     document.getElementById('game-input').value = data.normalized;
-    // Détection auto révélation 3-3 sur le dernier jeu (régime mis à jour sans saisie manuelle)
-    applyRevelationFromGameRaw(data.normalized || data.raw_text, `#N${data.game_number} (détectée auto via Telegram)`);
+    applyRevelationFromGameRaw(data.normalized || data.raw_text, `#N${data.game_number} (auto)`);
     const isNewUsable = liveLastUsableGameNum !== data.game_number;
     liveLastUsableGameNum = data.game_number;
-    const revelTag = regime.revelationNum != null ? ` · régime #N${regime.revelationNum} (${regime.revelationParity})` : '';
-    const chTag = data.channel_name
-      ? ` · @${data.channel_name}${data.fallback_used || data.channel_label==='relais' ? ' [RELAIS]' : ' [PRINCIPAL]'}`
-      : '';
-    setLiveStatus(`Canal synchronisé · ${isNewUsable ? 'jeu terminé détecté' : 'dernier jeu (déjà traité) confirmé'} · #N${data.game_number}${revelTag}${chTag}`);
+    const revelTag = regime.revelationNum != null ? ` · régime #N${regime.revelationNum}` : '';
+    setLiveStatus(`⚡ #N${data.game_number} · ▶ P1 parti → confirm+pred${isNewUsable?'':' (déjà traité)'}${revelTag}`);
+    // Dès que ▶ P1 disparu : feedback + pred suivante ENCHAÎNÉS
     if(isNewUsable || !silent){
       calculate();
     }
   }catch(err){
-    setLiveStatus(`Erreur de synchronisation Telegram : ${err.message}`);
+    if(!silent) setLiveStatus(`Erreur sync : ${err.message}`);
   }finally{
     if(btn && !silent){ btn.classList.remove('loading'); btn.textContent='⟳ Synchroniser le dernier jeu'; }
   }
@@ -2645,8 +2654,7 @@ async function fetchLatestTelegramGame(silent=false){
 
 let permanentLiveOn = true;
 let permanentLiveTimer = null;
-let historySyncTimer = null;
-let liveFetchInFlight = false; // évite les appels qui se chevauchent
+let liveFetchInFlight = false;
 
 function setPermanentLiveUI(on){
   const btn = document.getElementById('btn-demarrer-live');
@@ -2662,11 +2670,8 @@ function togglePermanentLive(){
   if(permanentLiveOn){
     permanentLiveOn = false;
     if(permanentLiveTimer){ clearInterval(permanentLiveTimer); permanentLiveTimer=null; }
-    if(historySyncTimer){ clearInterval(historySyncTimer); historySyncTimer=null; }
     if(liveAutoTimer){ clearInterval(liveAutoTimer); liveAutoTimer=null; }
     setPermanentLiveUI(false);
-    const s=document.getElementById('demarrer-status');
-    if(s) s.textContent='LIVE arrêté.';
     return;
   }
   startPermanentLive();
@@ -2675,35 +2680,33 @@ function togglePermanentLive(){
 function startPermanentLive(){
   permanentLiveOn = true;
   setPermanentLiveUI(true);
-  // Historique 150 jeux (léger) toutes les 15s
   demarrerLive(true);
-  if(historySyncTimer) clearInterval(historySyncTimer);
-  historySyncTimer = setInterval(()=>demarrerLive(true), 15000);
-  // ★ Scan RAPIDE : 1 seconde — sans recharger la page
   if(permanentLiveTimer) clearInterval(permanentLiveTimer);
   permanentLiveTimer = setInterval(()=>{
-    if(liveFetchInFlight) return; // skip si précédent pas fini
+    if(liveFetchInFlight) return;
     liveFetchInFlight = true;
     Promise.resolve(fetchLatestTelegramGame(true))
       .finally(()=>{ liveFetchInFlight = false; });
-  }, 1000);
+  }, 1000); // scan 1 seconde
   liveAutoTimer = permanentLiveTimer;
   const autoBtn=document.getElementById('btn-live-auto');
   if(autoBtn) autoBtn.textContent='AUTO REFRESH ON';
   fetchLatestTelegramGame(true);
   const s=document.getElementById('demarrer-status');
-  if(s) s.textContent='🟢 LIVE rapide · scan 1s (sans reload page)';
+  if(s) s.textContent='🟢 Scan 1s · confirm dès ▶ P1 disparu';
 }
 
-function toggleLiveAutoRefresh(){
-  togglePermanentLive();
+function toggleLiveAutoRefresh(){ togglePermanentLive(); }
+
+async function demarrerLiveSilentCompat(){
+  // wrapper si demarrerLive n'accepte pas silent
+  try{ await demarrerLive(true); }catch(e){ try{ await demarrerLive(); }catch(e2){} }
 }
 
 window.addEventListener('load', ()=>{
   requireUnlock();
   updateRegimeDisplay();
   renderHistory();
-  // Démarre immédiatement le scan 1s — zéro clic requis
   setTimeout(()=>{ startPermanentLive(); }, 200);
 });
 

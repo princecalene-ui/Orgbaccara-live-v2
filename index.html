@@ -388,14 +388,14 @@
     <div class="live-source" id="live-source"><small>Dernière donnée chargée</small>Aucune donnée récupérée pour le moment.</div>
 
     <div class="demarrer-wrap">
-      <button class="btn-demarrer" id="btn-demarrer-live" onclick="demarrerLive()">
-        🔴 DÉMARRER LIVE
+      <button class="btn-demarrer" id="btn-demarrer-live" onclick="togglePermanentLive()">
+        🟢 LIVE AUTO ACTIF
       </button>
       <div class="demarrer-desc">
-        Charge les 150 derniers jeux du canal et affiche les 15 dernières parties comme si elles avaient
-        déjà été jouées.
+        Sync <b style="color:var(--gold)">permanente</b> · scan toutes les <b style="color:var(--gold)">2 s</b> ·
+        accumulation auto 150 jeux Telegram · tendances unanimes sur tous les téléphones.
       </div>
-      <div class="demarrer-status" id="demarrer-status"></div>
+      <div class="demarrer-status" id="demarrer-status">LIVE permanent — démarrage auto…</div>
     </div>
   </div>
 
@@ -773,7 +773,7 @@ let globalBacktestStats  = null; // stats de fiabilité recalculées à partir d
 let liveLastUsableGameNum = null; // dernier n° de jeu réellement TERMINÉ et déjà traité (évite de recalculer en boucle)
 
 // ══════════════════════════════════════════════════════
-//  APPRENTISSAGE PARTAGÉ — /api/learn (unanimité multi-clients)
+//  APPRENTISSAGE PARTAGÉ (/api/learn) — anti 2 pertes d'affilée
 // ══════════════════════════════════════════════════════
 const LEARN_KEY = 'orgbacc_learn_v1';
 function emptyLearn(){
@@ -794,7 +794,7 @@ function learnKeyForAlgo(algoUsed){
   if(a.indexOf('3CARTES')>=0||a==='OPT2') return 'OPT2';
   if(a.indexOf('TOTAL')>=0||a==='OPT3') return 'OPT3';
   if(a.indexOf('ALLINV')>=0||a.indexOf('PARITÉ')>=0||a.indexOf('PARITE')>=0||a==='OPT4') return 'OPT4';
-  if(a.indexOf('ALGO')>=0||a==='OPT1'||a.indexOf('ENSEIGNE')>=0) return 'OPT1';
+  if(a.indexOf('ALGO')>=0||a==='OPT1') return 'OPT1';
   return a.slice(0,12);
 }
 function applyLearnLocally(option, win){
@@ -813,19 +813,19 @@ function applyLearnLocally(option, win){
   }
   learnState.source='local'; saveLearnLocal(learnState);
 }
-function mergeLearnFromServer(serverLearn){
-  if(!serverLearn) return;
+function mergeLearnFromServer(s){
+  if(!s) return;
   learnState=Object.assign(emptyLearn(),{
-    streaks:serverLearn.streaks||{}, forceFlip:serverLearn.forceFlip||{},
-    totalResolved:serverLearn.totalResolved||0, totalWins:serverLearn.totalWins||0,
-    updatedAt:serverLearn.updatedAt||null, version:serverLearn.version||0, source:'server'
+    streaks:s.streaks||{}, forceFlip:s.forceFlip||{},
+    totalResolved:s.totalResolved||0, totalWins:s.totalWins||0,
+    updatedAt:s.updatedAt||null, version:s.version||0, source:'server'
   });
   saveLearnLocal(learnState);
 }
 async function pullLearnFromServer(){
   try{
     const res=await fetch('/api/learn',{method:'GET',cache:'no-store'});
-    if(!res.ok) throw new Error('HTTP '+res.status);
+    if(!res.ok) return null;
     const data=await res.json();
     if(data&&data.ok&&data.learn){ mergeLearnFromServer(data.learn); return data.learn; }
   }catch(e){}
@@ -1158,14 +1158,13 @@ function setHistoryStatus(id, status){
   const list = loadHistory();
   const entry = list.find(e=>e.id===id);
   if(!entry) return;
-  const nextStatus = (entry.status === status) ? null : status; // re-cliquer annule
+  const nextStatus = (entry.status === status) ? null : status;
   entry.status = nextStatus;
   saveHistory(list);
   renderHistory();
   if(nextStatus === 'valid' || nextStatus === 'invalid'){
     recordOutcomeForLearning(entry.algoUsed || entry.side || 'OPT1', nextStatus==='valid', entry.gameNum);
   }
-  // Rattrapage : perte → même ALGO + inv couleur (max 2) ; gain → fin
   if(nextStatus === 'invalid' && entry.algoUsed){
     onPredictionLost(entry.algoUsed, entry.suitKey, !!entry.rattrapage);
   } else if(nextStatus === 'valid' && rattrapage.active){
@@ -1184,12 +1183,8 @@ function parseTotalTag(raw){
   const m = String(raw).match(/#T(\d+)/i);
   return m ? parseInt(m[1], 10) : null;
 }
-function isGameFullyFinished(raw){
-  if(!raw) return false;
-  return raw.indexOf('⏰')===-1 && raw.indexOf('▶')===-1 && raw.indexOf('▶️')===-1;
-}
 
-// ── Résout auto : OPT1 enseigne · OPT2 3 cartes · OPT3 #T · OPT4 pair P1 ──
+// ── Validation auto OPT1–4 + apprentissage ──
 function resolvePendingHistory(gameNum, p1Cards, p2Cards, rawText){
   const list = loadHistory();
   const pending = list.filter(e=>e.gameNum===gameNum && e.status===null);
@@ -1254,19 +1249,14 @@ function showAutoValidationFeedback(entry){
   if(!entry){ box.textContent=''; box.style.display='none'; return; }
   const ok = entry.status==='valid';
   const sk = entry.suitKey;
+  const mark = ok ? '✅' : '❌';
   let msg;
   if(sk==='+10.5'||sk==='-10.5'){
-    msg = ok
-      ? `✓ Auto-validé OPT3 : #N${entry.gameNum} ${sk} — total #T${entry.actualGameTotal}`
-      : `✕ Auto-validé OPT3 : #N${entry.gameNum} ${sk} — total #T${entry.actualGameTotal} (échec)`;
+    msg = `${mark} OPT3 #N${entry.gameNum} ${sk} — total #T${entry.actualGameTotal}`;
   } else if(sk==='OUI'||sk==='NON'){
-    msg = ok
-      ? `✓ Auto-validé : #N${entry.gameNum} ${sk}`
-      : `✕ Auto-validé : #N${entry.gameNum} ${sk} (échec)`;
+    msg = `${mark} #N${entry.gameNum} ${sk} — ${entry.actualP1Count!=null?entry.actualP1Count+' carte(s) P1':''}`;
   } else {
-    msg = ok
-      ? `✓ Auto-validé OPT1 : #N${entry.gameNum} ${SUIT_EMOJI[sk]||sk} — réussie`
-      : `✕ Auto-validé OPT1 : #N${entry.gameNum} ${SUIT_EMOJI[sk]||sk} — échouée`;
+    msg = `${mark} OPT1 #N${entry.gameNum} ${SUIT_EMOJI[sk]||sk}`;
   }
   box.textContent = msg;
   box.className = 'history-autoval show ' + (ok ? 'ok' : 'ko');
@@ -1382,15 +1372,16 @@ function renderHistory(){
       color = 'var(--ivory)';
       typeTag = e.side || 'P1';
     }
+    const fb = e.status==='valid' ? '✅' : (e.status==='invalid' ? '❌' : '⏳');
     return `
     <div class="history-item ${statusClass}">
       <span class="hist-num">#N${e.gameNum}</span>
       <span class="hist-suit" style="color:${color};font-size:${isSuit?'1rem':'.78rem'};min-width:${isSuit?'22px':'52px'};font-weight:700">${displayVal}</span>
-      <span class="hist-label">${typeTag}${e.algoUsed?` <span class="hist-tag">[${e.algoUsed}]</span>`:''}${e.rattrapage?` <span class="hist-tag" style="color:#ffbf80">⏱ RATTR</span>`:''}${e.source==='live-seed'?` <span class="hist-tag hist-live">🔴 LIVE</span>`:(e.autoResolved?` <span class="hist-tag">auto</span>`:'')}</span>
+      <span class="hist-label">${fb} ${typeTag}${e.algoUsed?` <span class="hist-tag">[${e.algoUsed}]</span>`:''}${e.rattrapage?` <span class="hist-tag" style="color:#ffbf80">⏱ RATTR</span>`:''}${e.source==='live-seed'?` <span class="hist-tag hist-live">🔴 LIVE</span>`:(e.autoResolved?` <span class="hist-tag">auto</span>`:'')}</span>
       <div class="hist-actions">
         <button class="hist-btn copy-btn" title="Copier" onclick="copyHistoryEntry('${e.id}')">⧉</button>
-        <button class="hist-btn valid-btn ${e.status==='valid'?'active':''}" title="Validée" onclick="setHistoryStatus('${e.id}','valid')">✓</button>
-        <button class="hist-btn invalid-btn ${e.status==='invalid'?'active':''}" title="Non passée" onclick="setHistoryStatus('${e.id}','invalid')">✕</button>
+        <button class="hist-btn valid-btn ${e.status==='valid'?'active':''}" title="✅ Validée" onclick="setHistoryStatus('${e.id}','valid')">✅</button>
+        <button class="hist-btn invalid-btn ${e.status==='invalid'?'active':''}" title="❌ Non validée" onclick="setHistoryStatus('${e.id}','invalid')">❌</button>
       </div>
     </div>`;
   }).join('');
@@ -2084,13 +2075,20 @@ function getCardValueParity(v){
 
 // ── OPTION 2 : P1 aura-t-il 3 cartes ? OUI / NON ──
 // Basé sur la tendance des 15 derniers jeux (historique Telegram commun)
+function isGameFullyFinished(raw){
+  if(!raw) return false;
+  return String(raw).indexOf('⏰')===-1 && String(raw).indexOf('▶')===-1 && String(raw).indexOf('▶️')===-1;
+}
+
+// OPT2 — 100% déterministe depuis Telegram (même résultat sur tous les téléphones)
+// N'utilise JAMAIS le contenu local partiel du jeu en cours comme heuristique.
 function runParityCalc(raw){
   const {num,p1,p2}=parseGame(raw);
   if(!p1.length||!p2.length) throw new Error('Cartes P1/P2 introuvables');
 
   applyFormatInversionFromGame(p1, p2, num);
 
-  // Collecte les 15 derniers jeux exploitables (cache Telegram ou historique local)
+  // Source UNIQUE : cache Telegram (rempli par LIVE auto 2s) — identique partout
   const samples = [];
   const srcList = (telegramHistoryCache && telegramHistoryCache.length)
     ? telegramHistoryCache.slice().sort((a,b)=>a.game_number-b.game_number)
@@ -2099,37 +2097,39 @@ function runParityCalc(raw){
   for(let i = srcList.length - 1; i >= 0 && samples.length < 15; i--){
     const g = srcList[i];
     try{
-      const readiness = checkGameReadiness(g.raw_text || g.normalized);
-      if(!readiness.usable) continue;
+      const txt = g.raw_text || g.normalized || '';
+      // Uniquement jeux TERMINÉS (pas ⏰ / ▶) pour éviter divergences mid-manche
+      if(!isGameFullyFinished(txt)) continue;
       const parsed = parseGame(g.normalized || g.raw_text);
       if(!parsed.p1 || !parsed.p1.length) continue;
+      // Exclure le jeu courant (num) pour ne pas biaiser
+      if(parsed.num === num) continue;
       samples.push({
         gameNum: parsed.num,
         p1Three: parsed.p1.length >= 3
       });
     }catch(e){ continue; }
   }
-  // ordre chronologique pour affichage
   samples.reverse();
 
   const withThree = samples.filter(s=>s.p1Three).length;
   const total = samples.length;
-  const rate = total > 0 ? withThree / total : 0.5;
 
-  // Tendance : si >= 50% des 15 derniers ont eu 3 cartes P1 → OUI, sinon NON
-  // Si < 5 échantillons → neutre basé sur le jeu courant (si P1 déjà 3 sur le précédent souvent continue)
+  // Comparaison ENTIÈRE (unanime) : OUI si withThree*2 >= total
   let prediction;
   let trendDetail;
   if(total < 5){
-    // peu de data : heuristique légère sur le jeu fourni
-    prediction = (p1.length >= 3) ? 'OUI' : 'NON';
-    trendDetail = `Échantillon faible (${total}/15) — lancez DÉMARRER LIVE pour synchroniser Telegram`;
+    // Fallback DÉTERMINISTE (pas basé sur cartes locales) : parité du prochain N°
+    // PAIR → NON · IMPAIR → OUI  (règle fixe, même partout)
+    const nextN = num + 1;
+    prediction = (nextN % 2 === 1) ? 'OUI' : 'NON';
+    trendDetail = `Échantillon faible (${total}/15) · fallback unanime N°${nextN} ${nextN%2?'IMPAIR→OUI':'PAIR→NON'} · LIVE auto recharge…`;
   } else {
-    prediction = (rate >= 0.5) ? 'OUI' : 'NON';
-    trendDetail = `${withThree}/${total} jeux avec P1 à 3 cartes (${Math.round(rate*100)}%) → ${prediction}`;
+    prediction = (withThree * 2 >= total) ? 'OUI' : 'NON';
+    trendDetail = `${withThree}/${total} jeux P1=3 cartes (${Math.round(withThree/total*100)}%) → ${prediction}`;
   }
 
-  // Inversion format (3-3 / 2-3 / 2-2)
+  // Inversion format (3-3 / 2-3 / 2-2) — état reconstruit depuis Telegram → unanime
   const fmtDec = shouldInvertOpt23();
   let formatInverted = false;
   if(fmtDec.invert){
@@ -2138,7 +2138,7 @@ function runParityCalc(raw){
   }
   consumeOneShotIfAny();
 
-  const predictedGameNum = num + 1; // prochain jeu (cohérent avec OPT1)
+  const predictedGameNum = num + 1;
 
   return {
     mode: 'parity',
@@ -2151,7 +2151,7 @@ function runParityCalc(raw){
     samples,
     withThree,
     sampleTotal: total,
-    rate,
+    rate: total>0 ? withThree/total : 0,
     trendDetail,
     p1First: p1[0],
     p2First: p2[0]
@@ -2220,7 +2220,7 @@ function renderParityResult(r){
   upsertHistoryEntry(r.nextNum, r.prediction, '3CARTES', false);
 
   const badges=[
-    `<div class="badge badge-engine">◆ OPTION 2 — P1 aura 3 cartes ? → ${r.prediction}${learnFlip?' · IA-FLIP':''}</div>`,
+    `<div class="badge badge-engine">◆ OPTION 2 — P1 aura 3 cartes ? → ${r.prediction}</div>`,
     r.formatInverted ? `<div class="badge badge-temporal">🔄 INV FORMAT — ${r.formatReason} → résultat inversé</div>` : `<div class="badge badge-temporal" style="opacity:.6">INV FORMAT — ${r.formatReason}</div>`,
     `<div class="badge badge-parity">◈ TENDANCE 15 JEUX — ${r.trendDetail}</div>`,
     `<div class="badge badge-finalinv">✦ FINAL — <b>${r.prediction}</b></div>`
@@ -2254,7 +2254,7 @@ function renderTotalResult(r){
   upsertHistoryEntry(r.nextNum, r.prediction, 'TOTAL±10.5', false);
 
   const badges=[
-    `<div class="badge badge-engine">◆ OPTION 3 — Total combiné → ${r.prediction}${learnFlip?' · IA-FLIP':''}</div>`,
+    `<div class="badge badge-engine">◆ OPTION 3 — Total combiné → ${r.prediction}</div>`,
     r.formatInverted ? `<div class="badge badge-temporal">🔄 INV FORMAT — ${r.formatReason} → résultat inversé</div>` : `<div class="badge badge-temporal" style="opacity:.6">INV FORMAT — ${r.formatReason}</div>`,
     r.inverted ? `<div class="badge badge-temporal">🔄 INV MOTEUR OPT3 — ${r.invDetail}</div>` : '',
     `<div class="badge badge-algo">⚙ ${r.baseLabel}</div>`,
@@ -2361,7 +2361,7 @@ function renderParity4Result(r){
   upsertHistoryEntry(r.nextNum, r.prediction, 'PARITÉ-ALLINV', false);
 
   const badges=[
-    `<div class="badge badge-engine">◆ OPTION 4 — P1 total PAIR ? (ALL-INVERSE) → ${r.prediction}${learnFlip?' · IA-FLIP':''}</div>`,
+    `<div class="badge badge-engine">◆ OPTION 4 — P1 total PAIR ? (ALL-INVERSE) → ${r.prediction}</div>`,
     `<div class="badge badge-transform">⇄ ${r.allInvDetail}</div>`,
     r.formatInverted ? `<div class="badge badge-temporal">🔄 INV FORMAT — ${r.formatReason}</div>` : '',
     `<div class="badge badge-finalinv">✦ FINAL — <b>${r.prediction}</b></div>`
@@ -2627,13 +2627,15 @@ function setLiveSource(payload){
 // 2) Rejoue les 15 dernières parties comme si elles avaient déjà été jouées : si une
 //    prédiction avait déjà été faite pour ce numéro, on la valide avec le vrai résultat ;
 //    sinon on comble rétroactivement avec la prédiction déterministe du système.
-async function demarrerLive(){
+async function demarrerLive(silent){
   const btn = document.getElementById('btn-demarrer-live');
   const statusBox = document.getElementById('demarrer-status');
-  const origText = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = '⏳ CHARGEMENT DES 150 DERNIERS JEUX…';
-  statusBox.textContent = 'Connexion au canal Telegram…';
+  const origText = btn ? btn.textContent : '';
+  if(!silent && btn){
+    btn.disabled = true;
+    btn.textContent = '⏳ CHARGEMENT DES 150 DERNIERS JEUX…';
+  }
+  if(statusBox && !silent) statusBox.textContent = 'Connexion au canal Telegram…';
 
   try{
     const res = await fetch('/api/history?limit=150');
@@ -2707,14 +2709,19 @@ async function demarrerLive(){
     const chInfo = data.channel_name
       ? ` · source @${data.channel_name}${data.fallback_used || data.channel_label==='relais' ? ' [RELAIS]' : ' [PRINCIPAL]'}`
       : '';
-    statusBox.textContent = `✅ LIVE démarré · ${telegramHistoryCache.length} jeux Telegram analysés · `
-      + `15 dernières parties : ${validCount} validées / ${invalidCount} ratées`
-      + `${skipped?` (${skipped} ignorées)`:''}${revelInfo}${chInfo}`;
+    if(statusBox){
+      statusBox.textContent = `✅ LIVE · ${telegramHistoryCache.length} jeux · `
+        + `${validCount}✅ / ${invalidCount}❌`
+        + `${skipped?` (${skipped} ign.)`:''}${revelInfo}${chInfo}`;
+    }
   }catch(e){
-    statusBox.textContent = '✕ Erreur : '+e.message;
+    if(statusBox) statusBox.textContent = '✕ Sync histo : '+e.message;
   }finally{
-    btn.disabled = false;
-    btn.textContent = origText;
+    if(btn){
+      btn.disabled = false;
+      if(!silent) btn.textContent = permanentLiveOn ? '🟢 LIVE AUTO ACTIF' : '🔴 LIVE AUTO OFF';
+      else setPermanentLiveUI(permanentLiveOn);
+    }
   }
 }
 
@@ -2762,6 +2769,10 @@ async function fetchLatestTelegramGame(silent=false){
   }
 }
 
+let permanentLiveOn = true;
+let permanentLiveTimer = null;
+let historySyncTimer = null;
+
 function toggleLiveAutoRefresh(){
   const btn = document.getElementById('btn-live-auto');
   if(liveAutoTimer){
@@ -2771,18 +2782,66 @@ function toggleLiveAutoRefresh(){
     setLiveStatus('Auto-refresh désactivé.');
     return;
   }
-  liveAutoTimer = setInterval(()=>fetchLatestTelegramGame(true), 5000);
+  liveAutoTimer = setInterval(()=>fetchLatestTelegramGame(true), 2000);
   btn.textContent = 'AUTO REFRESH ON';
-  setLiveStatus('Auto-refresh activé : vérification toutes les 5 secondes.');
+  setLiveStatus('Auto-refresh activé : toutes les 2 secondes.');
   fetchLatestTelegramGame(true);
+}
+
+function setPermanentLiveUI(on){
+  const btn = document.getElementById('btn-demarrer-live');
+  if(!btn) return;
+  btn.textContent = on ? '🟢 LIVE AUTO ACTIF' : '🔴 LIVE AUTO OFF';
+  btn.style.borderColor = on ? '#33cc66' : '#ff3333';
+  btn.style.background = on
+    ? 'linear-gradient(135deg,#003a10,#005c20)'
+    : 'linear-gradient(135deg,#3a0000,#5c0000)';
+  btn.style.animation = on ? '' : 'none';
+}
+
+function togglePermanentLive(){
+  if(permanentLiveOn){
+    permanentLiveOn = false;
+    if(permanentLiveTimer){ clearInterval(permanentLiveTimer); permanentLiveTimer=null; }
+    if(historySyncTimer){ clearInterval(historySyncTimer); historySyncTimer=null; }
+    if(liveAutoTimer){ clearInterval(liveAutoTimer); liveAutoTimer=null; }
+    setPermanentLiveUI(false);
+    const s=document.getElementById('demarrer-status');
+    if(s) s.textContent='LIVE auto arrêté.';
+    setLiveStatus('LIVE permanent désactivé.');
+    return;
+  }
+  startPermanentLive();
+}
+
+function startPermanentLive(){
+  permanentLiveOn = true;
+  setPermanentLiveUI(true);
+  // Historique 150 jeux (unanime OPT2) + refresh périodique
+  demarrerLive(true);
+  if(historySyncTimer) clearInterval(historySyncTimer);
+  historySyncTimer = setInterval(()=>demarrerLive(true), 20000);
+  // Scan dernier jeu toutes les 2s
+  if(permanentLiveTimer) clearInterval(permanentLiveTimer);
+  permanentLiveTimer = setInterval(()=>fetchLatestTelegramGame(true), 2000);
+  liveAutoTimer = permanentLiveTimer;
+  const autoBtn=document.getElementById('btn-live-auto');
+  if(autoBtn) autoBtn.textContent='AUTO REFRESH ON';
+  fetchLatestTelegramGame(true);
+  setLiveStatus('LIVE permanent actif · scan 2s · historique unanime.');
+  const s=document.getElementById('demarrer-status');
+  if(s) s.textContent='🟢 LIVE auto · accumulation toutes les 2s';
 }
 
 window.addEventListener('load', ()=>{
   requireUnlock();
   updateRegimeDisplay();
-  startLearnSyncLoop(); // /api/learn toutes les 8s — unanimité multi-téléphones
-  fetchLatestTelegramGame(true);
+  startLearnSyncLoop();
   renderHistory();
+  setTimeout(()=>{
+    if(typeof systemUnlocked!=='undefined' && systemUnlocked) startPermanentLive();
+    else { fetchLatestTelegramGame(true); demarrerLive(true); }
+  }, 500);
 });
 
 </script>

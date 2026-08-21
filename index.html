@@ -728,7 +728,7 @@ async function submitKey(){
   if(!match){ if(err) err.textContent = '✕ Clé invalide.'; return; }
   const sess = loadKeySession();
   if(sess && sess.keyHash && Date.now() < sess.expiresAt){
-    hideKeyGate(); startKeyTimer(); if(err) err.textContent = ''; return;
+    hideKeyGate(); startKeyTimer(); selectMode(selectedMode||1, true); if(err) err.textContent = ''; return;
   }
   if(err) err.textContent = '⏳ Vérification mondiale de la clé…';
   if(btn){ btn.disabled = true; btn.textContent = 'Vérification…'; }
@@ -752,6 +752,7 @@ async function submitKey(){
     if(input) input.value = '';
     if(err) err.textContent = '';
     hideKeyGate(); startKeyTimer();
+    selectMode(1, true); // OPT1 actif dès le déverrouillage → LIVE auto immédiat
   }finally{
     if(btn){ btn.disabled = false; btn.textContent = 'Déverrouiller'; }
   }
@@ -764,9 +765,9 @@ function requireUnlock(){
   systemUnlocked = false; showKeyGate(); return false;
 }
 
-let selectedMode = null;
-function selectMode(mode){
-  if(!requireUnlock()) return;
+let selectedMode = 1; // OPT1 par défaut — auto LIVE sans clic manuel
+function selectMode(mode, skipUnlockCheck){
+  if(!skipUnlockCheck && !requireUnlock()) return;
   selectedMode = mode;
   const b1 = document.getElementById('opt1Btn');
   const b4 = document.getElementById('opt4Btn');
@@ -774,8 +775,8 @@ function selectMode(mode){
   if(b1) b1.classList.toggle('active', mode===1);
   if(b4) b4.classList.toggle('active', mode===4);
   if(hint){
-    if(mode===1){ hint.textContent = '✓ OPTION 1 — RELAIS ALGO1/ALGO2 · Enseigne P1'; hint.className = 'mode-hint ready'; }
-    else if(mode===4){ hint.textContent = '✓ OPTION 4 — P1 total PAIR ? ALL-INVERSE de l\'ancien moteur'; hint.className = 'mode-hint ready'; }
+    if(mode===1){ hint.textContent = '✓ OPTION 1 — RELAIS ALGO1/ALGO2 · Enseigne P1 (AUTO)'; hint.className = 'mode-hint ready'; }
+    else if(mode===4){ hint.textContent = '✓ OPTION 4 — P1 total PAIR ? ALL-INVERSE (AUTO)'; hint.className = 'mode-hint ready'; }
   }
 }
 
@@ -2283,26 +2284,31 @@ function renderParity4Result(r){
 }
 
 
-function calculate(){
+function calculate(fromLive){
   hideError();
   hideWaiting();
-  if(!requireUnlock()) return;
-  if(!selectedMode){ showError("Choisissez d'abord OPTION 1 ou 4."); return; }
+  if(!requireUnlock()) return false;
+  // OPT1 par défaut si aucun mode (évite le blocage LIVE auto)
+  if(!selectedMode) selectedMode = 1;
   const raw=document.getElementById('game-input').value.trim();
-  if(!raw){showError("Veuillez saisir les données du jeu précédent.");return;}
+  if(!raw){
+    if(!fromLive) showError("Veuillez saisir les données du jeu précédent.");
+    return false;
+  }
 
   const readiness = checkGameReadiness(raw);
   if(!readiness.usable){
-    showWaiting(readiness.detail || 'En attente de la main finale du Joueur (P1).');
-    return;
+    if(!fromLive) showWaiting(readiness.detail || 'En attente de la main finale du Joueur (P1).');
+    return false;
   }
 
   const btn=document.getElementById('btn-calc');
-  btn.classList.add('loading');btn.textContent='⟳ CALCUL…';
-  // Exécution IMMÉDIATE (0 ms) : confirm ✅/❌ puis pred suivante en enchaînement
+  if(btn){ btn.classList.add('loading'); btn.textContent='⟳ CALCUL…'; }
+  // Exécution IMMÉDIATE : confirm ✅/❌ puis pred suivante en enchaînement
+  let ok = false;
   try{
     const parsed = parseGame(raw);
-    // 1) Feedback d'abord (dès que ▶ P1 est parti)
+    // 1) Feedback d'abord (main P1 finalisée)
     const autoVal = resolvePendingHistory(parsed.num, parsed.p1, parsed.p2, raw);
     showAutoValidationFeedback(autoVal);
 
@@ -2312,17 +2318,24 @@ function calculate(){
       lastCalcResult=r;
       renderParity4Result(r);
       document.getElementById('game-input').value='';
+      ok = true;
     } else {
-      // OPTION 1 — RELAIS ALGO1 / ALGO2
+      // OPTION 1 — RELAIS ALGO1 / ALGO2 (AUTO LIVE)
       const r=runCalc(raw);
       lastCalcResult=r;
       if(r.rattrapageForced){ consumeRattrapageAttempt(); }
       updateRegimeDisplay();
       renderResult(r);
       document.getElementById('game-input').value='';
+      ok = true;
     }
-  }catch(e){showError(e.message);}
-  btn.classList.remove('loading');btn.textContent='⬡ CALCULER LA PRÉDICTION ⬡';
+  }catch(e){
+    if(!fromLive) showError(e.message);
+    else setLiveStatus('✕ Calcul : '+e.message);
+    ok = false;
+  }
+  if(btn){ btn.classList.remove('loading'); btn.textContent='⬡ CALCULER LA PRÉDICTION ⬡'; }
+  return ok;
 }
 
 function renderResult(r){
@@ -2638,13 +2651,21 @@ async function fetchLatestTelegramGame(silent=false){
     document.getElementById('game-input').value = data.normalized;
     applyRevelationFromGameRaw(data.normalized || data.raw_text, `#N${data.game_number} (auto)`);
     const isNewUsable = liveLastUsableGameNum !== data.game_number;
-    liveLastUsableGameNum = data.game_number;
     const revelTag = regime.revelationNum != null ? ` · régime #N${regime.revelationNum}` : '';
     const why = readiness.reason === 'p1-3-done' ? '3ᵉ carte reçue' : 'main P1 finale (2 cartes)';
-    setLiveStatus(`⚡ #N${data.game_number} · ${why} → confirm+pred${isNewUsable?'':' (déjà traité)'}${revelTag}`);
-    // Main P1 finalisée → feedback + pred suivante ENCHAÎNÉS (immédiat)
+    // Main P1 finalisée → confirm + pred ENCHAÎNÉS (immédiat)
+    // Ne marquer comme traité QU'APRÈS un calcul réussi (sinon OPT1 restait bloqué)
     if(isNewUsable || !silent){
-      calculate();
+      if(!selectedMode) selectedMode = 1;
+      const calcOk = calculate(true);
+      if(calcOk){
+        liveLastUsableGameNum = data.game_number;
+        setLiveStatus(`⚡ #N${data.game_number} · ${why} → confirm+pred AUTO${revelTag}`);
+      } else {
+        setLiveStatus(`⏳ #N${data.game_number} · ${why} — recalcul en cours…${revelTag}`);
+      }
+    } else {
+      setLiveStatus(`⚡ #N${data.game_number} · déjà traité${revelTag}`);
     }
   }catch(err){
     if(!silent) setLiveStatus(`Erreur sync : ${err.message}`);
@@ -2704,7 +2725,9 @@ async function demarrerLiveSilentCompat(){
 }
 
 window.addEventListener('load', ()=>{
-  requireUnlock();
+  const unlocked = requireUnlock();
+  // OPT1 actif par défaut dès le chargement (LIVE auto sans clic)
+  selectMode(selectedMode || 1, true);
   updateRegimeDisplay();
   renderHistory();
   setTimeout(()=>{ startPermanentLive(); }, 200);

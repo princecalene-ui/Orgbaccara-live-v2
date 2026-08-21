@@ -963,7 +963,49 @@ function applyRattrapageInv(predSuit, lostColor, lostSuit){
   };
 }
 
-// RATTRAPAGE DÉSACTIVÉ — pred pure / universelle (aucun effet d'une perte)
+// ── ALL.INV après 1 jeu perdu (max 1) — dérivé de l'historique OPT1 unanime ──
+function applyAllInverse(suit, avantDernier, nextH){
+  const isPair = (avantDernier % 2 === 0);
+  const heurePair = (nextH % 2 === 0);
+  let map, label;
+  if(!heurePair){
+    if(isPair){
+      map={'♠️':'♦️','♦️':'♠️','♣️':'♥️','♥️':'♣️'};
+      label=`H=${nextH}(IMPAIR) · AV-DERN ${avantDernier}(PAIR) → ♠️↔♦️ / ♣️↔♥️`;
+    } else {
+      map={'♠️':'♣️','♣️':'♠️','♥️':'♥️','♦️':'♦️'};
+      label=`H=${nextH}(IMPAIR) · AV-DERN ${avantDernier}(IMPAIR) → ♠️↔♣️`;
+    }
+  } else {
+    if(isPair){
+      map={'♠️':'♥️','♥️':'♠️','♣️':'♦️','♦️':'♣️'};
+      label=`H=${nextH}(PAIR) · AV-DERN ${avantDernier}(PAIR) → ♠️↔♥️ / ♣️↔♦️`;
+    } else {
+      map={'♠️':'♦️','♦️':'♠️','♣️':'♥️','♥️':'♣️'};
+      label=`H=${nextH}(PAIR) · AV-DERN ${avantDernier}(IMPAIR) → ♠️↔♦️ / ♣️↔♥️`;
+    }
+  }
+  const result = map[suit] || suit;
+  return { result, label, isPair, heurePair, before: suit, applied: result !== suit };
+}
+
+// Max 1 ALL.INV : uniquement si le dernier OPT1 résolu est une PERTE et n'était pas déjà un ALL.INV
+function shouldApplyAllInv(nextNum){
+  if(typeof SYNC_SKIP_RATTRAPAGE !== 'undefined' && SYNC_SKIP_RATTRAPAGE) return false;
+  try{
+    const opt1 = loadHistory()
+      .filter(e => histModeKey(e.algoUsed) === 'OPT1' && (e.status === 'valid' || e.status === 'invalid'))
+      .sort((a,b) => a.gameNum - b.gameNum);
+    if(!opt1.length) return false;
+    const last = opt1[opt1.length - 1];
+    // Perte sur le jeu immédiatement précédent + pas déjà ALL.INV → 1 seule fois
+    if(last.status === 'invalid' && !last.allInv && last.gameNum === nextNum - 1){
+      return true;
+    }
+  }catch(e){}
+  return false;
+}
+
 function onPredictionLost(algo, suitKey, wasRattrapageEntry){
   rattrapage = emptyRattrapage();
   saveRattrapage(rattrapage);
@@ -1059,7 +1101,7 @@ function saveHistory(list){
 }
 
 // Une entrée par (gameNum + mode OPT1/OPT4) — statut uniquement auto (Telegram)
-function upsertHistoryEntry(gameNum, suitKey, algoUsed, isRattrapage){
+function upsertHistoryEntry(gameNum, suitKey, algoUsed, isRattrapage, isAllInv){
   const list = loadHistory();
   const mode = histModeKey(algoUsed);
   const existing = list.find(e=>e.gameNum===gameNum && histModeKey(e.algoUsed)===mode);
@@ -1070,6 +1112,7 @@ function upsertHistoryEntry(gameNum, suitKey, algoUsed, isRattrapage){
       existing.suitKey = suitKey;
       existing.algoUsed = algoUsed;
       if(isRattrapage) existing.rattrapage = true;
+      if(isAllInv) existing.allInv = true;
       saveHistory(list);
       renderHistory();
     }
@@ -1081,6 +1124,7 @@ function upsertHistoryEntry(gameNum, suitKey, algoUsed, isRattrapage){
     gameNum, suitKey, side:'P1', algoUsed, mode,
     status: null, // null=en attente | 'valid' | 'invalid' — UNIQUEMENT auto
     rattrapage: !!isRattrapage,
+    allInv: !!isAllInv,
     autoResolved: false,
     ts: new Date().toISOString()
   });
@@ -1301,7 +1345,7 @@ function renderHistory(){
     <div class="history-item ${statusClass}">
       <span class="hist-num">#N${e.gameNum}</span>
       <span class="hist-suit" style="color:${color};font-size:${isSuit?'1rem':'.78rem'};min-width:${isSuit?'22px':'52px'};font-weight:700">${displayVal}</span>
-      <span class="hist-label">${typeTag}${e.algoUsed?` <span class="hist-tag">[${e.algoUsed}]</span>`:''}${e.rattrapage?` <span class="hist-tag" style="color:#ffbf80">⏱ RATTR</span>`:''}${e.autoResolved||e.source==='live-seed'?` <span class="hist-tag">auto TG</span>`:' <span class="hist-tag">en attente</span>'}</span>
+      <span class="hist-label">${typeTag}${e.algoUsed?` <span class="hist-tag">[${e.algoUsed}]</span>`:''}${e.allInv?` <span class="hist-tag" style="color:#ff88ff">⟲ ALL.INV</span>`:''}${e.rattrapage?` <span class="hist-tag" style="color:#ffbf80">⏱ RATTR</span>`:''}${e.autoResolved||e.source==='live-seed'?` <span class="hist-tag">auto TG</span>`:' <span class="hist-tag">en attente</span>'}</span>
       <div class="hist-actions">
         <span title="Résultat unanime (Telegram)" style="min-width:28px;text-align:center">${statusIcon}</span>
         <button class="hist-btn copy-btn" title="Copier" onclick="copyHistoryEntry('${e.id}')">⧉</button>
@@ -1737,8 +1781,33 @@ function runCalc(raw){
     }
   }
 
+  // ── ALL.INV après 1 jeu perdu (max 1) — depuis historique OPT1 unanime ──
+  let allInvInfo = null;
+  if(shouldApplyAllInv(nextNum)){
+    const allInv = applyAllInverse(finalSuit, avantDernier, nextH);
+    if(allInv.result === finalSuit){
+      const reinvMap = {'♠️':'♦️','♦️':'♠️','♣️':'♥️','♥️':'♣️'};
+      const before = finalSuit;
+      finalSuit = reinvMap[finalSuit] || finalSuit;
+      allInvInfo = {
+        active: true,
+        before,
+        result: finalSuit,
+        label: `ALL.INV (=normal) → REINV ♠️↔♦️ / ♣️↔♥️ · ${SUIT_EMOJI[before]}→${SUIT_EMOJI[finalSuit]}`
+      };
+    } else {
+      allInvInfo = {
+        active: true,
+        before: allInv.before,
+        result: allInv.result,
+        label: `ALL.INV · ${allInv.label} · ${SUIT_EMOJI[allInv.before]}→${SUIT_EMOJI[allInv.result]}`
+      };
+      finalSuit = allInv.result;
+    }
+  }
+
   return {num,p1,p2,nextNum,nextH,nextM,avantDernier,dernierDigit,sel,subEngine,algoResult,finalInv,finalSuit,
-          hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,formatSuitInv,globalInvNote,
+          hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,formatSuitInv,globalInvNote,allInvInfo,
           isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime},
           rattrapageForced,rattrapageSnapshot,normalAlgo,digitAlgoRule,fmtInvSnapshot:{ globalOn:false }};
 }
@@ -2356,7 +2425,7 @@ function renderResult(r){
   document.getElementById('res-suit-label').textContent=SUIT_NAMES[displaySuit]||'';
   document.getElementById('res-side').innerHTML=`<span class="side-tag">P1</span>`;
 
-  upsertHistoryEntry(r.nextNum, displaySuit, r.algoUsed, r.rattrapageForced);
+  upsertHistoryEntry(r.nextNum, displaySuit, r.algoUsed, r.rattrapageForced, !!(r.allInvInfo && r.allInvInfo.active));
 
   const hParite=(r.nextH%2===0)?'PAIR':'IMPAIR';
   const avantDernierParite=r.avantDernier%2===0?'PAIR':'IMPAIR';
@@ -2385,6 +2454,9 @@ function renderResult(r){
       : []),
     ...(r.globalInvNote
       ? [`<div class="badge badge-hyper">🔄 INV GLOBALE RELAIS — ${r.globalInvNote}</div>`]
+      : []),
+    ...(r.allInvInfo && r.allInvInfo.active
+      ? [`<div class="badge badge-temporal">⟲ ALL.INV (max 1 · après perte) — ${r.allInvInfo.label}</div>`]
       : []),
     ...(r.formatSuitInv
       ? [`<div class="badge badge-hyper" style="opacity:.45">INV FORMAT — OFF · pred pure</div>`]

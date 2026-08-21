@@ -393,9 +393,8 @@
   <div class="live-card">
     <div class="live-top">
       <div class="live-meta">
-        <div><strong>Canal principal</strong> : <a href="https://t.me/jokerwcbnn11280" target="_blank" rel="noopener">@jokerwcbnn11280</a> · ID -1002699763359</div>
-        <div><strong>Canal relais</strong> : <a href="https://t.me/statistika_baccara" target="_blank" rel="noopener">@statistika_baccara</a> · ID -1001352009817</div>
-        <div><strong>Mode</strong> : principal d’abord, bascule auto sur le relais si échec · calcul avec les règles existantes</div>
+        <div><strong>Canal unique</strong> : <a href="https://t.me/statistika_baccara" target="_blank" rel="noopener">@statistika_baccara</a> · ID -1001352009817</div>
+        <div><strong>Mode</strong> : source exclusive · prédictions dès main P1 finalisée</div>
       </div>
     </div>
     <div class="live-status" id="live-status">En attente de synchronisation Telegram…</div>
@@ -410,8 +409,9 @@
         🟢 LIVE AUTO ACTIF
       </button>
       <div class="demarrer-desc">
-        Scan <b style="color:var(--lime)">1 s</b> · dès que ▶ P1 disparaît → ✅/❌ + pred suivante <b style="color:var(--lime)">immédiate</b>
-        (▶ P2 ignoré).
+        Scan <b style="color:var(--lime)">0,8 s</b> · canal <b style="color:var(--lime)">@statistika_baccara</b> uniquement.<br>
+        Si ▶️ P1 (3ᵉ carte annoncée) → on attend · dès qu’elle arrive → ✅/❌ + pred <b style="color:var(--lime)">immédiate</b>.<br>
+        Si pas de 3ᵉ carte → confirm + pred dès 2 cartes P1 (▶ P2 ignoré).
       </div>
       <div class="demarrer-status" id="demarrer-status">LIVE rapide — démarrage…</div>
     </div>
@@ -1091,12 +1091,14 @@ function parseTotalTag(raw){
   return m ? parseInt(m[1], 10) : null;
 }
 
-// Feedback UNIQUEMENT si main P1 finale (plus de ▶ côté P1).
-// OPT1 : dès ▶ P1 disparu → ✅/❌ immédiat puis pred du tour suivant.
+// Feedback UNIQUEMENT si main P1 finale :
+// • ▶️ P1 (3ᵉ carte annoncée) → pas de confirmation tant qu'elle n'est pas tirée
+// • 3 cartes P1 OU 2 cartes sans ▶️ → main finale → ✅/❌ puis pred suivante
+// S'applique à OPT1 (enseigne) et OPT4 (total pair OUI/NON).
 function resolvePendingHistory(gameNum, p1Cards, p2Cards, rawText){
   if(rawText){
     const ready = checkGameReadiness(rawText);
-    if(!ready.usable) return null; // encore ▶ côté P1 → pas de feedback
+    if(!ready.usable) return null; // 3ᵉ carte en attente ou main incomplète
   }
   const list = loadHistory();
   const pending = list.filter(e=>e.gameNum===gameNum && e.status===null);
@@ -1711,24 +1713,25 @@ function hideError(){document.getElementById('error-box').style.display='none';}
 function showWaiting(msg){const b=document.getElementById('waiting-box');b.textContent='⏳ '+msg;b.style.display='block';}
 function hideWaiting(){document.getElementById('waiting-box').style.display='none';}
 
-// ── Règle P1 UNIQUEMENT (pas P2) ──
-// • ▶ encore côté JOUEUR (P1) → ATTENDRE (pas de feedback, pas de pred)
-// • ▶ disparaît côté P1 → IMMÉDIAT : confirmer ✅/❌ + prédire le tour suivant
-// • On n'attend JAMAIS la disparition du ▶ côté BANQUIER (P2)
-// Ex: "▶️2(K♠️J♦️) - ▶️0(8♦️2♣️)" → ATTENTE
-// Ex: "2(K♠️J♦️) - ▶️0(8♦️2♣️)"   → GO immédiat (▶ P2 ignoré)
+// ── Règle P1 UNIQUEMENT (pas P2) — Enseigne + Total pair ──
+// • ▶️ côté JOUEUR (P1) = 3ᵉ carte annoncée → ATTENDRE (ni confirm, ni pred)
+// • Dès que la 3ᵉ carte P1 arrive (3 cartes) → GO immédiat : ✅/❌ + pred suivante
+// • Si 2 cartes P1 et PLUS de ▶️ P1 → main finale (pas de 3ᵉ) → GO immédiat
+// • ▶ côté BANQUIER (P2) = TOUJOURS ignoré
+// Ex: "▶️2(K♠️J♦️) - ▶️0(8♦️2♣️)" → ATTENTE 3ᵉ carte P1
+// Ex: "3(K♠️J♦️9♥️) - ▶️0(8♦️2♣️)" → GO (3ᵉ arrivée)
+// Ex: "2(K♠️J♦️) - ▶️0(8♦️2♣️)"   → GO (pas de 3ᵉ carte)
 function playMarkerOnP1Side(raw){
-  // Zone P1 = tout avant le séparateur " - " (P2 est à droite)
   const dash = raw.search(/\s-\s/);
   const p1Side = dash === -1 ? raw : raw.slice(0, dash);
   return p1Side.indexOf('▶️') !== -1 || p1Side.indexOf('▶') !== -1;
 }
 function checkGameReadiness(raw){
-  if(!raw) return {usable:false, reason:'empty', detail:'Aucune donnée.'};
+  if(!raw) return {usable:false, reason:'empty', detail:'Aucune donnée.', waitingThird:false};
   const parenIdxs=[];
   for(let i=0;i<raw.length;i++){ if(raw[i]==='(') parenIdxs.push(i); }
   if(parenIdxs.length<2){
-    return {usable:false, reason:'incomplete', detail:'Distribution P1/P2 pas encore affichée — en attente.'};
+    return {usable:false, reason:'incomplete', detail:'Distribution P1/P2 pas encore affichée — en attente.', waitingThird:false};
   }
   const idxP1Open=parenIdxs[0], idxP2Open=parenIdxs[1];
 
@@ -1746,28 +1749,34 @@ function checkGameReadiness(raw){
   }
 
   if(p1Count < 2){
-    return {usable:false, reason:'p1-short', detail:"P1 n'a pas encore 2 cartes — en attente."};
+    return {usable:false, reason:'p1-short', detail:"P1 n'a pas encore 2 cartes — en attente.", waitingThird:false};
   }
   if(p2Count < 1){
-    return {usable:false, reason:'p2-display', detail:'Données P2 pas encore affichées — en attente.'};
+    return {usable:false, reason:'p2-display', detail:'Données P2 pas encore affichées — en attente.', waitingThird:false};
   }
 
-  // P1 a 3 cartes = main max → GO immédiat (même si ▶ traîne encore)
+  // P1 a déjà 3 cartes = main complète → GO (confirm + pred)
   if(p1Count >= 3){
-    return {usable:true, reason:'p1-3-done', detail:'P1=3 cartes → confirmation + pred immédiates.'};
+    return {usable:true, reason:'p1-3-done', detail:'3ᵉ carte P1 reçue → confirmation + pred immédiates.', waitingThird:false};
   }
 
-  // ★ Seul le ▶ côté P1 compte. ▶ côté P2 = ignoré.
+  // ▶️ côté P1 = 3ᵉ carte annoncée mais pas encore tirée → ATTENDRE
   if(playMarkerOnP1Side(raw)){
     return {
       usable:false,
-      reason:'play-p1-active',
-      detail:'▶️ encore côté P1 — attente fin Joueur (P2 ignoré).'
+      reason:'waiting-third-p1',
+      detail:'▶️ 3ᵉ carte P1 annoncée — attente du tirage…',
+      waitingThird:true
     };
   }
 
-  // Plus de ▶ côté P1 → GO immédiat (confirm + pred suivante)
-  return {usable:true, reason:'p1-play-gone', detail:'▶️ P1 disparu → confirm + pred immédiates (P2 ignoré).'};
+  // 2 cartes P1, plus de ▶️ → pas de 3ᵉ carte → main finale → GO
+  return {
+    usable:true,
+    reason:'p1-final-2',
+    detail:'Main P1 finale (2 cartes, pas de 3ᵉ) → confirm + pred immédiates.',
+    waitingThird:false
+  };
 }
 
 
@@ -2497,11 +2506,9 @@ function setLiveStatus(msg){
 function setLiveSource(payload){
   const box = document.getElementById('live-source');
   if(!box) return;
-  const chName = payload.channel_name ? `@${payload.channel_name}` : 'Telegram';
-  const chLabel = payload.channel_label === 'relais' || payload.fallback_used
-    ? ' <span style="color:#ffbf80">[RELAIS]</span>'
-    : ' <span style="color:#8fd6b3">[PRINCIPAL]</span>';
-  box.innerHTML = `<small>Dernière donnée chargée</small>${payload.normalized}<br><br><span style="color:#7ea6cc">Source : <a href="${payload.source_url}" target="_blank" rel="noopener" style="color:#7fb6e8">${chName}</a>${chLabel} · ${payload.published_at || 'heure inconnue'}</span>`;
+  const chName = payload.channel_name ? `@${payload.channel_name}` : '@statistika_baccara';
+  const srcUrl = payload.source_url || 'https://t.me/statistika_baccara';
+  box.innerHTML = `<small>Dernière donnée chargée · canal unique</small>${payload.normalized}<br><br><span style="color:var(--orange-dim)">Source : <a href="${srcUrl}" target="_blank" rel="noopener" style="color:var(--orange)">${chName}</a> · ${payload.published_at || 'heure inconnue'}</span>`;
 }
 
 // ── DÉMARRER LIVE ──
@@ -2520,7 +2527,7 @@ async function demarrerLive(silent){
   if(statusBox && !silent) statusBox.textContent = 'Connexion Telegram…';
 
   try{
-    const res = await fetch('/api/history?limit=150');
+    const res = await fetch('/api/history?limit=150&channel=statistika_baccara');
     let data = null;
     try{ data = await res.json(); }catch(parseErr){ /* réponse non-JSON */ }
     if(!res.ok){
@@ -2588,9 +2595,7 @@ async function demarrerLive(silent){
     const revelInfo = lastRevel != null
       ? ` · Révélation auto #N${lastRevel} (${regime.revelationParity}) → routage ALGO actif`
       : ` · Aucune révélation 3-3 trouvée (routage par défaut)`;
-    const chInfo = data.channel_name
-      ? ` · source @${data.channel_name}${data.fallback_used || data.channel_label==='relais' ? ' [RELAIS]' : ' [PRINCIPAL]'}`
-      : '';
+    const chInfo = ' · @statistika_baccara (unique)';
     if(statusBox){
       statusBox.textContent = `✅ LIVE · ${telegramHistoryCache.length} jeux · ${validCount}✅/${invalidCount}❌`
         + `${skipped?` (${skipped} ign.)`:''}${revelInfo}${chInfo}`;
@@ -2609,8 +2614,8 @@ async function fetchLatestTelegramGame(silent=false){
   const btn = document.getElementById('btn-live-fetch');
   try{
     if(btn && !silent){ btn.classList.add('loading'); btn.textContent='⟳ SYNCHRO…'; }
-    if(!silent) setLiveStatus('Connexion Telegram…');
-    const res = await fetch('/api/latest-game');
+    if(!silent) setLiveStatus('Connexion @statistika_baccara…');
+    const res = await fetch('/api/latest-game?channel=statistika_baccara');
     let data = null;
     try{ data = await res.json(); }catch(parseErr){}
     if(!res.ok){
@@ -2623,10 +2628,10 @@ async function fetchLatestTelegramGame(silent=false){
 
     const rawFull = data.raw_text || data.normalized;
     const readiness = checkGameReadiness(rawFull);
-    // ▶ encore côté P1 → affiche le jeu mais BLOQUE feedback+pred
+    // 3ᵉ carte P1 annoncée (▶️) → affiche le jeu mais BLOQUE confirm+pred
     if(!readiness.usable){
       document.getElementById('game-input').value = data.normalized || '';
-      setLiveStatus(`⏳ #N${data.game_number} · ${readiness.detail || '▶️ P1 actif…'}`);
+      setLiveStatus(`⏳ #N${data.game_number} · ${readiness.detail || 'attente 3ᵉ carte P1…'}`);
       return;
     }
 
@@ -2635,8 +2640,9 @@ async function fetchLatestTelegramGame(silent=false){
     const isNewUsable = liveLastUsableGameNum !== data.game_number;
     liveLastUsableGameNum = data.game_number;
     const revelTag = regime.revelationNum != null ? ` · régime #N${regime.revelationNum}` : '';
-    setLiveStatus(`⚡ #N${data.game_number} · ▶ P1 parti → confirm+pred${isNewUsable?'':' (déjà traité)'}${revelTag}`);
-    // Dès que ▶ P1 disparu : feedback + pred suivante ENCHAÎNÉS
+    const why = readiness.reason === 'p1-3-done' ? '3ᵉ carte reçue' : 'main P1 finale (2 cartes)';
+    setLiveStatus(`⚡ #N${data.game_number} · ${why} → confirm+pred${isNewUsable?'':' (déjà traité)'}${revelTag}`);
+    // Main P1 finalisée → feedback + pred suivante ENCHAÎNÉS (immédiat)
     if(isNewUsable || !silent){
       calculate();
     }
@@ -2681,13 +2687,13 @@ function startPermanentLive(){
     liveFetchInFlight = true;
     Promise.resolve(fetchLatestTelegramGame(true))
       .finally(()=>{ liveFetchInFlight = false; });
-  }, 1000); // scan 1 seconde
+  }, 800); // scan 0,8 s — réactions plus rapides
   liveAutoTimer = permanentLiveTimer;
   const autoBtn=document.getElementById('btn-live-auto');
   if(autoBtn) autoBtn.textContent='AUTO REFRESH ON';
   fetchLatestTelegramGame(true);
   const s=document.getElementById('demarrer-status');
-  if(s) s.textContent='🟢 Scan 1s · confirm dès ▶ P1 disparu';
+  if(s) s.textContent='🟢 @statistika_baccara · scan 0,8s · attente 3ᵉ carte si ▶️ P1';
 }
 
 function toggleLiveAutoRefresh(){ togglePermanentLive(); }

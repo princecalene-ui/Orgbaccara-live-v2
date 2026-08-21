@@ -904,7 +904,8 @@ let SYNC_SKIP_RATTRAPAGE = false;
 
 // ── RATTRAPAGE : si un ALGO perd, on le réutilise jusqu'à 3 fois, puis retour au routage normal ──
 const RATTRAPAGE_KEY = 'orgbacc_rattrapage_v1';
-const RATTRAPAGE_MAX = 1; // max 1 rattrapage puis retour à zéro (gagnant ou perdant)
+const RATTRAPAGE_MAX = 2; // max 2 rattrapages après perte puis retour à zéro
+const ALLINV_MAX = 2;     // max 2 ALL.INV après perte puis retour à zéro
 function emptyRattrapage(){
   return { active:false, algo:null, remaining:0, startedAt:null, lostSuit:null, lostColor:null };
 }
@@ -963,7 +964,7 @@ function applyRattrapageInv(predSuit, lostColor, lostSuit){
   };
 }
 
-// ── ALL.INV après 1 jeu perdu (max 1) — dérivé de l'historique OPT1 unanime ──
+// ── ALL.INV après perte (max 2) — dérivé de l'historique OPT1 unanime ──
 function applyAllInverse(suit, avantDernier, nextH){
   const isPair = (avantDernier % 2 === 0);
   const heurePair = (nextH % 2 === 0);
@@ -989,7 +990,7 @@ function applyAllInverse(suit, avantDernier, nextH){
   return { result, label, isPair, heurePair, before: suit, applied: result !== suit };
 }
 
-// Max 1 ALL.INV : perte sur N-1 + pas déjà ALL.INV
+// Max 2 ALL.INV : série après perte ; stop si gagné ou 2 ALL.INV déjà consommés
 function shouldApplyAllInv(nextNum){
   if(typeof SYNC_SKIP_RATTRAPAGE !== 'undefined' && SYNC_SKIP_RATTRAPAGE) return false;
   try{
@@ -998,14 +999,24 @@ function shouldApplyAllInv(nextNum){
       .sort((a,b) => a.gameNum - b.gameNum);
     if(!opt1.length) return false;
     const last = opt1[opt1.length - 1];
-    if(last.status === 'invalid' && !last.allInv && last.gameNum === nextNum - 1){
-      return true;
+    if(last.gameNum !== nextNum - 1) return false;
+    if(last.status !== 'invalid') return false;
+
+    // Compte les ALL.INV consécutifs perdus en fin de série
+    let consecutive = 0;
+    for(let i = opt1.length - 1; i >= 0; i--){
+      if(opt1[i].allInv && opt1[i].status === 'invalid') consecutive++;
+      else if(opt1[i].allInv && opt1[i].status === 'valid') return false; // ALL.INV gagné → stop
+      else break;
     }
+    // Départ (perte normale) ou continuation si < max 2
+    if(!last.allInv) return true;
+    return consecutive < ALLINV_MAX;
   }catch(e){}
   return false;
 }
 
-// Max 1 RATTRAPAGE : perte sur N-1 + pas déjà un rattrapage → force même ALGO + inv couleur
+// Max 2 RATTRAPAGE : série après perte ; force même ALGO + inv couleur
 function shouldApplyRattrapage(nextNum){
   if(typeof SYNC_SKIP_RATTRAPAGE !== 'undefined' && SYNC_SKIP_RATTRAPAGE) return null;
   try{
@@ -1014,15 +1025,26 @@ function shouldApplyRattrapage(nextNum){
       .sort((a,b) => a.gameNum - b.gameNum);
     if(!opt1.length) return null;
     const last = opt1[opt1.length - 1];
-    // Perte hors-rattrapage sur le jeu précédent → 1 rattrapage pour N
-    if(last.status === 'invalid' && !last.rattrapage && last.gameNum === nextNum - 1){
-      return {
-        active: true,
-        algo: last.algoUsed || 'ALGO1',
-        lostSuit: last.suitKey || null,
-        lostColor: last.suitKey ? (isRed(last.suitKey) ? 'rouge' : 'noir') : null
-      };
+    if(last.gameNum !== nextNum - 1) return null;
+    if(last.status !== 'invalid') return null;
+
+    // Compte les rattrapages consécutifs perdus en fin de série
+    let consecutive = 0;
+    for(let i = opt1.length - 1; i >= 0; i--){
+      if(opt1[i].rattrapage && opt1[i].status === 'invalid') consecutive++;
+      else if(opt1[i].rattrapage && opt1[i].status === 'valid') return null; // rattrapage gagné → stop
+      else break;
     }
+    if(last.rattrapage && consecutive >= RATTRAPAGE_MAX) return null;
+
+    // Départ (perte normale) ou continuation
+    return {
+      active: true,
+      algo: last.algoUsed || 'ALGO1',
+      lostSuit: last.suitKey || null,
+      lostColor: last.suitKey ? (isRed(last.suitKey) ? 'rouge' : 'noir') : null,
+      remaining: last.rattrapage ? (RATTRAPAGE_MAX - consecutive) : RATTRAPAGE_MAX
+    };
   }catch(e){}
   return null;
 }
@@ -1069,20 +1091,20 @@ function updateRegimeDisplay(){
       rattrapageHtml = `
     <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #7a6028">
       <span class="regime-label" style="color:#ffbf80">⏱ RATTRAPAGE</span>
-      <span class="regime-val" style="color:#ffbf80">EN ATTENTE · max 1 · après perte #N${last.gameNum}</span>
+      <span class="regime-val" style="color:#ffbf80">EN ATTENTE · max ${RATTRAPAGE_MAX} · après perte #N${last.gameNum}</span>
     </div>`;
     } else {
       rattrapageHtml = `
     <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #2a1a1a">
       <span class="regime-label">Rattrapage</span>
-      <span class="regime-val" style="color:var(--ivory-dim)">Inactif · max 1 après perte</span>
+      <span class="regime-val" style="color:var(--ivory-dim)">Inactif · max ${RATTRAPAGE_MAX} après perte</span>
     </div>`;
     }
   }catch(e){
     rattrapageHtml = `
     <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #2a1a1a">
       <span class="regime-label">Rattrapage</span>
-      <span class="regime-val" style="color:var(--ivory-dim)">Inactif · max 1 après perte</span>
+      <span class="regime-val" style="color:var(--ivory-dim)">Inactif · max ${RATTRAPAGE_MAX} après perte</span>
     </div>`;
   }
   const fmtOn = (typeof fmtInv !== 'undefined' && fmtInv.globalOn);
@@ -1621,7 +1643,7 @@ function runCalc(raw){
       : `2 derniers chiffres ${String(lastTwo).padStart(2,'0')} (${digitZone}) → NORMAL (pas de bascule)`
   };
 
-  // RATTRAPAGE max 1 — après 1 perte (historique OPT1 unanime)
+  // RATTRAPAGE max 2 — après perte (historique OPT1 unanime)
   const normalAlgo = baseAlgo;
   const rattrInfo = shouldApplyRattrapage(nextNum);
   const inRattrapage = !!(rattrInfo && rattrInfo.active);
@@ -1632,7 +1654,7 @@ function runCalc(raw){
     rattrapage = {
       active: true,
       algo: rattrInfo.algo,
-      remaining: 1,
+      remaining: rattrInfo.remaining != null ? rattrInfo.remaining : RATTRAPAGE_MAX,
       startedAt: new Date().toISOString(),
       lostSuit: rattrInfo.lostSuit,
       lostColor: rattrInfo.lostColor
@@ -1839,7 +1861,7 @@ function runCalc(raw){
     }
   }
 
-  // ── ALL.INV après 1 jeu perdu (max 1) — depuis historique OPT1 unanime ──
+  // ── ALL.INV après perte (max 2) — depuis historique OPT1 unanime ──
   let allInvInfo = null;
   if(shouldApplyAllInv(nextNum)){
     const allInv = applyAllInverse(finalSuit, avantDernier, nextH);
@@ -2514,7 +2536,7 @@ function renderResult(r){
       ? [`<div class="badge badge-hyper">🔄 INV GLOBALE RELAIS — ${r.globalInvNote}</div>`]
       : []),
     ...(r.allInvInfo && r.allInvInfo.active
-      ? [`<div class="badge badge-temporal">⟲ ALL.INV (max 1 · après perte) — ${r.allInvInfo.label}</div>`]
+      ? [`<div class="badge badge-temporal">⟲ ALL.INV (max ${ALLINV_MAX} · après perte) — ${r.allInvInfo.label}</div>`]
       : []),
     ...(r.formatSuitInv
       ? [`<div class="badge badge-hyper" style="opacity:.45">INV FORMAT — OFF · pred pure</div>`]

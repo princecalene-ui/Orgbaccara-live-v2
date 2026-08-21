@@ -820,7 +820,8 @@ function loadRegime(){
 function saveRegime(){
   try{ localStorage.setItem(REGIME_KEY, JSON.stringify(regime)); }catch(e){}
 }
-let regime = loadRegime();
+// Régime : JAMAIS initialisé depuis localStorage (source = TG uniquement au calcul)
+let regime = { revelationNum: null, revelationParity: 'PAIR', source: 'Défaut · PAIR→ALGO1 / IMPAIR→ALGO2' };
 
 // Détecte automatiquement la dernière RÉVÉLATION (format 3-3) dans une liste de jeux
 // et met à jour le régime de routage ALGO1/ALGO2. Retourne le n° trouvé ou null.
@@ -853,62 +854,50 @@ function scanHistoryForLatestRevelation(history){
   return null;
 }
 
-// ── État UNANIME : régime + inv.format + rattrapage dérivés UNIQUEMENT de Telegram ──
-// Appelé avant chaque pred → même résultat sur tous les appareils
-function syncUnanimousStateFromTelegram(currentRaw){
-  // 1) Régime (dernière révélation 3-3) depuis le cache Telegram
+// ── RÉGIME PUR (méthode universelle) ─────────────────────────────────────
+// Source unique = historique Telegram + jeu courant. AUCUN localStorage dans le calcul.
+function pureRegimeFromTelegram(currentRaw){
+  let revelationNum = null;
+  let revelationParity = 'PAIR';
+  let source = 'Défaut · PAIR→ALGO1 / IMPAIR→ALGO2';
   if(telegramHistoryCache && telegramHistoryCache.length){
-    let best = null;
     for(let i = telegramHistoryCache.length - 1; i >= 0; i--){
-      const g = telegramHistoryCache[i];
       try{
-        const parsed = parseGame(g.normalized || g.raw_text);
+        const parsed = parseGame(telegramHistoryCache[i].normalized || telegramHistoryCache[i].raw_text);
         if(parsed.p1.length === 3 && parsed.p2.length === 3){
-          best = {
-            revelationNum: parsed.num,
-            revelationParity: (parsed.num % 2 === 0) ? 'PAIR' : 'IMPAIR',
-            source: `#N${parsed.num} (Telegram unanime · 3-3)`
-          };
+          revelationNum = parsed.num;
+          revelationParity = (parsed.num % 2 === 0) ? 'PAIR' : 'IMPAIR';
+          source = `#N${parsed.num} (TG unanime · 3-3)`;
           break;
         }
       }catch(e){}
     }
-    if(best){
-      regime.revelationNum = best.revelationNum;
-      regime.revelationParity = best.revelationParity;
-      regime.source = best.source;
-      saveRegime();
-    }
-    // 2) Inv. format pure depuis historique Telegram
-    fmtInv = rebuildFmtInvFromHistory(telegramHistoryCache);
   }
-
-  // 3) Jeu courant (s'il n'est pas déjà le dernier du cache)
   if(currentRaw){
     try{
       const {num, p1, p2} = parseGame(currentRaw);
       if(p1.length === 3 && p2.length === 3){
-        if(regime.revelationNum == null || num >= regime.revelationNum){
-          regime.revelationNum = num;
-          regime.revelationParity = (num % 2 === 0) ? 'PAIR' : 'IMPAIR';
-          regime.source = `#N${num} (Telegram unanime · jeu courant 3-3)`;
-          saveRegime();
+        if(revelationNum == null || num >= revelationNum){
+          revelationNum = num;
+          revelationParity = (num % 2 === 0) ? 'PAIR' : 'IMPAIR';
+          source = `#N${num} (jeu courant · 3-3)`;
         }
-      }
-      const last = telegramHistoryCache && telegramHistoryCache.length
-        ? telegramHistoryCache[telegramHistoryCache.length - 1]
-        : null;
-      const lastNum = last ? (last.game_number || 0) : null;
-      if(num !== lastNum){
-        const fmt = detectHandFormat(p1, p2);
-        fmtInv = stepFmtInv(fmtInv, fmt, num);
       }
     }catch(e){}
   }
+  return { revelationNum, revelationParity, source };
+}
 
-  // 4) RATTRAPAGE OFF — pred pure / universelle (aucun effet d'un jeu perdant)
-  rattrapage = emptyRattrapage();
-  try{ saveRattrapage(rattrapage); }catch(e){}
+function syncUnanimousStateFromTelegram(currentRaw){
+  const pure = pureRegimeFromTelegram(currentRaw);
+  regime.revelationNum = pure.revelationNum;
+  regime.revelationParity = pure.revelationParity;
+  regime.source = pure.source;
+  // localStorage = affichage seulement (jamais source du calcul)
+  try{ saveRegime(); }catch(e){}
+  fmtInv = { globalOn:false, activeMap:null, oneShotNext:false, lastTriggerNum:null, source:'OFF · pred pure' };
+  rattrapage = { active:false, algo:null, remaining:0, startedAt:null, lostSuit:null, lostColor:null };
+  try{ if(typeof saveRattrapage==='function') saveRattrapage(rattrapage); }catch(e){}
   updateRegimeDisplay();
 }
 let SYNC_SKIP_RATTRAPAGE = false;
@@ -1497,17 +1486,20 @@ function runEngine(num, p1Cards, p2Cards, nextNum){
 //  CALCUL PRINCIPAL — RÉVÉLATION (routage ALGO1/ALGO2, cible fixe P1)
 // ══════════════════════════════════════════════════════
 function runCalc(raw){
-  // UNANIME : resync régime + fmtInv + rattrapage depuis Telegram AVANT tout calcul
-  syncUnanimousStateFromTelegram(raw);
+  // UNANIME (méthode pure) : régime dérivé UNIQUEMENT de TG + jeu courant — pas de localStorage
+  const pureReg = pureRegimeFromTelegram(raw);
+  regime.revelationNum = pureReg.revelationNum;
+  regime.revelationParity = pureReg.revelationParity;
+  regime.source = pureReg.source;
 
   const {num,p1,p2}=parseGame(raw);
   const isRevelationGame = (p1.length===3 && p2.length===3);
-  const regimeBefore = { ...regime };
+  const regimeBefore = { revelationNum: pureReg.revelationNum, revelationParity: pureReg.revelationParity, source: pureReg.source };
 
   const nextNum=num+1;
   const nextParity = (nextNum % 2 === 0) ? 'PAIR' : 'IMPAIR';
-  // Règle de relais : parité(prochain N°) === parité(dernière révélation TG) → ALGO1, sinon ALGO2
-  let baseAlgo = (nextParity === regime.revelationParity) ? 'ALGO1' : 'ALGO2';
+  // Règle de relais pure : parité(N+1) === parité(dernière révélation TG) → ALGO1, sinon ALGO2
+  let baseAlgo = (nextParity === pureReg.revelationParity) ? 'ALGO1' : 'ALGO2';
 
   // ── Bascule ALGO selon les 2 derniers chiffres du n° prédit ──
   // NORMAL (✅)     : 20–39, 60–79
@@ -1701,24 +1693,54 @@ function runCalc(raw){
       }
     : { forced:false, algo:null, remainingBefore:0, remainingAfter:0, lostSuit:null, lostColor:null };
 
-  // ── INV FORMAT ULTIME OPT1 (au-dessus de toute la chaîne) ──
-  let formatSuitInv = null;
+  // INV FORMAT OFF (pred pure)
+  let formatSuitInv = { active:false, map:null, before:finalSuit, result:finalSuit, reason:'INV FORMAT OFF · pred pure' };
+
+  // ── INV GLOBALES RELAIS (pures · uniquement digits du N° prédit · unanimes) ──
+  // Aucune dépendance à une perte / historique local
+  let globalInvNote = null;
   {
-    const dec = shouldInvertOpt1Suit(finalSuit);
-    formatSuitInv = {
-      active: dec.invert,
-      map: dec.map,
-      before: finalSuit,
-      result: dec.result,
-      reason: dec.reason
-    };
-    finalSuit = dec.result;
-    consumeOneShotIfAny();
+    const str = String(nextNum);
+    const len = str.length;
+    const first = parseInt(str[0], 10);
+    const second = len >= 2 ? parseInt(str[1], 10) : null;
+    const avDern = len >= 2 ? parseInt(str[len-2], 10) : first;
+    const beforeG = finalSuit;
+    if(len === 3){
+      if(avDern % 2 === 1 && first % 2 === 1){
+        const map = {'♣️':'♠️','♠️':'♣️','♦️':'♥️','♥️':'♦️'};
+        finalSuit = map[finalSuit] || finalSuit;
+        globalInvNote = `INV GLOBALE 3ch (av-d imp + 1er imp) · ${SUIT_EMOJI[beforeG]}→${SUIT_EMOJI[finalSuit]}`;
+      } else if(avDern % 2 === 0 && first % 2 === 0){
+        const map = {'♠️':'♦️','♦️':'♠️','♣️':'♥️','♥️':'♣️'};
+        finalSuit = map[finalSuit] || finalSuit;
+        globalInvNote = `INV GLOBALE 3ch (av-d pair + 1er pair) · ${SUIT_EMOJI[beforeG]}→${SUIT_EMOJI[finalSuit]}`;
+      }
+    } else if(len === 2 || len === 4){
+      let cond1=false, cond2=false;
+      if(len === 2){
+        cond1 = (avDern % 2 === 1 && first % 2 === 0);
+        cond2 = (avDern % 2 === 0 && first % 2 === 1);
+      } else {
+        cond1 = (second % 2 === 0 && first % 2 === 0);
+        cond2 = (avDern % 2 === 0 && first % 2 === 1 && second % 2 === 1);
+      }
+      if(cond1){
+        const map = {'♣️':'♦️','♦️':'♣️','♠️':'♥️','♥️':'♠️'};
+        finalSuit = map[finalSuit] || finalSuit;
+        globalInvNote = `INV GLOBALE ${len}ch (cond1) · ${SUIT_EMOJI[beforeG]}→${SUIT_EMOJI[finalSuit]}`;
+      } else if(cond2){
+        const map = {'♠️':'♣️','♣️':'♠️','♦️':'♥️','♥️':'♦️'};
+        finalSuit = map[finalSuit] || finalSuit;
+        globalInvNote = `INV GLOBALE ${len}ch (cond2) · ${SUIT_EMOJI[beforeG]}→${SUIT_EMOJI[finalSuit]}`;
+      }
+    }
   }
 
   return {num,p1,p2,nextNum,nextH,nextM,avantDernier,dernierDigit,sel,subEngine,algoResult,finalInv,finalSuit,
-          hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,formatSuitInv,isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime},
-          rattrapageForced,rattrapageSnapshot,normalAlgo,digitAlgoRule,fmtInvSnapshot:{...fmtInv}};
+          hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,formatSuitInv,globalInvNote,
+          isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime},
+          rattrapageForced,rattrapageSnapshot,normalAlgo,digitAlgoRule,fmtInvSnapshot:{ globalOn:false }};
 }
 
 function showError(msg){const b=document.getElementById('error-box');b.textContent='⚠ '+msg;b.style.display='block';}
@@ -2361,10 +2383,11 @@ function renderResult(r){
     ...(r.groupCInv && r.groupCInv.active
       ? [`<div class="badge badge-transform">🅲 GROUPE C — ${r.groupCInv.detail}</div>`]
       : []),
+    ...(r.globalInvNote
+      ? [`<div class="badge badge-hyper">🔄 INV GLOBALE RELAIS — ${r.globalInvNote}</div>`]
+      : []),
     ...(r.formatSuitInv
-      ? [r.formatSuitInv.active
-          ? `<div class="badge badge-hyper">🔄 INV FORMAT OPT1 — ${r.formatSuitInv.reason}</div>`
-          : `<div class="badge badge-hyper" style="opacity:.55">INV FORMAT OPT1 — ${r.formatSuitInv.reason}</div>`]
+      ? [`<div class="badge badge-hyper" style="opacity:.45">INV FORMAT — OFF · pred pure</div>`]
       : []),
     `<div class="badge badge-algo">⚙ ALGO INTERNE — BASE : ALGO ${ar.baseAlgo} · ${fibOverrideLabel} → ALGO FINAL : ALGO ${ar.algo}</div>`,
     `<div class="badge badge-parity">◈ PARITÉ — ALGO ${algoParity} · #N${r.nextNum} RÉDUIT = ${ar.reduceSteps.join(' → ')} → ${numParity}</div>`,

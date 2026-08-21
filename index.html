@@ -1382,9 +1382,20 @@ function showAutoValidationFeedback(entry){
 
 // ── Prédiction déterministe "brute" : moteur RÉVÉLATION, sans aucun bouton manuel,
 //    pour servir de référence stable/rejouable identique partout (cible toujours P1)
+// Prédiction déterministe "brute" (méthode unanime Telegram) :
+// même texte de jeu + même cache TG → même résultat partout (cible P1)
 function deterministicPredict(raw){
-  const r = runCalc(raw);
-  return {nextNum:r.nextNum, suit:r.finalSuit, side:'P1'};
+  const prevPure = PURE_CALC_MODE;
+  const prevSkip = SYNC_SKIP_RATTRAPAGE;
+  PURE_CALC_MODE = true;
+  SYNC_SKIP_RATTRAPAGE = true;
+  try{
+    const r = runCalc(raw);
+    return {nextNum:r.nextNum, suit:r.finalSuit, side:'P1', algo:r.algoUsed};
+  }finally{
+    PURE_CALC_MODE = prevPure;
+    SYNC_SKIP_RATTRAPAGE = prevSkip;
+  }
 }
 
 function actualOutcomeSuits(gameRecord){
@@ -2831,15 +2842,20 @@ async function demarrerLive(silent){
     _tgSimCache = null;
     if(telegramHistoryCache.length < 2) throw new Error('Pas assez de jeux récupérés depuis Telegram.');
 
-    // État inversion format IDENTIQUE sur tous les appareils (recalcul depuis Telegram)
-    fmtInv = rebuildFmtInvFromHistory(telegramHistoryCache);
+    // Inv. format neutre (OFF) — pred pure
+    fmtInv = { globalOn:false, activeMap:null, oneShotNext:false, lastTriggerNum:null, source:'OFF · pred pure' };
 
-    // Détection automatique de la dernière RÉVÉLATION (3-3) dans les 150 jeux
-    statusBox.textContent = `${telegramHistoryCache.length} jeux chargés · détection des révélations…`;
+    // RÉVÉLATION depuis Telegram UNIQUEMENT (méthode unanime du fichier de référence)
+    if(statusBox) statusBox.textContent = `${telegramHistoryCache.length} jeux chargés · détection des révélations…`;
     const lastRevel = scanHistoryForLatestRevelation(telegramHistoryCache);
+    const pureReg = pureRegimeFromTelegram(null);
+    regime.revelationNum = pureReg.revelationNum;
+    regime.revelationParity = pureReg.revelationParity;
+    regime.source = pureReg.source;
+    _tgSimCache = null;
     updateRegimeDisplay();
 
-    statusBox.textContent = `${telegramHistoryCache.length} jeux chargés · calcul des statistiques globales…`;
+    if(statusBox) statusBox.textContent = `${telegramHistoryCache.length} jeux chargés · calcul des statistiques globales…`;
     globalBacktestStats = computeGlobalBacktestStats(telegramHistoryCache, 50);
 
     // Reconstruction UNANIME depuis Telegram (OPT1 + OPT4) — identique sur tous les appareils

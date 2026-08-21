@@ -1886,8 +1886,38 @@ function runCalc(raw){
     }
   }
 
+  // ── ULTIME BIG INV ──
+  // · 90–110 : toujours ♦️↔♥️ / ♠️↔♣️
+  // · 910–999 : uniquement si avant-dernier chiffre IMPAIR → ♦️↔♥️ / ♠️↔♣️
+  let ultimateBigInv = null;
+  {
+    const bigMap = {'♦️':'♥️','♥️':'♦️','♠️':'♣️','♣️':'♠️'};
+    let applyBig = false;
+    let zone = '';
+    if(nextNum >= 90 && nextNum <= 110){
+      applyBig = true;
+      zone = '90–110';
+    } else if(nextNum >= 910 && nextNum <= 999){
+      if(avantDernier % 2 === 1){
+        applyBig = true;
+        zone = `910–999 · AV-DERN=${avantDernier}(IMPAIR)`;
+      }
+    }
+    if(applyBig){
+      const before = finalSuit;
+      finalSuit = bigMap[finalSuit] || finalSuit;
+      ultimateBigInv = {
+        active: true,
+        zone,
+        before,
+        result: finalSuit,
+        label: `ULTIME BIG INV · #N${nextNum} ∈ ${zone} → ♦️↔♥️ / ♠️↔♣️ · ${SUIT_EMOJI[before]}→${SUIT_EMOJI[finalSuit]}`
+      };
+    }
+  }
+
   return {num,p1,p2,nextNum,nextH,nextM,avantDernier,dernierDigit,sel,subEngine,algoResult,finalInv,finalSuit,
-          hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,formatSuitInv,globalInvNote,allInvInfo,
+          hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,formatSuitInv,globalInvNote,allInvInfo,ultimateBigInv,
           isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime},
           rattrapageForced,rattrapageSnapshot,normalAlgo,digitAlgoRule,fmtInvSnapshot:{ globalOn:false }};
 }
@@ -2537,6 +2567,9 @@ function renderResult(r){
       : []),
     ...(r.allInvInfo && r.allInvInfo.active
       ? [`<div class="badge badge-temporal">⟲ ALL.INV (max ${ALLINV_MAX} · après perte) — ${r.allInvInfo.label}</div>`]
+      : []),
+    ...(r.ultimateBigInv && r.ultimateBigInv.active
+      ? [`<div class="badge badge-hyper">⚡ ULTIME BIG INV — ${r.ultimateBigInv.label}</div>`]
       : []),
     ...(r.formatSuitInv
       ? [`<div class="badge badge-hyper" style="opacity:.45">INV FORMAT — OFF · pred pure</div>`]

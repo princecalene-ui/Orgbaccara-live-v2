@@ -2011,18 +2011,19 @@ function runCalc(raw){
     }
   }
 
-  // ── ULTIME INV HORAIRE — 21h et 23h → ♠️↔♣️ / ♥️↔♦️ ──
+  // ── ULTIME INV HORAIRE — 21h00–21h49 et 23h00–23h49 → ♠️↔♣️ / ♥️↔♦️ ──
   let ultimateHourInv = null;
-  if(nextH === 21 || nextH === 23){
+  if((nextH === 21 || nextH === 23) && nextM >= 0 && nextM <= 49){
     const hourMap = {'♠️':'♣️','♣️':'♠️','♥️':'♦️','♦️':'♥️'};
     const before = finalSuit;
     finalSuit = hourMap[finalSuit] || finalSuit;
     ultimateHourInv = {
       active: true,
       h: nextH,
+      m: nextM,
       before,
       result: finalSuit,
-      label: `ULTIME INV HORAIRE · ${String(nextH).padStart(2,'0')}h → ♠️↔♣️ / ♥️↔♦️ · ${SUIT_EMOJI[before]}→${SUIT_EMOJI[finalSuit]}`
+      label: `ULTIME INV HORAIRE · ${String(nextH).padStart(2,'0')}h${String(nextM).padStart(2,'0')} (zone 00–49) → ♠️↔♣️ / ♥️↔♦️ · ${SUIT_EMOJI[before]}→${SUIT_EMOJI[finalSuit]}`
     };
   }
 

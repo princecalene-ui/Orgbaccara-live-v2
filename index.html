@@ -2011,8 +2011,23 @@ function runCalc(raw){
     }
   }
 
+  // ── ULTIME INV HORAIRE — 21h et 23h → ♠️↔♣️ / ♥️↔♦️ ──
+  let ultimateHourInv = null;
+  if(nextH === 21 || nextH === 23){
+    const hourMap = {'♠️':'♣️','♣️':'♠️','♥️':'♦️','♦️':'♥️'};
+    const before = finalSuit;
+    finalSuit = hourMap[finalSuit] || finalSuit;
+    ultimateHourInv = {
+      active: true,
+      h: nextH,
+      before,
+      result: finalSuit,
+      label: `ULTIME INV HORAIRE · ${String(nextH).padStart(2,'0')}h → ♠️↔♣️ / ♥️↔♦️ · ${SUIT_EMOJI[before]}→${SUIT_EMOJI[finalSuit]}`
+    };
+  }
+
   return {num,p1,p2,nextNum,nextH,nextM,avantDernier,dernierDigit,sel,subEngine,algoResult,finalInv,finalSuit,
-          hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,formatSuitInv,globalInvNote,allInvInfo,ultimateBigInv,
+          hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,formatSuitInv,globalInvNote,allInvInfo,ultimateBigInv,ultimateHourInv,
           isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime},
           rattrapageForced,rattrapageSnapshot,normalAlgo,digitAlgoRule,fmtInvSnapshot:{ globalOn:false }};
 }
@@ -2665,6 +2680,9 @@ function renderResult(r){
       : []),
     ...(r.ultimateBigInv && r.ultimateBigInv.active
       ? [`<div class="badge badge-hyper">⚡ ULTIME BIG INV — ${r.ultimateBigInv.label}</div>`]
+      : []),
+    ...(r.ultimateHourInv && r.ultimateHourInv.active
+      ? [`<div class="badge badge-hyper">🌙 ULTIME INV HORAIRE — ${r.ultimateHourInv.label}</div>`]
       : []),
     ...(r.formatSuitInv
       ? [`<div class="badge badge-hyper" style="opacity:.45">INV FORMAT — OFF · pred pure</div>`]

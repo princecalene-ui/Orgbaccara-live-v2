@@ -847,11 +847,95 @@ function scanHistoryForLatestRevelation(history){
   for(let i=history.length-1;i>=0;i--){
     const g = history[i];
     const raw = g.normalized || g.raw_text;
-    const found = applyRevelationFromGameRaw(raw, `#N${g.game_number || '?'} (détectée auto dans l'historique Telegram)`);
+    const found = applyRevelationFromGameRaw(raw, `#N${g.game_number || '?'} (Telegram unanime)`);
     if(found != null) return found;
   }
   return null;
 }
+
+// ── État UNANIME : régime + inv.format + rattrapage dérivés UNIQUEMENT de Telegram ──
+// Appelé avant chaque pred → même résultat sur tous les appareils
+function syncUnanimousStateFromTelegram(currentRaw){
+  // 1) Régime (dernière révélation 3-3) depuis le cache Telegram
+  if(telegramHistoryCache && telegramHistoryCache.length){
+    let best = null;
+    for(let i = telegramHistoryCache.length - 1; i >= 0; i--){
+      const g = telegramHistoryCache[i];
+      try{
+        const parsed = parseGame(g.normalized || g.raw_text);
+        if(parsed.p1.length === 3 && parsed.p2.length === 3){
+          best = {
+            revelationNum: parsed.num,
+            revelationParity: (parsed.num % 2 === 0) ? 'PAIR' : 'IMPAIR',
+            source: `#N${parsed.num} (Telegram unanime · 3-3)`
+          };
+          break;
+        }
+      }catch(e){}
+    }
+    if(best){
+      regime.revelationNum = best.revelationNum;
+      regime.revelationParity = best.revelationParity;
+      regime.source = best.source;
+      saveRegime();
+    }
+    // 2) Inv. format pure depuis historique Telegram
+    fmtInv = rebuildFmtInvFromHistory(telegramHistoryCache);
+  }
+
+  // 3) Jeu courant (s'il n'est pas déjà le dernier du cache)
+  if(currentRaw){
+    try{
+      const {num, p1, p2} = parseGame(currentRaw);
+      if(p1.length === 3 && p2.length === 3){
+        if(regime.revelationNum == null || num >= regime.revelationNum){
+          regime.revelationNum = num;
+          regime.revelationParity = (num % 2 === 0) ? 'PAIR' : 'IMPAIR';
+          regime.source = `#N${num} (Telegram unanime · jeu courant 3-3)`;
+          saveRegime();
+        }
+      }
+      const last = telegramHistoryCache && telegramHistoryCache.length
+        ? telegramHistoryCache[telegramHistoryCache.length - 1]
+        : null;
+      const lastNum = last ? (last.game_number || 0) : null;
+      if(num !== lastNum){
+        const fmt = detectHandFormat(p1, p2);
+        fmtInv = stepFmtInv(fmtInv, fmt, num);
+      }
+    }catch(e){}
+  }
+
+  // 4) Rattrapage dérivé de l'historique OPT1 unanime (sauf en mode seed/backtest)
+  if(typeof SYNC_SKIP_RATTRAPAGE !== 'undefined' && SYNC_SKIP_RATTRAPAGE){
+    rattrapage = emptyRattrapage();
+  } else {
+    const opt1 = loadHistory()
+      .filter(e => histModeKey(e.algoUsed) === 'OPT1' && (e.status === 'valid' || e.status === 'invalid'))
+      .sort((a,b) => a.gameNum - b.gameNum);
+    if(opt1.length){
+      const last = opt1[opt1.length - 1];
+      // Perte hors-rattrapage → 1 rattrapage pour le prochain ; sinon reset
+      if(last.status === 'invalid' && !last.rattrapage){
+        rattrapage = {
+          active: true,
+          algo: last.algoUsed || 'ALGO1',
+          remaining: RATTRAPAGE_MAX,
+          startedAt: last.ts || new Date().toISOString(),
+          lostSuit: last.suitKey || null,
+          lostColor: last.suitKey ? (isRed(last.suitKey) ? 'rouge' : 'noir') : null
+        };
+      } else {
+        rattrapage = emptyRattrapage();
+      }
+    } else {
+      rattrapage = emptyRattrapage();
+    }
+  }
+  saveRattrapage(rattrapage);
+  updateRegimeDisplay();
+}
+let SYNC_SKIP_RATTRAPAGE = false;
 
 // ── RATTRAPAGE : si un ALGO perd, on le réutilise jusqu'à 3 fois, puis retour au routage normal ──
 const RATTRAPAGE_KEY = 'orgbacc_rattrapage_v1';
@@ -1476,26 +1560,16 @@ function runEngine(num, p1Cards, p2Cards, nextNum){
 //  CALCUL PRINCIPAL — RÉVÉLATION (routage ALGO1/ALGO2, cible fixe P1)
 // ══════════════════════════════════════════════════════
 function runCalc(raw){
-  const {num,p1,p2}=parseGame(raw);
+  // UNANIME : resync régime + fmtInv + rattrapage depuis Telegram AVANT tout calcul
+  syncUnanimousStateFromTelegram(raw);
 
-  // ── Détection RÉVÉLATION automatique : 3 cartes P1 ET 3 cartes P2 (format 3-3) ──
-  // Le régime se met à jour tout seul — pas besoin de saisie manuelle
+  const {num,p1,p2}=parseGame(raw);
   const isRevelationGame = (p1.length===3 && p2.length===3);
   const regimeBefore = { ...regime };
-  if(isRevelationGame){
-    regime.revelationNum = num;
-    regime.revelationParity = (num % 2 === 0) ? 'PAIR' : 'IMPAIR';
-    regime.source = `#N${num} (détectée automatiquement, format 3-3)`;
-    saveRegime();
-  }
-
-  // Régime inversion format OPT1/2/3 (3-3 / 2-3 / 2-2)
-  applyFormatInversionFromGame(p1, p2, num);
-
 
   const nextNum=num+1;
   const nextParity = (nextNum % 2 === 0) ? 'PAIR' : 'IMPAIR';
-  // Règle de relais : parité(prochain N°) === parité(dernière révélation) → ALGO1, sinon ALGO2
+  // Règle de relais : parité(prochain N°) === parité(dernière révélation TG) → ALGO1, sinon ALGO2
   let baseAlgo = (nextParity === regime.revelationParity) ? 'ALGO1' : 'ALGO2';
 
   // ── Bascule ALGO selon les 2 derniers chiffres du n° prédit ──
@@ -2186,10 +2260,11 @@ function renderTotalResult(r){
 // Ancien code prédisait OUI/NON ; ici on inverse systématiquement le résultat final.
 // Prédit le PROCHAIN jeu (N+1).
 function runParityAllInvCalc(raw){
+  // UNANIME : même état Telegram que OPT1
+  syncUnanimousStateFromTelegram(raw);
+
   const {num,p1,p2}=parseGame(raw);
   if(!p1.length||!p2.length) throw new Error('Cartes P1/P2 introuvables');
-
-  applyFormatInversionFromGame(p1, p2, num);
 
   const valueP1=getCardValueParity(p1[0].val);
   const valueP2=getCardValueParity(p2[0].val);
@@ -2570,6 +2645,7 @@ async function demarrerLive(silent){
     const startIdx = Math.max(1, n-30);
     let validCount=0, invalidCount=0, skipped=0;
     const rebuilt = [];
+    SYNC_SKIP_RATTRAPAGE = true; // seed pur sans rattrapage local
 
     for(let i=startIdx;i<n;i++){
       const prev = telegramHistoryCache[i-1];
@@ -2624,11 +2700,14 @@ async function demarrerLive(silent){
       }catch(e){}
     }
 
+    SYNC_SKIP_RATTRAPAGE = false;
     // Garde les entrées "en attente" du jeu courant non encore finalisé (hors fenêtre rebuild)
     const prevList = loadHistory().filter(e=>e.status===null && !rebuilt.some(r=>r.gameNum===e.gameNum && histModeKey(r.algoUsed)===histModeKey(e.algoUsed)));
     const merged = rebuilt.concat(prevList).sort((a,b)=>b.gameNum-a.gameNum);
     saveHistory(merged);
     renderHistory();
+    // Resync rattrapage réel après reconstruction
+    syncUnanimousStateFromTelegram(null);
 
     const revelInfo = lastRevel != null
       ? ` · Révélation auto #N${lastRevel} (${regime.revelationParity}) → routage ALGO actif`
@@ -2641,6 +2720,7 @@ async function demarrerLive(silent){
   }catch(e){
     if(statusBox) statusBox.textContent = '✕ Sync : '+e.message;
   }finally{
+    SYNC_SKIP_RATTRAPAGE = false;
     if(btn){
       btn.disabled = false;
       setPermanentLiveUI(typeof permanentLiveOn !== 'undefined' ? permanentLiveOn : true);
@@ -2663,6 +2743,22 @@ async function fetchLatestTelegramGame(silent=false){
     if(!data || !data.normalized) throw new Error('Aucune donnée exploitable trouvée');
     liveLastMessageId = data.message_id;
     setLiveSource(data);
+
+    // Enrichir le cache Telegram (source unanime) avec le jeu courant
+    if(data.game_number != null){
+      const idx = telegramHistoryCache.findIndex(g => g.game_number === data.game_number);
+      const entry = {
+        game_number: data.game_number,
+        normalized: data.normalized,
+        raw_text: data.raw_text || data.normalized,
+        message_id: data.message_id
+      };
+      if(idx >= 0) telegramHistoryCache[idx] = entry;
+      else {
+        telegramHistoryCache.push(entry);
+        telegramHistoryCache.sort((a,b)=>a.game_number-b.game_number);
+      }
+    }
 
     const rawFull = data.raw_text || data.normalized;
     const readiness = checkGameReadiness(rawFull);

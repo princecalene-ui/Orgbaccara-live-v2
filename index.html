@@ -384,7 +384,7 @@
     <h1>ORG BACC — RELAIS ALGO1 / ALGO2</h1>
     <span class="suit-deco">♣️ ♦️</span>
   </div>
-  <div class="subtitle">Fusion pilotée par les jeux RÉVÉLATION · Pred pure / universelle (sans rattrapage)</div>
+  <div class="subtitle">Pred PURE / UNIVERSELLE · même jeu → même résultat partout · sans état local</div>
   <div class="author">AUTEUR : X_Code</div>
 </header>
 
@@ -1947,41 +1947,13 @@ function getMapByKey(key){
 }
 
 function shouldInvertOpt23(){
-  if(fmtInv.oneShotNext){
-    const invert = !fmtInv.globalOn;
-    return { invert, reason: fmtInv.globalOn
-      ? '2-2 one-shot : annulation temporaire (pas d\'inv ce jeu)'
-      : '2-2 one-shot : inversion forcée ce jeu' };
-  }
-  if(fmtInv.globalOn){
-    return { invert: true, reason: 'Inversion globale active' };
-  }
-  return { invert: false, reason: 'Pas d\'inversion format' };
+  // INV FORMAT OFF — pred pure / universelle
+  return { invert: false, reason: 'INV FORMAT OFF · pred pure' };
 }
 
 function shouldInvertOpt1Suit(suit){
-  if(!suit) return { invert:false, result:suit, map:null, reason:'pas de couleur' };
-
-  if(fmtInv.oneShotNext){
-    if(fmtInv.globalOn){
-      return { invert:false, result:suit, map:null, reason:'2-2 one-shot : annule inv globale (brut ce jeu)' };
-    }
-    // one-shot active : map selon le 2-2 déclencheur (parité stockée dans activeMap one-shot)
-    // On utilise lastTriggerNum si 2-2, sinon parité courante via activeMap key
-    const key = fmtInv._oneShotMap || (fmtInv.lastTriggerNum!=null && (fmtInv.lastTriggerNum%2===1) ? '22_odd' : '22_even');
-    const m = getMapByKey(key) || MAP_22_ODD;
-    const result = m[suit] || suit;
-    return { invert: result!==suit, result, map:key, reason:`2-2 one-shot → ${SUIT_EMOJI[suit]}→${SUIT_EMOJI[result]}` };
-  }
-
-  if(fmtInv.globalOn){
-    const key = fmtInv.activeMap || '33';
-    const m = getMapByKey(key) || MAP_33;
-    const result = m[suit] || suit;
-    return { invert: result!==suit, result, map:key, reason:`Inv globale (${key}) → ${SUIT_EMOJI[suit]}→${SUIT_EMOJI[result]}` };
-  }
-
-  return { invert:false, result:suit, map:null, reason:'Pas d\'inversion format' };
+  // INV FORMAT OFF — pred pure / universelle (même entrée → même couleur partout)
+  return { invert:false, result:suit, map:null, reason:'INV FORMAT OFF · pred pure' };
 }
 
 function consumeOneShotIfAny(){
@@ -2707,22 +2679,37 @@ async function fetchLatestTelegramGame(silent=false){
     }
 
     document.getElementById('game-input').value = data.normalized;
-    applyRevelationFromGameRaw(data.normalized || data.raw_text, `#N${data.game_number} (auto)`);
     const isNewUsable = liveLastUsableGameNum !== data.game_number;
-    const revelTag = regime.revelationNum != null ? ` · régime #N${regime.revelationNum}` : '';
     const why = readiness.reason === 'p1-3-done' ? '3ᵉ carte reçue' : 'main P1 finale (2 cartes)';
-    // Main P1 finalisée → confirm + pred ENCHAÎNÉS (immédiat)
-    // Ne marquer comme traité QU'APRÈS un calcul réussi (sinon OPT1 restait bloqué)
+    // Main P1 finalisée → resync TG complet puis pred PURE (unanime)
     if(isNewUsable || !silent){
       if(!selectedMode) selectedMode = 1;
+      // Resync historique Telegram AVANT le calcul → même état sur tous les téléphones
+      try{
+        const hRes = await fetch('/api/history?limit=150&channel=statistika_baccara');
+        const hData = await hRes.json();
+        if(hData && hData.games && hData.games.length){
+          telegramHistoryCache = hData.games.slice().sort((a,b)=>a.game_number-b.game_number);
+        }
+      }catch(e){}
+      // Enrichir avec le jeu courant
+      if(data.game_number != null){
+        const idx = telegramHistoryCache.findIndex(g => g.game_number === data.game_number);
+        const entry = { game_number: data.game_number, normalized: data.normalized, raw_text: data.raw_text || data.normalized };
+        if(idx >= 0) telegramHistoryCache[idx] = entry;
+        else { telegramHistoryCache.push(entry); telegramHistoryCache.sort((a,b)=>a.game_number-b.game_number); }
+      }
+      syncUnanimousStateFromTelegram(data.normalized);
+      const revelTag = regime.revelationNum != null ? ` · régime #N${regime.revelationNum}` : '';
       const calcOk = calculate(true);
       if(calcOk){
         liveLastUsableGameNum = data.game_number;
-        setLiveStatus(`⚡ #N${data.game_number} · ${why} → confirm+pred AUTO${revelTag}`);
+        setLiveStatus(`⚡ #N${data.game_number} · ${why} → pred PURE AUTO${revelTag}`);
       } else {
-        setLiveStatus(`⏳ #N${data.game_number} · ${why} — recalcul en cours…${revelTag}`);
+        setLiveStatus(`⏳ #N${data.game_number} · ${why} — recalcul…${revelTag}`);
       }
     } else {
+      const revelTag = regime.revelationNum != null ? ` · régime #N${regime.revelationNum}` : '';
       setLiveStatus(`⚡ #N${data.game_number} · déjà traité${revelTag}`);
     }
   }catch(err){

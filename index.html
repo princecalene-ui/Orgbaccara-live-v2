@@ -475,7 +475,7 @@
 
   <div class="history-card" id="history-card">
     <div class="history-head">
-      <span class="history-title">◆ HISTORIQUE DES PRÉDICTIONS ◆</span>
+      <span class="history-title">◆ HISTORIQUE UNANIME (Telegram · auto) ◆</span>
       <button class="btn-clear-hist" id="btn-clear-hist" onclick="clearHistory()">Effacer</button>
     </div>
     <div class="history-stats" id="history-stats"></div>
@@ -1021,9 +1021,18 @@ function resetRegime(){
 }
 
 // ══════════════════════════════════════════════════════
-//  HISTORIQUE DES PRÉDICTIONS (persisté localStorage) — cible toujours P1
+//  HISTORIQUE UNANIME (source Telegram · auto uniquement · pas d'action manuelle)
+//  OPT1 + OPT4 : même logique partout — résolution = résultat réel du canal
 // ══════════════════════════════════════════════════════
-const HIST_KEY = 'orgbacc_history_revelation_v1';
+const HIST_KEY = 'orgbacc_history_unanimous_v2';
+
+function histModeKey(algoUsed){
+  const a = String(algoUsed||'');
+  if(a.indexOf('ALLINV')>=0 || a.indexOf('PARITÉ')>=0) return 'OPT4';
+  if(a.indexOf('3CARTES')>=0) return 'OPT2';
+  if(a.indexOf('TOTAL')>=0) return 'OPT3';
+  return 'OPT1';
+}
 
 function loadHistory(){
   try{
@@ -1035,14 +1044,14 @@ function saveHistory(list){
   try{ localStorage.setItem(HIST_KEY, JSON.stringify(list)); }catch(e){}
 }
 
-// Une seule entrée par numéro de jeu prédit : si elle existe déjà et est encore
-// en attente, on la met à jour (pas de doublon) ; si elle est déjà résolue, on n'y touche pas ;
-// sinon on la crée.
+// Une entrée par (gameNum + mode OPT1/OPT4) — statut uniquement auto (Telegram)
 function upsertHistoryEntry(gameNum, suitKey, algoUsed, isRattrapage){
   const list = loadHistory();
-  const existing = list.find(e=>e.gameNum===gameNum);
+  const mode = histModeKey(algoUsed);
+  const existing = list.find(e=>e.gameNum===gameNum && histModeKey(e.algoUsed)===mode);
 
   if(existing){
+    // Ne jamais écraser un résultat déjà auto-résolu (unanime)
     if(existing.status===null){
       existing.suitKey = suitKey;
       existing.algoUsed = algoUsed;
@@ -1055,33 +1064,23 @@ function upsertHistoryEntry(gameNum, suitKey, algoUsed, isRattrapage){
 
   list.unshift({
     id: Date.now() + '-' + Math.random().toString(36).slice(2,7),
-    gameNum, suitKey, side:'P1', algoUsed,
-    status: null, // null=en attente | 'valid' | 'invalid'
+    gameNum, suitKey, side:'P1', algoUsed, mode,
+    status: null, // null=en attente | 'valid' | 'invalid' — UNIQUEMENT auto
     rattrapage: !!isRattrapage,
+    autoResolved: false,
     ts: new Date().toISOString()
   });
   saveHistory(list);
   renderHistory();
 }
 
+// Pas d'action manuelle : les ✓/✕ locaux sont désactivés (résultats unanimes Telegram)
 function setHistoryStatus(id, status){
-  const list = loadHistory();
-  const entry = list.find(e=>e.id===id);
-  if(!entry) return;
-  const nextStatus = (entry.status === status) ? null : status; // re-cliquer annule
-  entry.status = nextStatus;
-  saveHistory(list);
-  renderHistory();
-  // Rattrapage : perte → même ALGO + inv couleur (max 1) ; gain ou perte du rattrapage → reset à 0
-  if(nextStatus === 'invalid' && entry.algoUsed){
-    onPredictionLost(entry.algoUsed, entry.suitKey, !!entry.rattrapage);
-  } else if(nextStatus === 'valid' && rattrapage.active){
-    endRattrapage();
-  }
+  return; // no-op — historique non actionnable
 }
 
 function clearHistory(){
-  if(!confirm('Effacer tout l\'historique des prédictions ?')) return;
+  if(!confirm('Effacer l\'historique local ? (il sera reconstruit depuis Telegram au prochain LIVE)')) return;
   saveHistory([]);
   renderHistory();
 }
@@ -1271,11 +1270,11 @@ function renderHistory(){
     if(isSuit){
       displayVal = SUIT_EMOJI[e.suitKey];
       color = isRed(e.suitKey) ? '#cc4444' : 'var(--ivory)';
-      typeTag = 'P1';
+      typeTag = 'OPT1 · P1';
     } else if(isOuiNon){
       displayVal = e.suitKey;
       color = e.suitKey==='OUI' ? 'var(--green-ok)' : 'var(--red)';
-      typeTag = (e.algoUsed&&e.algoUsed.indexOf('ALLINV')>=0) ? 'PAIR ALL-INV' : ((e.algoUsed&&e.algoUsed.indexOf('3CARTES')>=0) ? '3 CARTES' : 'OUI/NON');
+      typeTag = (e.algoUsed&&e.algoUsed.indexOf('ALLINV')>=0) ? 'OPT4 · PAIR' : 'OUI/NON';
     } else if(isTotal){
       displayVal = e.suitKey;
       color = String(e.suitKey).startsWith('+') ? 'var(--green-ok)' : 'var(--red)';
@@ -1285,15 +1284,17 @@ function renderHistory(){
       color = 'var(--ivory)';
       typeTag = e.side || 'P1';
     }
+    const statusIcon = e.status==='valid' ? '<span style="color:var(--green-ok);font-weight:700">✓</span>'
+      : (e.status==='invalid' ? '<span style="color:var(--red);font-weight:700">✕</span>'
+      : '<span style="color:var(--ivory-dim)">…</span>');
     return `
     <div class="history-item ${statusClass}">
       <span class="hist-num">#N${e.gameNum}</span>
       <span class="hist-suit" style="color:${color};font-size:${isSuit?'1rem':'.78rem'};min-width:${isSuit?'22px':'52px'};font-weight:700">${displayVal}</span>
-      <span class="hist-label">${typeTag}${e.algoUsed?` <span class="hist-tag">[${e.algoUsed}]</span>`:''}${e.rattrapage?` <span class="hist-tag" style="color:#ffbf80">⏱ RATTR</span>`:''}${e.source==='live-seed'?` <span class="hist-tag hist-live">🔴 LIVE</span>`:(e.autoResolved?` <span class="hist-tag">auto</span>`:'')}</span>
+      <span class="hist-label">${typeTag}${e.algoUsed?` <span class="hist-tag">[${e.algoUsed}]</span>`:''}${e.rattrapage?` <span class="hist-tag" style="color:#ffbf80">⏱ RATTR</span>`:''}${e.autoResolved||e.source==='live-seed'?` <span class="hist-tag">auto TG</span>`:' <span class="hist-tag">en attente</span>'}</span>
       <div class="hist-actions">
+        <span title="Résultat unanime (Telegram)" style="min-width:28px;text-align:center">${statusIcon}</span>
         <button class="hist-btn copy-btn" title="Copier" onclick="copyHistoryEntry('${e.id}')">⧉</button>
-        <button class="hist-btn valid-btn ${e.status==='valid'?'active':''}" title="Validée" onclick="setHistoryStatus('${e.id}','valid')">✓</button>
-        <button class="hist-btn invalid-btn ${e.status==='invalid'?'active':''}" title="Non passée" onclick="setHistoryStatus('${e.id}','invalid')">✕</button>
       </div>
     </div>`;
   }).join('');
@@ -2564,45 +2565,69 @@ async function demarrerLive(silent){
     statusBox.textContent = `${telegramHistoryCache.length} jeux chargés · calcul des statistiques globales…`;
     globalBacktestStats = computeGlobalBacktestStats(telegramHistoryCache, 50);
 
+    // Reconstruction UNANIME depuis Telegram (OPT1 + OPT4) — identique sur tous les appareils
     const n = telegramHistoryCache.length;
-    const startIdx = Math.max(1, n-15);
+    const startIdx = Math.max(1, n-30);
     let validCount=0, invalidCount=0, skipped=0;
-    const list = loadHistory();
+    const rebuilt = [];
 
     for(let i=startIdx;i<n;i++){
       const prev = telegramHistoryCache[i-1];
       const curr = telegramHistoryCache[i];
       const readiness = checkGameReadiness(curr.raw_text || curr.normalized);
       if(!readiness.usable){ skipped++; continue; }
-      let pred;
-      try{ pred = deterministicPredict(prev.normalized || prev.raw_text); }catch(e){ skipped++; continue; }
-      if(pred.nextNum !== curr.game_number){ skipped++; continue; }
 
-      let entry = list.find(e=>e.gameNum===curr.game_number);
-      if(entry){
-        if(entry.status===null){
-          let actualSuits;
-          try{ actualSuits = actualOutcomeSuits(curr); }catch(e){ skipped++; continue; }
-          if(!actualSuits){ skipped++; continue; }
-          entry.status = actualSuits.has(entry.suitKey) ? 'valid' : 'invalid';
-          entry.autoResolved = true;
-          entry.status==='valid' ? validCount++ : invalidCount++;
+      let currParsed=null;
+      try{ currParsed = parseGame(curr.normalized || curr.raw_text); }catch(e){ skipped++; continue; }
+      if(!currParsed || !currParsed.p1 || !currParsed.p1.length){ skipped++; continue; }
+
+      // ── OPT1 enseigne (déterministe) ──
+      try{
+        const pred = deterministicPredict(prev.normalized || prev.raw_text);
+        if(pred.nextNum === curr.game_number){
+          const actualSuits = new Set(currParsed.p1.map(c=>c.suit));
+          const st = actualSuits.has(pred.suit) ? 'valid' : 'invalid';
+          st==='valid' ? validCount++ : invalidCount++;
+          rebuilt.push({
+            id: 'tg1-'+curr.game_number,
+            gameNum: curr.game_number, suitKey: pred.suit, side:'P1',
+            algoUsed: 'ALGO-RELAIS', mode:'OPT1',
+            status: st, autoResolved:true, source:'live-seed',
+            ts: new Date().toISOString()
+          });
         }
-      } else {
-        let actualSuits;
-        try{ actualSuits = actualOutcomeSuits(curr); }catch(e){ skipped++; continue; }
-        if(!actualSuits){ skipped++; continue; }
-        const st = actualSuits.has(pred.suit) ? 'valid' : 'invalid';
-        st==='valid' ? validCount++ : invalidCount++;
-        list.unshift({
-          id: Date.now()+'-'+Math.random().toString(36).slice(2,7),
-          gameNum: curr.game_number, suitKey: pred.suit, side:'P1',
-          status:st, autoResolved:true, source:'live-seed',
-          ts:new Date().toISOString()
-        });
-      }
+      }catch(e){}
+
+      // ── OPT4 pair ALL-INV (déterministe) ──
+      try{
+        const r4 = runParityAllInvCalc(prev.normalized || prev.raw_text);
+        if(r4.nextNum === curr.game_number){
+          let sum = 0;
+          for(const c of currParsed.p1){
+            const v = c.val;
+            if(v==='A') sum += 1;
+            else if(v==='10'||v==='J'||v==='Q'||v==='K') sum += 0;
+            else sum += (parseInt(v,10)||0);
+          }
+          const tot = sum % 10;
+          const isPair = (tot % 2 === 0);
+          const st = (r4.prediction==='OUI' && isPair) || (r4.prediction==='NON' && !isPair) ? 'valid' : 'invalid';
+          rebuilt.push({
+            id: 'tg4-'+curr.game_number,
+            gameNum: curr.game_number, suitKey: r4.prediction, side:'P1',
+            algoUsed: 'PARITÉ-ALLINV', mode:'OPT4',
+            status: st, autoResolved:true, source:'live-seed',
+            actualTotal: tot,
+            ts: new Date().toISOString()
+          });
+        }
+      }catch(e){}
     }
-    saveHistory(list);
+
+    // Garde les entrées "en attente" du jeu courant non encore finalisé (hors fenêtre rebuild)
+    const prevList = loadHistory().filter(e=>e.status===null && !rebuilt.some(r=>r.gameNum===e.gameNum && histModeKey(r.algoUsed)===histModeKey(e.algoUsed)));
+    const merged = rebuilt.concat(prevList).sort((a,b)=>b.gameNum-a.gameNum);
+    saveHistory(merged);
     renderHistory();
 
     const revelInfo = lastRevel != null

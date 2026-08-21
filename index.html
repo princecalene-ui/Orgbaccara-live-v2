@@ -384,7 +384,7 @@
     <h1>ORG BACC — RELAIS ALGO1 / ALGO2</h1>
     <span class="suit-deco">♣️ ♦️</span>
   </div>
-  <div class="subtitle">Fusion pilotée par les jeux RÉVÉLATION · Mémoire persistante + Rattrapage ×1</div>
+  <div class="subtitle">Fusion pilotée par les jeux RÉVÉLATION · Pred pure / universelle (sans rattrapage)</div>
   <div class="author">AUTEUR : X_Code</div>
 </header>
 
@@ -906,33 +906,9 @@ function syncUnanimousStateFromTelegram(currentRaw){
     }catch(e){}
   }
 
-  // 4) Rattrapage dérivé de l'historique OPT1 unanime (sauf en mode seed/backtest)
-  if(typeof SYNC_SKIP_RATTRAPAGE !== 'undefined' && SYNC_SKIP_RATTRAPAGE){
-    rattrapage = emptyRattrapage();
-  } else {
-    const opt1 = loadHistory()
-      .filter(e => histModeKey(e.algoUsed) === 'OPT1' && (e.status === 'valid' || e.status === 'invalid'))
-      .sort((a,b) => a.gameNum - b.gameNum);
-    if(opt1.length){
-      const last = opt1[opt1.length - 1];
-      // Perte hors-rattrapage → 1 rattrapage pour le prochain ; sinon reset
-      if(last.status === 'invalid' && !last.rattrapage){
-        rattrapage = {
-          active: true,
-          algo: last.algoUsed || 'ALGO1',
-          remaining: RATTRAPAGE_MAX,
-          startedAt: last.ts || new Date().toISOString(),
-          lostSuit: last.suitKey || null,
-          lostColor: last.suitKey ? (isRed(last.suitKey) ? 'rouge' : 'noir') : null
-        };
-      } else {
-        rattrapage = emptyRattrapage();
-      }
-    } else {
-      rattrapage = emptyRattrapage();
-    }
-  }
-  saveRattrapage(rattrapage);
+  // 4) RATTRAPAGE OFF — pred pure / universelle (aucun effet d'un jeu perdant)
+  rattrapage = emptyRattrapage();
+  try{ saveRattrapage(rattrapage); }catch(e){}
   updateRegimeDisplay();
 }
 let SYNC_SKIP_RATTRAPAGE = false;
@@ -998,29 +974,9 @@ function applyRattrapageInv(predSuit, lostColor, lostSuit){
   };
 }
 
-// Déclenché à chaque perte :
-// - 1ère perte (pred normale) → démarre cycle max 1 rattrapage
-// - perte du rattrapage → reset immédiat à 0 (pas de 2e rattrapage)
-// - gain du rattrapage → reset via endRattrapage()
+// RATTRAPAGE DÉSACTIVÉ — pred pure / universelle (aucun effet d'une perte)
 function onPredictionLost(algo, suitKey, wasRattrapageEntry){
-  if(!algo) return;
-  const color = suitKey ? (isRed(suitKey) ? 'rouge' : 'noir') : null;
-  // Si c'était déjà un rattrapage (gagnant ou perdant) → toujours reset à 0
-  if(wasRattrapageEntry){
-    rattrapage = emptyRattrapage();
-    saveRattrapage(rattrapage);
-    updateRegimeDisplay();
-    return;
-  }
-  // Nouvelle série de rattrapage (max 1) — uniquement après une perte hors rattrapage
-  rattrapage = {
-    active: true,
-    algo: algo,
-    remaining: RATTRAPAGE_MAX,
-    startedAt: new Date().toISOString(),
-    lostSuit: suitKey || null,
-    lostColor: color
-  };
+  rattrapage = emptyRattrapage();
   saveRattrapage(rattrapage);
   updateRegimeDisplay();
 }
@@ -1048,26 +1004,11 @@ function updateRegimeDisplay(){
   if(!el) return;
   const p1parity = regime.revelationParity;
   const p2parity = p1parity==='PAIR' ? 'IMPAIR' : 'PAIR';
-  let rattrapageHtml = '';
-  if(rattrapage.active && rattrapage.algo){
-    const refSuit = rattrapage.lostSuit ? (SUIT_EMOJI[rattrapage.lostSuit]||rattrapage.lostSuit) : '—';
-    const refCol = rattrapage.lostColor === 'rouge' ? 'ROUGE' : (rattrapage.lostColor === 'noir' ? 'NOIR' : '?');
-    rattrapageHtml = `
-    <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #7a6028">
-      <span class="regime-label" style="color:#ffbf80">⏱ RATTRAPAGE ACTIF</span>
-      <span class="regime-val" style="color:#ffbf80">${rattrapage.algo} · ${rattrapage.remaining}/${RATTRAPAGE_MAX} restant(s)</span>
-    </div>
-    <div class="regime-row">
-      <span class="regime-label" style="color:#ffbf80">Réf. jeu perdu</span>
-      <span class="regime-val" style="color:#ffbf80">${refSuit} (${refCol}) · inv rouge→noir · ♠️=♠️→♣️</span>
-    </div>`;
-  } else {
-    rattrapageHtml = `
+  const rattrapageHtml = `
     <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #2a1a1a">
       <span class="regime-label">Rattrapage</span>
-      <span class="regime-val" style="color:var(--ivory-dim)">Inactif (max ${RATTRAPAGE_MAX} · inv selon couleur perdue)</span>
+      <span class="regime-val" style="color:var(--lime-dim)">OFF · pred pure / universelle</span>
     </div>`;
-  }
   const fmtOn = (typeof fmtInv !== 'undefined' && fmtInv.globalOn);
   const fmtOne = (typeof fmtInv !== 'undefined' && fmtInv.oneShotNext);
   const fmtSrc = (typeof fmtInv !== 'undefined' && fmtInv.source) ? fmtInv.source : '—';
@@ -1226,12 +1167,8 @@ function resolvePendingHistory(gameNum, p1Cards, p2Cards, rawText){
     if(ok === null) continue;
     entry.status = ok ? 'valid' : 'invalid';
     entry.autoResolved = true;
+    entry.rattrapage = false; // plus de rattrapage — pred pure
     lastEntry = entry;
-    if(entry.status === 'invalid' && entry.algoUsed && SUIT_EMOJI[sk]){
-      onPredictionLost(entry.algoUsed, entry.suitKey, !!entry.rattrapage);
-    } else if(entry.status === 'valid' && rattrapage.active && SUIT_EMOJI[sk]){
-      endRattrapage();
-    }
   }
   saveHistory(list);
   renderHistory();
@@ -1604,11 +1541,11 @@ function runCalc(raw){
       : `2 derniers chiffres ${String(lastTwo).padStart(2,'0')} (${digitZone}) → NORMAL (pas de bascule)`
   };
 
-  // RATTRAPAGE : si actif, on force le même ALGO qui a perdu (max 1 tentative) — prioritaire sur la bascule
+  // RATTRAPAGE OFF — pred pure / universelle (identique partout, indépendante des pertes)
   const normalAlgo = baseAlgo;
-  const inRattrapage = rattrapage.active && rattrapage.algo && rattrapage.remaining > 0;
-  const algoUsed = inRattrapage ? rattrapage.algo : normalAlgo;
-  const rattrapageForced = inRattrapage;
+  const inRattrapage = false;
+  const algoUsed = normalAlgo;
+  const rattrapageForced = false;
 
   const nextH=Math.floor((nextNum-1)/60)%24;
   const nextM=(nextNum-1)%60;
@@ -2849,6 +2786,9 @@ window.addEventListener('load', ()=>{
   const unlocked = requireUnlock();
   // OPT1 actif par défaut dès le chargement (LIVE auto sans clic)
   selectMode(selectedMode || 1, true);
+  // Purge rattrapage local (pred pure / universelle)
+  rattrapage = emptyRattrapage();
+  saveRattrapage(rattrapage);
   updateRegimeDisplay();
   renderHistory();
   setTimeout(()=>{ startPermanentLive(); }, 200);

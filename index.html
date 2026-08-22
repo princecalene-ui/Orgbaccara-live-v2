@@ -1134,13 +1134,41 @@ function shouldApplyAllInv(nextNum){
   }catch(e){ return false; }
 }
 
-// Rattrapage max 1 (semaine) — ANNULÉ samedi/dimanche — série Telegram uniquement
+// Rattrapage max 1 (semaine) — ANNULÉ samedi/dimanche
+// Exception WE : #N1080–1100 → rattrapage RÉACTIVÉ avec max = RATTRAPAGE_MAX+1
 function shouldApplyRattrapage(nextNum){
   if(typeof SYNC_SKIP_RATTRAPAGE !== 'undefined' && SYNC_SKIP_RATTRAPAGE) return null;
   if(PURE_CALC_MODE) return null;
-  if(isWeekendDay()) return null; // week-end : rattrapage annulé
+  const weBoost = isWeekendDay() && nextNum >= 1080 && nextNum <= 1100;
+  if(isWeekendDay() && !weBoost) return null; // week-end hors 1080–1100 : annulé
   try{
-    return _flagsFromSeries(buildTelegramSimSeries(), nextNum).rattr;
+    const series = buildTelegramSimSeries();
+    if(!weBoost){
+      return _flagsFromSeries(series, nextNum).rattr;
+    }
+    // WE 1080–1100 : même logique pertes TG, plafond max+1
+    const maxW = RATTRAPAGE_MAX + 1;
+    const resolved = series.filter(e => e.status === 'valid' || e.status === 'invalid');
+    if(!resolved.length) return null;
+    const last = resolved[resolved.length - 1];
+    if(last.gameNum !== nextNum - 1) return null;
+    if(last.status !== 'invalid') return null;
+    let consR = 0;
+    for(let i = resolved.length - 1; i >= 0; i--){
+      if(resolved[i].rattrapage && resolved[i].status === 'invalid') consR++;
+      else if(resolved[i].rattrapage && resolved[i].status === 'valid') return null;
+      else break;
+    }
+    if(last.rattrapage && consR >= maxW) return null;
+    return {
+      active: true,
+      algo: last.algoUsed || 'ALGO1',
+      lostSuit: last.suitKey || null,
+      lostColor: last.suitKey ? (isRed(last.suitKey) ? 'rouge' : 'noir') : null,
+      remaining: last.rattrapage ? (maxW - consR) : maxW,
+      weBoost: true,
+      max: maxW
+    };
   }catch(e){ return null; }
 }
 
@@ -1179,7 +1207,7 @@ function updateRegimeDisplay(){
     rattrapageHtml = `
     <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #7a6028">
       <span class="regime-label" style="color:#ffbf80">📅 WEEK-END</span>
-      <span class="regime-val" style="color:#ffbf80">RATTR+ALL.INV annulés · INV selon AV+DER digits</span>
+      <span class="regime-val" style="color:#ffbf80">ALL.INV annulé · RATTR annulé sauf #N1080–1100 (max ${RATTRAPAGE_MAX + 1})</span>
     </div>`;
   } else {
     try{

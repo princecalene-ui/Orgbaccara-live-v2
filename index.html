@@ -2074,8 +2074,37 @@ function runCalc(raw){
     };
   }
 
+  // ── POST-PRED WEEK-END TRANCHES 991–1500 (sam/dim) ──
+  // Blocs de 10 depuis 991 : phase%4 → 0:♥️↔♣️/♠️↔♦️ · 1:rien · 2:♥️↔♠️/♣️↔♦️ · 3:rien
+  // (protocole continu jusqu'à 1500 — 1200–1399 / 1400–1500 suivent la même cadence)
+  let weekendRangeInv = null;
+  if(isWeekendDay() && nextNum >= 991 && nextNum <= 1500){
+    const block = Math.floor((nextNum - 991) / 10);
+    const phase = block % 4;
+    if(phase === 0 || phase === 2){
+      const mapA = {'♥️':'♣️','♣️':'♥️','♠️':'♦️','♦️':'♠️'}; // ♥️↔♣️ / ♠️↔♦️
+      const mapB = {'♥️':'♠️','♠️':'♥️','♣️':'♦️','♦️':'♣️'}; // ♥️↔♠️ / ♣️↔♦️
+      const useA = (phase === 0);
+      const rMap = useA ? mapA : mapB;
+      const mapLabel = useA ? '♥️↔♣️ / ♠️↔♦️' : '♥️↔♠️ / ♣️↔♦️';
+      const before = finalSuit;
+      finalSuit = rMap[finalSuit] || finalSuit;
+      const rangeLo = 991 + block * 10;
+      const rangeHi = Math.min(rangeLo + 9, 1500);
+      weekendRangeInv = {
+        active: true,
+        phase,
+        block,
+        range: `${rangeLo}–${rangeHi}`,
+        before,
+        result: finalSuit,
+        label: `POST-PRED WE ${rangeLo}–${rangeHi} · phase ${phase} → ${mapLabel} · ${SUIT_EMOJI[before]}→${SUIT_EMOJI[finalSuit]}`
+      };
+    }
+  }
+
   return {num,p1,p2,nextNum,nextH,nextM,avantDernier,dernierDigit,sel,subEngine,algoResult,finalInv,finalSuit,
-          hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,formatSuitInv,globalInvNote,allInvInfo,ultimateBigInv,ultimateHourInv,weekendGlobalInv,
+          hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,formatSuitInv,globalInvNote,allInvInfo,ultimateBigInv,ultimateHourInv,weekendGlobalInv,weekendRangeInv,
           isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime},
           rattrapageForced,rattrapageSnapshot,normalAlgo,digitAlgoRule,fmtInvSnapshot:{ globalOn:false }};
 }
@@ -2734,6 +2763,9 @@ function renderResult(r){
       : []),
     ...(r.weekendGlobalInv && r.weekendGlobalInv.active
       ? [`<div class="badge badge-hyper">📅 INV GLOBALE WEEK-END — ${r.weekendGlobalInv.label}</div>`]
+      : []),
+    ...(r.weekendRangeInv && r.weekendRangeInv.active
+      ? [`<div class="badge badge-hyper">📊 POST-PRED WE TRANCHE — ${r.weekendRangeInv.label}</div>`]
       : []),
     ...(r.formatSuitInv
       ? [`<div class="badge badge-hyper" style="opacity:.45">INV FORMAT — OFF · pred pure</div>`]

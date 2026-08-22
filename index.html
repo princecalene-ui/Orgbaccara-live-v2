@@ -1177,9 +1177,9 @@ function updateRegimeDisplay(){
   let rattrapageHtml = '';
   if(isWeekendDay()){
     rattrapageHtml = `
-    <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #2a1a1a">
-      <span class="regime-label" style="color:#888">⏱ RATTRAPAGE / ALL.INV</span>
-      <span class="regime-val" style="color:#888">ANNULÉS · week-end (sam/dim)</span>
+    <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #7a6028">
+      <span class="regime-label" style="color:#ffbf80">📅 WEEK-END</span>
+      <span class="regime-val" style="color:#ffbf80">RATTR+ALL.INV annulés · INV selon AV+DER digits</span>
     </div>`;
   } else {
     try{
@@ -2044,8 +2044,38 @@ function runCalc(raw){
     };
   }
 
+  // ── INV GLOBALE WEEK-END (sam/dim uniquement) ──
+  // AV-DERN PAIR  + dernier PAIR   → ♣️↔♠️ / ♦️↔♥️
+  // AV-DERN PAIR  + dernier IMPAIR → ♥️↔♠️ / ♦️↔♣️
+  // AV-DERN IMPAIR + dernier PAIR  → ♥️↔♠️ / ♦️↔♣️
+  // AV-DERN IMPAIR + dernier IMPAIR→ ♣️↔♠️ / ♦️↔♥️
+  // (rattrapage + ALL.INV déjà annulés le week-end)
+  let weekendGlobalInv = null;
+  if(isWeekendDay()){
+    const avPair = (avantDernier % 2 === 0);
+    const lastPair = (dernierDigit % 2 === 0);
+    const sameParity = (avPair === lastPair);
+    const weMap = sameParity
+      ? {'♣️':'♠️','♠️':'♣️','♦️':'♥️','♥️':'♦️'}
+      : {'♥️':'♠️','♠️':'♥️','♦️':'♣️','♣️':'♦️'};
+    const before = finalSuit;
+    finalSuit = weMap[finalSuit] || finalSuit;
+    const dayName = new Date().getDay() === 0 ? 'dimanche' : 'samedi';
+    const mapLabel = sameParity ? '♣️↔♠️ / ♦️↔♥️' : '♥️↔♠️ / ♦️↔♣️';
+    weekendGlobalInv = {
+      active: true,
+      day: dayName,
+      avantDernier,
+      dernierDigit,
+      sameParity,
+      before,
+      result: finalSuit,
+      label: `INV GLOBALE WEEK-END · ${dayName} · AV=${avantDernier}(${avPair?'PAIR':'IMPAIR'}) · DER=${dernierDigit}(${lastPair?'PAIR':'IMPAIR'}) → ${mapLabel} · ${SUIT_EMOJI[before]}→${SUIT_EMOJI[finalSuit]}`
+    };
+  }
+
   return {num,p1,p2,nextNum,nextH,nextM,avantDernier,dernierDigit,sel,subEngine,algoResult,finalInv,finalSuit,
-          hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,formatSuitInv,globalInvNote,allInvInfo,ultimateBigInv,ultimateHourInv,
+          hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,formatSuitInv,globalInvNote,allInvInfo,ultimateBigInv,ultimateHourInv,weekendGlobalInv,
           isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime},
           rattrapageForced,rattrapageSnapshot,normalAlgo,digitAlgoRule,fmtInvSnapshot:{ globalOn:false }};
 }
@@ -2701,6 +2731,9 @@ function renderResult(r){
       : []),
     ...(r.ultimateHourInv && r.ultimateHourInv.active
       ? [`<div class="badge badge-hyper">🌙 ULTIME INV HORAIRE — ${r.ultimateHourInv.label}</div>`]
+      : []),
+    ...(r.weekendGlobalInv && r.weekendGlobalInv.active
+      ? [`<div class="badge badge-hyper">📅 INV GLOBALE WEEK-END — ${r.weekendGlobalInv.label}</div>`]
       : []),
     ...(r.formatSuitInv
       ? [`<div class="badge badge-hyper" style="opacity:.45">INV FORMAT — OFF · pred pure</div>`]

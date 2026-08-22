@@ -904,8 +904,17 @@ let SYNC_SKIP_RATTRAPAGE = false;
 
 // ── RATTRAPAGE : si un ALGO perd, on le réutilise jusqu'à 3 fois, puis retour au routage normal ──
 const RATTRAPAGE_KEY = 'orgbacc_rattrapage_v1';
-const RATTRAPAGE_MAX = 2; // max 2 rattrapages après perte puis retour à zéro
-const ALLINV_MAX = 2;     // max 2 ALL.INV après perte puis retour à zéro
+const RATTRAPAGE_MAX = 1; // max 1 rattrapage après perte (semaine) ; ANNULÉ le week-end
+const ALLINV_MAX = 2;     // max 2 ALL.INV après perte (semaine) ; ANNULÉ le week-end
+
+// Week-end = samedi (6) ou dimanche (0) — heure locale appareil
+// Rattrapage + ALL.INV après perte sont ANNULÉS ces jours-là
+function isWeekendDay(){
+  try{
+    const d = new Date().getDay();
+    return d === 0 || d === 6;
+  }catch(e){ return false; }
+}
 function emptyRattrapage(){
   return { active:false, algo:null, remaining:0, startedAt:null, lostSuit:null, lostColor:null };
 }
@@ -1115,19 +1124,21 @@ function _flagsFromSeries(series, nextNum){
   return { allInv, rattr };
 }
 
-// Max 2 ALL.INV — UNIQUEMENT depuis série Telegram (pas localStorage)
+// ALL.INV max 2 (semaine) — ANNULÉ samedi/dimanche — série Telegram uniquement
 function shouldApplyAllInv(nextNum){
   if(typeof SYNC_SKIP_RATTRAPAGE !== 'undefined' && SYNC_SKIP_RATTRAPAGE) return false;
   if(PURE_CALC_MODE) return false;
+  if(isWeekendDay()) return false; // week-end : ALL.INV annulé
   try{
     return !!_flagsFromSeries(buildTelegramSimSeries(), nextNum).allInv;
   }catch(e){ return false; }
 }
 
-// Max 2 RATTRAPAGE — UNIQUEMENT depuis série Telegram (pas localStorage)
+// Rattrapage max 1 (semaine) — ANNULÉ samedi/dimanche — série Telegram uniquement
 function shouldApplyRattrapage(nextNum){
   if(typeof SYNC_SKIP_RATTRAPAGE !== 'undefined' && SYNC_SKIP_RATTRAPAGE) return null;
   if(PURE_CALC_MODE) return null;
+  if(isWeekendDay()) return null; // week-end : rattrapage annulé
   try{
     return _flagsFromSeries(buildTelegramSimSeries(), nextNum).rattr;
   }catch(e){ return null; }
@@ -1164,32 +1175,38 @@ function updateRegimeDisplay(){
   const p1parity = regime.revelationParity;
   const p2parity = p1parity==='PAIR' ? 'IMPAIR' : 'PAIR';
   let rattrapageHtml = '';
-  const liveRattr = shouldApplyRattrapage((regime.revelationNum != null ? regime.revelationNum : 0) + 1);
-  // Affiche le prochain rattrapage potentiel via historique
-  try{
-    const opt1 = loadHistory()
-      .filter(e => histModeKey(e.algoUsed)==='OPT1' && (e.status==='valid'||e.status==='invalid'))
-      .sort((a,b)=>a.gameNum-b.gameNum);
-    const last = opt1.length ? opt1[opt1.length-1] : null;
-    if(last && last.status==='invalid' && !last.rattrapage){
-      rattrapageHtml = `
+  if(isWeekendDay()){
+    rattrapageHtml = `
+    <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #2a1a1a">
+      <span class="regime-label" style="color:#888">⏱ RATTRAPAGE / ALL.INV</span>
+      <span class="regime-val" style="color:#888">ANNULÉS · week-end (sam/dim)</span>
+    </div>`;
+  } else {
+    try{
+      const opt1 = loadHistory()
+        .filter(e => histModeKey(e.algoUsed)==='OPT1' && (e.status==='valid'||e.status==='invalid'))
+        .sort((a,b)=>a.gameNum-b.gameNum);
+      const last = opt1.length ? opt1[opt1.length-1] : null;
+      if(last && last.status==='invalid' && !last.rattrapage){
+        rattrapageHtml = `
     <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #7a6028">
       <span class="regime-label" style="color:#ffbf80">⏱ RATTRAPAGE</span>
       <span class="regime-val" style="color:#ffbf80">EN ATTENTE · max ${RATTRAPAGE_MAX} · après perte #N${last.gameNum}</span>
     </div>`;
-    } else {
+      } else {
+        rattrapageHtml = `
+    <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #2a1a1a">
+      <span class="regime-label">Rattrapage</span>
+      <span class="regime-val" style="color:var(--ivory-dim)">Inactif · max ${RATTRAPAGE_MAX} · ALL.INV max ${ALLINV_MAX}</span>
+    </div>`;
+      }
+    }catch(e){
       rattrapageHtml = `
     <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #2a1a1a">
       <span class="regime-label">Rattrapage</span>
-      <span class="regime-val" style="color:var(--ivory-dim)">Inactif · max ${RATTRAPAGE_MAX} après perte</span>
+      <span class="regime-val" style="color:var(--ivory-dim)">Inactif · max ${RATTRAPAGE_MAX} · ALL.INV max ${ALLINV_MAX}</span>
     </div>`;
     }
-  }catch(e){
-    rattrapageHtml = `
-    <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #2a1a1a">
-      <span class="regime-label">Rattrapage</span>
-      <span class="regime-val" style="color:var(--ivory-dim)">Inactif · max ${RATTRAPAGE_MAX} après perte</span>
-    </div>`;
   }
   const fmtOn = (typeof fmtInv !== 'undefined' && fmtInv.globalOn);
   const fmtOne = (typeof fmtInv !== 'undefined' && fmtInv.oneShotNext);

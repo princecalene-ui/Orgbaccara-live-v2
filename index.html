@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ORG_Back RELAIS V9.13</title>
+<title>ORG BACC — RELAIS ALGO1 / ALGO2</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&family=Rajdhani:wght@300;400;600;700&family=Courier+Prime:wght@400;700&display=swap');
 
@@ -381,7 +381,7 @@
 <header>
   <div class="title-suite">
     <span class="suit-deco">♠️ ♥️</span>
-    <h1>ORG_Back RELAIS V9.13</h1>
+    <h1>ORG BACC — RELAIS ALGO1 / ALGO2</h1>
     <span class="suit-deco">♣️ ♦️</span>
   </div>
   <div class="subtitle">Pred PURE / UNIVERSELLE · même jeu → même résultat partout · sans état local</div>
@@ -484,7 +484,7 @@
   </div>
 </main>
 
-<footer>ORG_Back RELAIS V9.13 · X_Code · ♠️ ♥️ ♣️ ♦️</footer>
+<footer>ORG BACC RELAIS · ALGO1 / ALGO2 · X_Code · ♠️ ♥️ ♣️ ♦️</footer>
 
 <script>
 
@@ -2387,6 +2387,47 @@ function runParityAllInvCalc(raw){
   let prediction = (basePred === 'OUI') ? 'NON' : 'OUI';
   const allInvDetail = `Ancien moteur → ${basePred} → ALL-INV → ${prediction}`;
 
+  // ── Même trafic d'INV GLOBALE que OPT1 → OUI ↔ NON ──
+  let globalInvApplied = false;
+  let globalInvNote4 = null;
+  {
+    const nextNum = predictedGameNum;
+    const str = String(nextNum);
+    const len = str.length;
+    const first = parseInt(str[0], 10);
+    const second = len >= 2 ? parseInt(str[1], 10) : null;
+    const avDern = len >= 2 ? parseInt(str[len-2], 10) : first;
+    // 720–1040 : si avant-dernier chiffre PAIR → inv (même règle OPT1)
+    if(nextNum >= 720 && nextNum <= 1040 && (avDern % 2 === 0)){
+      globalInvApplied = true;
+      globalInvNote4 = `INV GLOBALE 720-1040 (av-d PAIR lot de 10) → OUI↔NON`;
+    } else if(len === 3){
+      if(avDern % 2 === 1 && first % 2 === 1){
+        globalInvApplied = true;
+        globalInvNote4 = `INV GLOBALE 3ch (av-d imp + 1er imp) → OUI↔NON`;
+      } else if(avDern % 2 === 0 && first % 2 === 0){
+        globalInvApplied = true;
+        globalInvNote4 = `INV GLOBALE 3ch (av-d pair + 1er pair) → OUI↔NON`;
+      }
+    } else if(len === 2 || len === 4){
+      let cond1=false, cond2=false;
+      if(len === 2){
+        cond1 = (avDern % 2 === 1 && first % 2 === 0);
+        cond2 = (avDern % 2 === 0 && first % 2 === 1);
+      } else {
+        cond1 = (second % 2 === 0 && first % 2 === 0);
+        cond2 = (avDern % 2 === 0 && first % 2 === 1 && second % 2 === 1);
+      }
+      if(cond1 || cond2){
+        globalInvApplied = true;
+        globalInvNote4 = `INV GLOBALE ${len}ch → OUI↔NON`;
+      }
+    }
+    if(globalInvApplied){
+      prediction = (prediction === 'OUI') ? 'NON' : 'OUI';
+    }
+  }
+
   // + inversion format éventuelle
   const fmtDec = shouldInvertOpt23();
   let formatInverted = false;
@@ -2400,6 +2441,7 @@ function runParityAllInvCalc(raw){
     mode: 'parity4',
     num, nextNum: predictedGameNum, prediction,
     basePred, allInvDetail, motorInv,
+    globalInvApplied, globalInvNote4,
     formatInverted, formatReason: fmtDec.reason,
     fmtInvSnapshot: {...fmtInv},
     valueP1, valueP2, cardsSum, cardsRed, cardsSign,
@@ -2422,6 +2464,7 @@ function renderParity4Result(r){
   const badges=[
     `<div class="badge badge-engine">◆ OPTION 4 — P1 total PAIR ? (ALL-INVERSE) → ${r.prediction}</div>`,
     `<div class="badge badge-transform">⇄ ${r.allInvDetail}</div>`,
+    r.globalInvApplied ? `<div class="badge badge-hyper">🔄 ${r.globalInvNote4 || 'INV GLOBALE (même trafic OPT1) → OUI↔NON'}</div>` : '',
     r.formatInverted ? `<div class="badge badge-temporal">🔄 INV FORMAT — ${r.formatReason}</div>` : '',
     `<div class="badge badge-finalinv">✦ FINAL — <b>${r.prediction}</b></div>`
   ].filter(Boolean);
@@ -2431,6 +2474,7 @@ function renderParity4Result(r){
 <div class="det-row"><span class="det-label">Jeu fourni → prédit</span><span class="det-val">#N${r.num} → #N${r.nextNum} (prochain)</span></div>
 <div class="det-row"><span class="det-label">Ancien moteur</span><span class="det-val">${r.basePred}</span></div>
 <div class="det-row"><span class="det-label">ALL-INVERSE</span><span class="det-val">${r.allInvDetail}</span></div>
+${r.globalInvApplied?`<div class="det-row"><span class="det-label" style="color:#ffaaff">INV GLOBALE (trafic OPT1)</span><span class="det-val" style="color:#ffaaff">${r.globalInvNote4||'OUI↔NON'}</span></div>`:''}
 <div class="det-row"><span class="det-label">RÉSULTAT</span><span class="det-val det-result">#N${r.nextNum} — ${r.prediction}</span></div>`;
   const zone=document.getElementById('result-zone');
   zone.style.display='block';

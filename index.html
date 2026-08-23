@@ -1830,12 +1830,36 @@ function runCalc(raw){
     const second = len >= 2 ? parseInt(str[1], 10) : null;
     const avDern = len >= 2 ? parseInt(str[len-2], 10) : first;
     const beforeG = finalSuit;
-    // 720–1040 : si avant-dernier chiffre PAIR → inv ♣️↔♠️ / ♥️↔♦️ (lots de 10)
-    if(nextNum >= 720 && nextNum <= 1040 && (avDern % 2 === 0)){
-      const map = {'♣️':'♠️','♠️':'♣️','♥️':'♦️','♦️':'♥️'};
-      finalSuit = map[finalSuit] || finalSuit;
-      globalInvNote = `INV GLOBALE 720-1040 (av-d PAIR lot de 10) · ${SUIT_EMOJI[beforeG]}→${SUIT_EMOJI[finalSuit]}`;
-    } else if(len === 3){
+    // 720–1140 : av-dernier PAIR → inv ♣️↔♠️ / ♥️↔♦️ (lots de 10)
+    // 1000–1400 : filtre zones selon 2e chiffre (PAIR=base, IMPAIR=inversé)
+    // Zones base (2e PAIR) : %100 ∈ 00-10, 26-35, 65-70, 86-99 → inv ; sinon non
+    // 1141–1400 : zones seules (sans exiger av-d PAIR)
+    {
+      const r100 = nextNum % 100;
+      const inBaseZone = (r100 <= 10) || (r100 >= 26 && r100 <= 35) || (r100 >= 65 && r100 <= 70) || (r100 >= 86);
+      const secondEven = (second != null) ? (second % 2 === 0) : true;
+      const inZone = (nextNum >= 1000 && nextNum <= 1400)
+        ? (secondEven ? inBaseZone : !inBaseZone)
+        : true;
+      let applyLot10 = false;
+      let lot10Label = '';
+      if(nextNum >= 720 && nextNum <= 1140 && (avDern % 2 === 0) && inZone){
+        applyLot10 = true;
+        lot10Label = (nextNum >= 1000)
+          ? `720-1140 av-d PAIR + zone 2e=${second}(${secondEven?'PAIR':'IMPAIR'})`
+          : `720-1140 (av-d PAIR lot de 10)`;
+      } else if(nextNum >= 1141 && nextNum <= 1400 && inZone){
+        applyLot10 = true;
+        lot10Label = `1141-1400 zone 2e=${second}(${secondEven?'PAIR':'IMPAIR'})`;
+      }
+      if(applyLot10){
+        const map = {'♣️':'♠️','♠️':'♣️','♥️':'♦️','♦️':'♥️'};
+        finalSuit = map[finalSuit] || finalSuit;
+        globalInvNote = `INV GLOBALE ${lot10Label} · ${SUIT_EMOJI[beforeG]}→${SUIT_EMOJI[finalSuit]}`;
+      }
+    }
+    if(globalInvNote){ /* déjà appliqué lot de 10 */ }
+    else if(len === 3){
       if(avDern % 2 === 1 && first % 2 === 1){
         const map = {'♣️':'♠️','♠️':'♣️','♦️':'♥️','♥️':'♦️'};
         finalSuit = map[finalSuit] || finalSuit;
@@ -2419,30 +2443,44 @@ function runParityAllInvCalc(raw){
     const first = parseInt(str[0], 10);
     const second = len >= 2 ? parseInt(str[1], 10) : null;
     const avDern = len >= 2 ? parseInt(str[len-2], 10) : first;
-    // 720–1040 : si avant-dernier chiffre PAIR → inv (même règle OPT1)
-    if(nextNum >= 720 && nextNum <= 1040 && (avDern % 2 === 0)){
-      globalInvApplied = true;
-      globalInvNote4 = `INV GLOBALE 720-1040 (av-d PAIR lot de 10) → OUI↔NON`;
-    } else if(len === 3){
-      if(avDern % 2 === 1 && first % 2 === 1){
+    // 720–1140 : av-d PAIR + zones 1000–1400 (même trafic OPT1) → OUI↔NON
+    // Zones base (2e PAIR) : %100 ∈ 00-10, 26-35, 65-70, 86-99 ; 2e IMPAIR → inversé
+    {
+      const r100 = nextNum % 100;
+      const inBaseZone = (r100 <= 10) || (r100 >= 26 && r100 <= 35) || (r100 >= 65 && r100 <= 70) || (r100 >= 86);
+      const secondEven = (second != null) ? (second % 2 === 0) : true;
+      const inZone = (nextNum >= 1000 && nextNum <= 1400)
+        ? (secondEven ? inBaseZone : !inBaseZone)
+        : true;
+      if(nextNum >= 720 && nextNum <= 1140 && (avDern % 2 === 0) && inZone){
         globalInvApplied = true;
-        globalInvNote4 = `INV GLOBALE 3ch (av-d imp + 1er imp) → OUI↔NON`;
-      } else if(avDern % 2 === 0 && first % 2 === 0){
+        globalInvNote4 = (nextNum >= 1000)
+          ? `INV GLOBALE 720-1140 av-d PAIR + zone 2e=${second}(${secondEven?'PAIR':'IMPAIR'}) → OUI↔NON`
+          : `INV GLOBALE 720-1140 (av-d PAIR lot de 10) → OUI↔NON`;
+      } else if(nextNum >= 1141 && nextNum <= 1400 && inZone){
         globalInvApplied = true;
-        globalInvNote4 = `INV GLOBALE 3ch (av-d pair + 1er pair) → OUI↔NON`;
-      }
-    } else if(len === 2 || len === 4){
-      let cond1=false, cond2=false;
-      if(len === 2){
-        cond1 = (avDern % 2 === 1 && first % 2 === 0);
-        cond2 = (avDern % 2 === 0 && first % 2 === 1);
-      } else {
-        cond1 = (second % 2 === 0 && first % 2 === 0);
-        cond2 = (avDern % 2 === 0 && first % 2 === 1 && second % 2 === 1);
-      }
-      if(cond1 || cond2){
-        globalInvApplied = true;
-        globalInvNote4 = `INV GLOBALE ${len}ch → OUI↔NON`;
+        globalInvNote4 = `INV GLOBALE 1141-1400 zone 2e=${second}(${secondEven?'PAIR':'IMPAIR'}) → OUI↔NON`;
+      } else if(len === 3){
+        if(avDern % 2 === 1 && first % 2 === 1){
+          globalInvApplied = true;
+          globalInvNote4 = `INV GLOBALE 3ch (av-d imp + 1er imp) → OUI↔NON`;
+        } else if(avDern % 2 === 0 && first % 2 === 0){
+          globalInvApplied = true;
+          globalInvNote4 = `INV GLOBALE 3ch (av-d pair + 1er pair) → OUI↔NON`;
+        }
+      } else if(len === 2 || len === 4){
+        let cond1=false, cond2=false;
+        if(len === 2){
+          cond1 = (avDern % 2 === 1 && first % 2 === 0);
+          cond2 = (avDern % 2 === 0 && first % 2 === 1);
+        } else {
+          cond1 = (second % 2 === 0 && first % 2 === 0);
+          cond2 = (avDern % 2 === 0 && first % 2 === 1 && second % 2 === 1);
+        }
+        if(cond1 || cond2){
+          globalInvApplied = true;
+          globalInvNote4 = `INV GLOBALE ${len}ch → OUI↔NON`;
+        }
       }
     }
     if(globalInvApplied){

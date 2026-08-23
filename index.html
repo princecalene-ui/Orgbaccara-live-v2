@@ -1134,20 +1134,13 @@ function shouldApplyAllInv(nextNum){
   }catch(e){ return false; }
 }
 
-// Rattrapage max 1 (semaine) — ANNULÉ samedi/dimanche
-// Exception WE : #N1080–1100 → rattrapage RÉACTIVÉ avec max = RATTRAPAGE_MAX+1
+// Rattrapage : semaine max 1 · week-end max = RATTRAPAGE_MAX+2 (réactivé WE)
 function shouldApplyRattrapage(nextNum){
   if(typeof SYNC_SKIP_RATTRAPAGE !== 'undefined' && SYNC_SKIP_RATTRAPAGE) return null;
   if(PURE_CALC_MODE) return null;
-  const weBoost = isWeekendDay() && nextNum >= 1080 && nextNum <= 1100;
-  if(isWeekendDay() && !weBoost) return null; // week-end hors 1080–1100 : annulé
+  const maxR = isWeekendDay() ? (RATTRAPAGE_MAX + 2) : RATTRAPAGE_MAX;
   try{
     const series = buildTelegramSimSeries();
-    if(!weBoost){
-      return _flagsFromSeries(series, nextNum).rattr;
-    }
-    // WE 1080–1100 : même logique pertes TG, plafond max+1
-    const maxW = RATTRAPAGE_MAX + 1;
     const resolved = series.filter(e => e.status === 'valid' || e.status === 'invalid');
     if(!resolved.length) return null;
     const last = resolved[resolved.length - 1];
@@ -1159,15 +1152,111 @@ function shouldApplyRattrapage(nextNum){
       else if(resolved[i].rattrapage && resolved[i].status === 'valid') return null;
       else break;
     }
-    if(last.rattrapage && consR >= maxW) return null;
+    if(last.rattrapage && consR >= maxR) return null;
     return {
       active: true,
       algo: last.algoUsed || 'ALGO1',
       lostSuit: last.suitKey || null,
       lostColor: last.suitKey ? (isRed(last.suitKey) ? 'rouge' : 'noir') : null,
-      remaining: last.rattrapage ? (maxW - consR) : maxW,
-      weBoost: true,
-      max: maxW
+      remaining: last.rattrapage ? (maxR - consR) : maxR,
+      weBoost: isWeekendDay(),
+      max: maxR
+    };
+  }catch(e){ return null; }
+}
+
+// ══════════════════════════════════════════════════════
+//  AUTO-APPRENTISSAGE (lun–dim) — source Telegram uniquement
+//  Objectif : éviter 2 pertes de suite, détecter pièges/similarités
+//  Déterministe → même cache TG = même correction partout
+// ══════════════════════════════════════════════════════
+function autoApprentissage(finalSuit, nextNum){
+  if(PURE_CALC_MODE) return null;
+  if(!telegramHistoryCache || telegramHistoryCache.length < 3) return null;
+  try{
+    const series = buildTelegramSimSeries();
+    const resolved = series.filter(e => e.status === 'valid' || e.status === 'invalid');
+    if(!resolved.length) return null;
+
+    // Dernières issues (ordre chrono)
+    const recent = resolved.slice(-8);
+    const last = resolved[resolved.length - 1];
+
+    // Compte pertes consécutives en fin de série
+    let lossStreak = 0;
+    for(let i = resolved.length - 1; i >= 0; i--){
+      if(resolved[i].status === 'invalid') lossStreak++;
+      else break;
+    }
+
+    // Suites perdues récemment (fréquence par enseigne)
+    const lostCounts = {'♠️':0,'♥️':0,'♦️':0,'♣️':0};
+    let recentLosses = 0;
+    recent.forEach(e => {
+      if(e.status === 'invalid'){
+        recentLosses++;
+        if(lostCounts[e.suitKey] != null) lostCounts[e.suitKey]++;
+      }
+    });
+
+    // Similarité : si les 2 dernières pertes ont la même enseigne → piège probable sur cette enseigne
+    const lastTwo = resolved.slice(-2);
+    const sameSuitTrap = lastTwo.length === 2
+      && lastTwo[0].status === 'invalid' && lastTwo[1].status === 'invalid'
+      && lastTwo[0].suitKey === lastTwo[1].suitKey;
+
+    let action = null;
+    let reason = '';
+    let newSuit = finalSuit;
+
+    // PRIORITÉ 1 — éviter 2 pertes de suite (conscience / doute)
+    if(lossStreak >= 1 && last.gameNum === nextNum - 1){
+      // Dernière pred a perdu → on change de famille de couleur
+      const colorFlip = {'♠️':'♥️','♥️':'♠️','♣️':'♦️','♦️':'♣️'};
+      // Si l'enseigne candidate est celle qui vient de perdre → flip obligatoire
+      if(finalSuit === last.suitKey || lossStreak >= 2){
+        newSuit = colorFlip[finalSuit] || finalSuit;
+        action = 'ANTI-DOUBLE-PERTE';
+        reason = `streak pertes ${lossStreak} · dernier perdu ${SUIT_EMOJI[last.suitKey]} → flip couleur ${SUIT_EMOJI[finalSuit]}→${SUIT_EMOJI[newSuit]}`;
+      } else if(lostCounts[finalSuit] >= 2){
+        // Enseigne souvent perdante récemment → éviter
+        const alt = colorFlip[finalSuit] || finalSuit;
+        newSuit = alt;
+        action = 'ÉVITE-ENSEIGNE-PIÈGE';
+        reason = `${SUIT_EMOJI[finalSuit]} a perdu ${lostCounts[finalSuit]}×/8 · → ${SUIT_EMOJI[newSuit]}`;
+      }
+    }
+
+    // PRIORITÉ 2 — piège similarité (2 mêmes enseignes perdues d'affilée)
+    if(!action && sameSuitTrap){
+      const trapSuit = lastTwo[1].suitKey;
+      if(finalSuit === trapSuit){
+        const escape = {'♠️':'♦️','♦️':'♠️','♥️':'♣️','♣️':'♥️'};
+        newSuit = escape[finalSuit] || finalSuit;
+        action = 'PIÈGE-SIMILARITÉ';
+        reason = `2× ${SUIT_EMOJI[trapSuit]} perdus → échappe ${SUIT_EMOJI[finalSuit]}→${SUIT_EMOJI[newSuit]}`;
+      }
+    }
+
+    // PRIORITÉ 3 — doute si taux de perte récent élevé (>50% sur 8) et enseigne dans le top perdu
+    if(!action && recent.length >= 6 && recentLosses / recent.length >= 0.5){
+      const topLost = Object.entries(lostCounts).sort((a,b)=>b[1]-a[1])[0];
+      if(topLost && topLost[1] >= 2 && finalSuit === topLost[0]){
+        const rotate = {'♠️':'♣️','♣️':'♥️','♥️':'♦️','♦️':'♠️'};
+        newSuit = rotate[finalSuit] || finalSuit;
+        action = 'DOUTE-TAUX-ÉLEVÉ';
+        reason = `taux perte ${(100*recentLosses/recent.length).toFixed(0)}% · ${SUIT_EMOJI[finalSuit]} top perdu → rotate ${SUIT_EMOJI[newSuit]}`;
+      }
+    }
+
+    if(!action || newSuit === finalSuit) return null;
+    return {
+      active: true,
+      action,
+      before: finalSuit,
+      result: newSuit,
+      lossStreak,
+      label: `AUTO-APPRENTISSAGE · ${action} · ${reason}`
     };
   }catch(e){ return null; }
 }
@@ -1207,7 +1296,7 @@ function updateRegimeDisplay(){
     rattrapageHtml = `
     <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #7a6028">
       <span class="regime-label" style="color:#ffbf80">📅 WEEK-END</span>
-      <span class="regime-val" style="color:#ffbf80">ALL.INV annulé · RATTR annulé sauf #N1080–1100 (max ${RATTRAPAGE_MAX + 1})</span>
+      <span class="regime-val" style="color:#ffbf80">ALL.INV annulé · RATTR max ${RATTRAPAGE_MAX + 2} · auto-apprentissage ON</span>
     </div>`;
   } else {
     try{
@@ -2131,8 +2220,18 @@ function runCalc(raw){
     }
   }
 
+  // ── AUTO-APPRENTISSAGE (tous les jours) — anti double-perte / pièges TG ──
+  let autoLearn = null;
+  {
+    const al = autoApprentissage(finalSuit, nextNum);
+    if(al && al.active){
+      finalSuit = al.result;
+      autoLearn = al;
+    }
+  }
+
   return {num,p1,p2,nextNum,nextH,nextM,avantDernier,dernierDigit,sel,subEngine,algoResult,finalInv,finalSuit,
-          hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,formatSuitInv,globalInvNote,allInvInfo,ultimateBigInv,ultimateHourInv,weekendGlobalInv,weekendRangeInv,
+          hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,formatSuitInv,globalInvNote,allInvInfo,ultimateBigInv,ultimateHourInv,weekendGlobalInv,weekendRangeInv,autoLearn,
           isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime},
           rattrapageForced,rattrapageSnapshot,normalAlgo,digitAlgoRule,fmtInvSnapshot:{ globalOn:false }};
 }
@@ -2794,6 +2893,9 @@ function renderResult(r){
       : []),
     ...(r.weekendRangeInv && r.weekendRangeInv.active
       ? [`<div class="badge badge-hyper">📊 POST-PRED WE TRANCHE — ${r.weekendRangeInv.label}</div>`]
+      : []),
+    ...(r.autoLearn && r.autoLearn.active
+      ? [`<div class="badge badge-engine">🧠 AUTO-APPRENTISSAGE — ${r.autoLearn.label}</div>`]
       : []),
     ...(r.formatSuitInv
       ? [`<div class="badge badge-hyper" style="opacity:.45">INV FORMAT — OFF · pred pure</div>`]

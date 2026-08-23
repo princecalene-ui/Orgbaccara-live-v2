@@ -1165,97 +1165,166 @@ function shouldApplyRattrapage(nextNum){
 }
 
 // ══════════════════════════════════════════════════════
-//  AUTO-APPRENTISSAGE (lun–dim) — source Telegram uniquement
-//  Objectif : éviter 2 pertes de suite, détecter pièges/similarités
-//  Déterministe → même cache TG = même correction partout
+//  SO — SYSTÈME AUTONOME (juge, pas prédicteur seul)
+//  • Fenêtre : 50 derniers jeux Telegram
+//  • Poids : BOT 60 % · SO 40 % (jugement)
+//  • Rattrapage / jugement initial : SO pèse 60 %
+//  • Décision finale : SO peut corriger si le bot n'est pas assez fiable
+//  Déterministe → même cache TG = même jugement partout
 // ══════════════════════════════════════════════════════
-function autoApprentissage(finalSuit, nextNum){
+const SO_WINDOW = 50;
+const SO_WEIGHT_NORMAL = 0.40;   // jugement courant
+const SO_WEIGHT_RATTRAP = 0.60;  // rattrapage + jugement après perte
+const BOT_WEIGHT_NORMAL = 0.60;
+const BOT_WEIGHT_RATTRAP = 0.40;
+
+function soAnalyzeWindow(){
+  // Analyse les 50 derniers jeux TG : tendances P1 + perf bot (série sim)
+  const out = {
+    n: 0,
+    p1Freq: {'♠️':0,'♥️':0,'♦️':0,'♣️':0},
+    botHits: 0,
+    botTotal: 0,
+    botHitBySuit: {'♠️':0,'♥️':0,'♦️':0,'♣️':0},
+    botTryBySuit: {'♠️':0,'♥️':0,'♦️':0,'♣️':0},
+    lossStreak: 0,
+    lastLostSuit: null,
+    lastStatus: null,
+    lastGameNum: null
+  };
+  if(!telegramHistoryCache || telegramHistoryCache.length < 2) return out;
+
+  // Fréquences P1 réelles sur fenêtre
+  const games = telegramHistoryCache.slice(-SO_WINDOW);
+  games.forEach(g => {
+    try{
+      const p = parseGame(g.normalized || g.raw_text);
+      if(!p || !p.p1 || !p.p1.length) return;
+      out.n++;
+      p.p1.forEach(c => { if(out.p1Freq[c.suit] != null) out.p1Freq[c.suit]++; });
+    }catch(e){}
+  });
+
+  // Perf bot sur série simulée (même fenêtre)
+  const series = buildTelegramSimSeries().filter(e => e.status === 'valid' || e.status === 'invalid');
+  const recent = series.slice(-SO_WINDOW);
+  recent.forEach(e => {
+    out.botTotal++;
+    if(out.botTryBySuit[e.suitKey] != null) out.botTryBySuit[e.suitKey]++;
+    if(e.status === 'valid'){
+      out.botHits++;
+      if(out.botHitBySuit[e.suitKey] != null) out.botHitBySuit[e.suitKey]++;
+    }
+  });
+  // Streak pertes
+  for(let i = series.length - 1; i >= 0; i--){
+    if(series[i].status === 'invalid'){
+      out.lossStreak++;
+      if(!out.lastLostSuit) out.lastLostSuit = series[i].suitKey;
+    } else break;
+  }
+  if(series.length){
+    out.lastStatus = series[series.length - 1].status;
+    out.lastGameNum = series[series.length - 1].gameNum;
+  }
+  return out;
+}
+
+function soScoreSuit(suit, analysis){
+  // Score 0–1 pour une enseigne selon tendances TG
+  let score = 0.25; // base uniforme
+  const totalP1 = Object.values(analysis.p1Freq).reduce((a,b)=>a+b, 0) || 1;
+  const freq = (analysis.p1Freq[suit] || 0) / totalP1;
+  score += freq * 0.35; // présence récente P1
+
+  const tries = analysis.botTryBySuit[suit] || 0;
+  const hits = analysis.botHitBySuit[suit] || 0;
+  if(tries >= 2){
+    const rate = hits / tries;
+    score += (rate - 0.25) * 0.4; // perf bot sur cette enseigne
+  }
+  // Pénalité si enseigne vient de perdre en streak
+  if(analysis.lossStreak >= 1 && suit === analysis.lastLostSuit){
+    score -= 0.25 * Math.min(analysis.lossStreak, 3);
+  }
+  return Math.max(0, Math.min(1, score));
+}
+
+function soJudge(botSuit, nextNum, isRattrapage){
   if(PURE_CALC_MODE) return null;
-  if(!telegramHistoryCache || telegramHistoryCache.length < 3) return null;
+  if(!telegramHistoryCache || telegramHistoryCache.length < 5) return null;
   try{
-    const series = buildTelegramSimSeries();
-    const resolved = series.filter(e => e.status === 'valid' || e.status === 'invalid');
-    if(!resolved.length) return null;
+    const analysis = soAnalyzeWindow();
+    if(analysis.n < 5 && analysis.botTotal < 3) return null;
 
-    // Dernières issues (ordre chrono)
-    const recent = resolved.slice(-8);
-    const last = resolved[resolved.length - 1];
+    const soW = isRattrapage ? SO_WEIGHT_RATTRAP : SO_WEIGHT_NORMAL;
+    const botW = isRattrapage ? BOT_WEIGHT_RATTRAP : BOT_WEIGHT_NORMAL;
 
-    // Compte pertes consécutives en fin de série
-    let lossStreak = 0;
-    for(let i = resolved.length - 1; i >= 0; i--){
-      if(resolved[i].status === 'invalid') lossStreak++;
-      else break;
+    // Scores SO pour chaque enseigne
+    const suits = ['♠️','♥️','♦️','♣️'];
+    const scores = {};
+    suits.forEach(s => { scores[s] = soScoreSuit(s, analysis); });
+
+    // Meilleure enseigne selon SO
+    let soBest = suits[0];
+    suits.forEach(s => { if(scores[s] > scores[soBest]) soBest = s; });
+
+    // Score bot vs score SO alternatif
+    const botScore = scores[botSuit] || 0;
+    const soBestScore = scores[soBest] || 0;
+
+    // Confiance bot globale (hit rate fenêtre)
+    const botRate = analysis.botTotal > 0 ? analysis.botHits / analysis.botTotal : 0.5;
+
+    // Note combinée : si bot est aligné avec SO → garder
+    // Si SO voit une alternative nettement meilleure → override
+    const margin = soBestScore - botScore;
+    // Seuil d'intervention : plus bas en rattrapage (SO pèse 60%)
+    const threshold = isRattrapage ? 0.08 : 0.15;
+
+    // Force anti double-perte
+    const forceAntiLoss = analysis.lossStreak >= 1
+      && analysis.lastGameNum === nextNum - 1
+      && botSuit === analysis.lastLostSuit;
+
+    let finalSuit = botSuit;
+    let overruled = false;
+    let action = 'VALIDE-BOT';
+
+    if(forceAntiLoss || (soBest !== botSuit && margin >= threshold)){
+      finalSuit = soBest;
+      overruled = true;
+      action = forceAntiLoss ? 'OVERRIDE-ANTI-STREAK' : 'OVERRIDE-TENDANCE';
+    } else if(botRate < 0.35 && analysis.botTotal >= 10 && soBest !== botSuit && margin > 0.05){
+      // Bot très faible sur la fenêtre → SO arbitre
+      finalSuit = soBest;
+      overruled = true;
+      action = 'OVERRIDE-BOT-FAIBLE';
     }
 
-    // Suites perdues récemment (fréquence par enseigne)
-    const lostCounts = {'♠️':0,'♥️':0,'♦️':0,'♣️':0};
-    let recentLosses = 0;
-    recent.forEach(e => {
-      if(e.status === 'invalid'){
-        recentLosses++;
-        if(lostCounts[e.suitKey] != null) lostCounts[e.suitKey]++;
-      }
-    });
-
-    // Similarité : si les 2 dernières pertes ont la même enseigne → piège probable sur cette enseigne
-    const lastTwo = resolved.slice(-2);
-    const sameSuitTrap = lastTwo.length === 2
-      && lastTwo[0].status === 'invalid' && lastTwo[1].status === 'invalid'
-      && lastTwo[0].suitKey === lastTwo[1].suitKey;
-
-    let action = null;
-    let reason = '';
-    let newSuit = finalSuit;
-
-    // PRIORITÉ 1 — éviter 2 pertes de suite (conscience / doute)
-    if(lossStreak >= 1 && last.gameNum === nextNum - 1){
-      // Dernière pred a perdu → on change de famille de couleur
-      const colorFlip = {'♠️':'♥️','♥️':'♠️','♣️':'♦️','♦️':'♣️'};
-      // Si l'enseigne candidate est celle qui vient de perdre → flip obligatoire
-      if(finalSuit === last.suitKey || lossStreak >= 2){
-        newSuit = colorFlip[finalSuit] || finalSuit;
-        action = 'ANTI-DOUBLE-PERTE';
-        reason = `streak pertes ${lossStreak} · dernier perdu ${SUIT_EMOJI[last.suitKey]} → flip couleur ${SUIT_EMOJI[finalSuit]}→${SUIT_EMOJI[newSuit]}`;
-      } else if(lostCounts[finalSuit] >= 2){
-        // Enseigne souvent perdante récemment → éviter
-        const alt = colorFlip[finalSuit] || finalSuit;
-        newSuit = alt;
-        action = 'ÉVITE-ENSEIGNE-PIÈGE';
-        reason = `${SUIT_EMOJI[finalSuit]} a perdu ${lostCounts[finalSuit]}×/8 · → ${SUIT_EMOJI[newSuit]}`;
-      }
+    if(!overruled && finalSuit === botSuit){
+      // Jugement favorable : badge informatif uniquement si utile
+      if(analysis.lossStreak === 0 && botRate >= 0.45) return null;
     }
 
-    // PRIORITÉ 2 — piège similarité (2 mêmes enseignes perdues d'affilée)
-    if(!action && sameSuitTrap){
-      const trapSuit = lastTwo[1].suitKey;
-      if(finalSuit === trapSuit){
-        const escape = {'♠️':'♦️','♦️':'♠️','♥️':'♣️','♣️':'♥️'};
-        newSuit = escape[finalSuit] || finalSuit;
-        action = 'PIÈGE-SIMILARITÉ';
-        reason = `2× ${SUIT_EMOJI[trapSuit]} perdus → échappe ${SUIT_EMOJI[finalSuit]}→${SUIT_EMOJI[newSuit]}`;
-      }
-    }
-
-    // PRIORITÉ 3 — doute si taux de perte récent élevé (>50% sur 8) et enseigne dans le top perdu
-    if(!action && recent.length >= 6 && recentLosses / recent.length >= 0.5){
-      const topLost = Object.entries(lostCounts).sort((a,b)=>b[1]-a[1])[0];
-      if(topLost && topLost[1] >= 2 && finalSuit === topLost[0]){
-        const rotate = {'♠️':'♣️','♣️':'♥️','♥️':'♦️','♦️':'♠️'};
-        newSuit = rotate[finalSuit] || finalSuit;
-        action = 'DOUTE-TAUX-ÉLEVÉ';
-        reason = `taux perte ${(100*recentLosses/recent.length).toFixed(0)}% · ${SUIT_EMOJI[finalSuit]} top perdu → rotate ${SUIT_EMOJI[newSuit]}`;
-      }
-    }
-
-    if(!action || newSuit === finalSuit) return null;
+    const botPct = Math.round(botW * 100);
+    const soPct = Math.round(soW * 100);
     return {
       active: true,
+      overruled,
       action,
-      before: finalSuit,
-      result: newSuit,
-      lossStreak,
-      label: `AUTO-APPRENTISSAGE · ${action} · ${reason}`
+      before: botSuit,
+      result: finalSuit,
+      botScore: +botScore.toFixed(3),
+      soBestScore: +soBestScore.toFixed(3),
+      botRate: +botRate.toFixed(3),
+      lossStreak: analysis.lossStreak,
+      window: analysis.n,
+      soWeight: soPct,
+      botWeight: botPct,
+      label: overruled
+        ? `SO ${soPct}% · ${action} · bot ${SUIT_EMOJI[botSuit]}→${SUIT_EMOJI[finalSuit]} · fenêtre ${analysis.n} · rate bot ${(botRate*100).toFixed(0)}%`
+        : `SO ${soPct}% · ${action} · ${SUIT_EMOJI[botSuit]} · rate bot ${(botRate*100).toFixed(0)}% · fen. ${analysis.n}`
     };
   }catch(e){ return null; }
 }
@@ -2224,18 +2293,18 @@ function runCalc(raw){
     }
   }
 
-  // ── AUTO-APPRENTISSAGE (tous les jours) — anti double-perte / pièges TG ──
-  let autoLearn = null;
+  // ── SO — SYSTÈME AUTONOME (juge 40%/60% sur 50 jeux TG) ──
+  let soDecision = null;
   {
-    const al = autoApprentissage(finalSuit, nextNum);
-    if(al && al.active){
-      finalSuit = al.result;
-      autoLearn = al;
+    const so = soJudge(finalSuit, nextNum, !!rattrapageForced);
+    if(so && so.active){
+      if(so.overruled) finalSuit = so.result;
+      soDecision = so;
     }
   }
 
   return {num,p1,p2,nextNum,nextH,nextM,avantDernier,dernierDigit,sel,subEngine,algoResult,finalInv,finalSuit,
-          hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,formatSuitInv,globalInvNote,allInvInfo,ultimateBigInv,ultimateHourInv,weekendGlobalInv,weekendRangeInv,autoLearn,
+          hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,formatSuitInv,globalInvNote,allInvInfo,ultimateBigInv,ultimateHourInv,weekendGlobalInv,weekendRangeInv,soDecision,
           isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime},
           rattrapageForced,rattrapageSnapshot,normalAlgo,digitAlgoRule,fmtInvSnapshot:{ globalOn:false }};
 }
@@ -2898,8 +2967,8 @@ function renderResult(r){
     ...(r.weekendRangeInv && r.weekendRangeInv.active
       ? [`<div class="badge badge-hyper">📊 POST-PRED WE TRANCHE — ${r.weekendRangeInv.label}</div>`]
       : []),
-    ...(r.autoLearn && r.autoLearn.active
-      ? [`<div class="badge badge-engine">🧠 AUTO-APPRENTISSAGE — ${r.autoLearn.label}</div>`]
+    ...(r.soDecision && r.soDecision.active
+      ? [`<div class="badge badge-engine">⚖️ SO · ${r.soDecision.label}</div>`]
       : []),
     ...(r.formatSuitInv
       ? [`<div class="badge badge-hyper" style="opacity:.45">INV FORMAT — OFF · pred pure</div>`]

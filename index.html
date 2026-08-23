@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ORG BACC — RELAIS ALGO1 / ALGO2</title>
+<title>ORG_Back RELAIS V9.13</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&family=Rajdhani:wght@300;400;600;700&family=Courier+Prime:wght@400;700&display=swap');
 
@@ -381,7 +381,7 @@
 <header>
   <div class="title-suite">
     <span class="suit-deco">♠️ ♥️</span>
-    <h1>ORG BACC — RELAIS ALGO1 / ALGO2</h1>
+    <h1>ORG_Back RELAIS V9.13</h1>
     <span class="suit-deco">♣️ ♦️</span>
   </div>
   <div class="subtitle">Pred PURE / UNIVERSELLE · même jeu → même résultat partout · sans état local</div>
@@ -484,7 +484,7 @@
   </div>
 </main>
 
-<footer>ORG BACC RELAIS · ALGO1 / ALGO2 · X_Code · ♠️ ♥️ ♣️ ♦️</footer>
+<footer>ORG_Back RELAIS V9.13 · X_Code · ♠️ ♥️ ♣️ ♦️</footer>
 
 <script>
 
@@ -1830,7 +1830,12 @@ function runCalc(raw){
     const second = len >= 2 ? parseInt(str[1], 10) : null;
     const avDern = len >= 2 ? parseInt(str[len-2], 10) : first;
     const beforeG = finalSuit;
-    if(len === 3){
+    // 720–1040 : si avant-dernier chiffre PAIR → inv ♣️↔♠️ / ♥️↔♦️ (lots de 10)
+    if(nextNum >= 720 && nextNum <= 1040 && (avDern % 2 === 0)){
+      const map = {'♣️':'♠️','♠️':'♣️','♥️':'♦️','♦️':'♥️'};
+      finalSuit = map[finalSuit] || finalSuit;
+      globalInvNote = `INV GLOBALE 720-1040 (av-d PAIR lot de 10) · ${SUIT_EMOJI[beforeG]}→${SUIT_EMOJI[finalSuit]}`;
+    } else if(len === 3){
       if(avDern % 2 === 1 && first % 2 === 1){
         const map = {'♣️':'♠️','♠️':'♣️','♦️':'♥️','♥️':'♦️'};
         finalSuit = map[finalSuit] || finalSuit;
@@ -1861,6 +1866,23 @@ function runCalc(raw){
     }
   }
 
+  // ── 720–1010 · 1er chiffre IMPAIR → transform ♥️↔♠️ / ♦️↔♣️ (après règles établies) ──
+  let firstDigitImpInv = null;
+  {
+    const firstDig = parseInt(String(nextNum)[0], 10);
+    if(nextNum >= 720 && nextNum <= 1010 && (firstDig % 2 === 1)){
+      const map = {'♥️':'♠️','♠️':'♥️','♦️':'♣️','♣️':'♦️'};
+      const beforeF = finalSuit;
+      finalSuit = map[finalSuit] || finalSuit;
+      firstDigitImpInv = {
+        active: true,
+        before: beforeF,
+        result: finalSuit,
+        label: `720-1010 · 1er chiffre ${firstDig}(IMPAIR) → ♥️↔♠️ / ♦️↔♣️ · ${SUIT_EMOJI[beforeF]}→${SUIT_EMOJI[finalSuit]}`
+      };
+    }
+  }
+
   // ── ALL.INV après perte (max 2) — depuis historique OPT1 unanime ──
   let allInvInfo = null;
   if(shouldApplyAllInv(nextNum)){
@@ -1887,7 +1909,7 @@ function runCalc(raw){
   }
 
   return {num,p1,p2,nextNum,nextH,nextM,avantDernier,dernierDigit,sel,subEngine,algoResult,finalInv,finalSuit,
-          hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,formatSuitInv,globalInvNote,allInvInfo,
+          hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,formatSuitInv,globalInvNote,allInvInfo,firstDigitImpInv,
           isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime},
           rattrapageForced,rattrapageSnapshot,normalAlgo,digitAlgoRule,fmtInvSnapshot:{ globalOn:false }};
 }
@@ -2428,6 +2450,21 @@ function runParityAllInvCalc(raw){
     }
   }
 
+  // ── 720–1010 · 1er chiffre IMPAIR → OUI ↔ NON (même trafic OPT1) ──
+  let firstDigitImpInv4 = null;
+  {
+    const nextNum = predictedGameNum;
+    const firstDig = parseInt(String(nextNum)[0], 10);
+    if(nextNum >= 720 && nextNum <= 1010 && (firstDig % 2 === 1)){
+      const beforeP = prediction;
+      prediction = (prediction === 'OUI') ? 'NON' : 'OUI';
+      firstDigitImpInv4 = {
+        active: true,
+        label: `720-1010 · 1er chiffre ${firstDig}(IMPAIR) → OUI↔NON · ${beforeP}→${prediction}`
+      };
+    }
+  }
+
   // + inversion format éventuelle
   const fmtDec = shouldInvertOpt23();
   let formatInverted = false;
@@ -2441,7 +2478,7 @@ function runParityAllInvCalc(raw){
     mode: 'parity4',
     num, nextNum: predictedGameNum, prediction,
     basePred, allInvDetail, motorInv,
-    globalInvApplied, globalInvNote4,
+    globalInvApplied, globalInvNote4, firstDigitImpInv4,
     formatInverted, formatReason: fmtDec.reason,
     fmtInvSnapshot: {...fmtInv},
     valueP1, valueP2, cardsSum, cardsRed, cardsSign,
@@ -2465,6 +2502,7 @@ function renderParity4Result(r){
     `<div class="badge badge-engine">◆ OPTION 4 — P1 total PAIR ? (ALL-INVERSE) → ${r.prediction}</div>`,
     `<div class="badge badge-transform">⇄ ${r.allInvDetail}</div>`,
     r.globalInvApplied ? `<div class="badge badge-hyper">🔄 ${r.globalInvNote4 || 'INV GLOBALE (même trafic OPT1) → OUI↔NON'}</div>` : '',
+    r.firstDigitImpInv4 && r.firstDigitImpInv4.active ? `<div class="badge badge-hyper">🔄 ${r.firstDigitImpInv4.label}</div>` : '',
     r.formatInverted ? `<div class="badge badge-temporal">🔄 INV FORMAT — ${r.formatReason}</div>` : '',
     `<div class="badge badge-finalinv">✦ FINAL — <b>${r.prediction}</b></div>`
   ].filter(Boolean);
@@ -2475,6 +2513,7 @@ function renderParity4Result(r){
 <div class="det-row"><span class="det-label">Ancien moteur</span><span class="det-val">${r.basePred}</span></div>
 <div class="det-row"><span class="det-label">ALL-INVERSE</span><span class="det-val">${r.allInvDetail}</span></div>
 ${r.globalInvApplied?`<div class="det-row"><span class="det-label" style="color:#ffaaff">INV GLOBALE (trafic OPT1)</span><span class="det-val" style="color:#ffaaff">${r.globalInvNote4||'OUI↔NON'}</span></div>`:''}
+${r.firstDigitImpInv4&&r.firstDigitImpInv4.active?`<div class="det-row"><span class="det-label" style="color:#ffaaff">1er CHIFFRE IMPAIR</span><span class="det-val" style="color:#ffaaff">${r.firstDigitImpInv4.label}</span></div>`:''}
 <div class="det-row"><span class="det-label">RÉSULTAT</span><span class="det-val det-result">#N${r.nextNum} — ${r.prediction}</span></div>`;
   const zone=document.getElementById('result-zone');
   zone.style.display='block';
@@ -2578,6 +2617,9 @@ function renderResult(r){
       : []),
     ...(r.globalInvNote
       ? [`<div class="badge badge-hyper">🔄 INV GLOBALE RELAIS — ${r.globalInvNote}</div>`]
+      : []),
+    ...(r.firstDigitImpInv && r.firstDigitImpInv.active
+      ? [`<div class="badge badge-hyper">🔄 1er CHIFFRE IMPAIR 720-1010 — ${r.firstDigitImpInv.label}</div>`]
       : []),
     ...(r.allInvInfo && r.allInvInfo.active
       ? [`<div class="badge badge-temporal">⟲ ALL.INV (max ${ALLINV_MAX} · après perte) — ${r.allInvInfo.label}</div>`]

@@ -904,17 +904,8 @@ let SYNC_SKIP_RATTRAPAGE = false;
 
 // ── RATTRAPAGE : si un ALGO perd, on le réutilise jusqu'à 3 fois, puis retour au routage normal ──
 const RATTRAPAGE_KEY = 'orgbacc_rattrapage_v1';
-const RATTRAPAGE_MAX = 1; // max 1 rattrapage après perte (semaine) ; ANNULÉ le week-end
-const ALLINV_MAX = 2;     // max 2 ALL.INV après perte (semaine) ; ANNULÉ le week-end
-
-// Week-end = samedi (6) ou dimanche (0) — heure locale appareil
-// Rattrapage + ALL.INV après perte sont ANNULÉS ces jours-là
-function isWeekendDay(){
-  try{
-    const d = new Date().getDay();
-    return d === 0 || d === 6;
-  }catch(e){ return false; }
-}
+const RATTRAPAGE_MAX = 2; // max 2 rattrapages après perte puis retour à zéro
+const ALLINV_MAX = 2;     // max 2 ALL.INV après perte puis retour à zéro
 function emptyRattrapage(){
   return { active:false, algo:null, remaining:0, startedAt:null, lostSuit:null, lostColor:null };
 }
@@ -999,177 +990,63 @@ function applyAllInverse(suit, avantDernier, nextH){
   return { result, label, isPair, heurePair, before: suit, applied: result !== suit };
 }
 
-// ══════════════════════════════════════════════════════
-//  SÉRIE PERTES depuis Telegram UNIQUEMENT (unanime partout)
-//  Aucun localStorage — rejoue le cache TG avec le moteur pur
-// ══════════════════════════════════════════════════════
-let PURE_CALC_MODE = false;
-let _tgSimCache = null; // { key, series }
-
-function _tgCacheKey(){
-  if(!telegramHistoryCache || !telegramHistoryCache.length) return '';
-  const last = telegramHistoryCache[telegramHistoryCache.length-1];
-  return telegramHistoryCache.length + ':' + (last.game_number||0) + ':' + (last.normalized||'').slice(0,40);
-}
-
-function buildTelegramSimSeries(){
-  const key = _tgCacheKey();
-  if(_tgSimCache && _tgSimCache.key === key) return _tgSimCache.series;
-  const series = [];
-  if(!telegramHistoryCache || telegramHistoryCache.length < 2){
-    _tgSimCache = { key, series };
-    return series;
-  }
-  const n = telegramHistoryCache.length;
-  const start = Math.max(1, n - 40);
-  const prevPure = PURE_CALC_MODE;
-  const prevSkip = SYNC_SKIP_RATTRAPAGE;
-  PURE_CALC_MODE = true;
-  SYNC_SKIP_RATTRAPAGE = true;
-  try{
-    for(let i = start; i < n; i++){
-      const prev = telegramHistoryCache[i-1];
-      const curr = telegramHistoryCache[i];
-      try{
-        const rawPrev = prev.normalized || prev.raw_text;
-        const rawCurr = curr.normalized || curr.raw_text;
-        if(!checkGameReadiness(rawCurr).usable) continue;
-        const r = runCalc(rawPrev); // base pure
-        if(r.nextNum !== curr.game_number) continue;
-        const parsed = parseGame(rawCurr);
-        if(!parsed.p1 || !parsed.p1.length) continue;
-
-        // Flags dérivés de la série déjà construite (TG uniquement)
-        const flags = _flagsFromSeries(series, r.nextNum);
-        let suit = r.finalSuit;
-        let usedAllInv = false;
-        let usedRattr = false;
-
-        // Rattrapage inv couleur
-        if(flags.rattr && flags.rattr.active){
-          usedRattr = true;
-          const inv = applyRattrapageInv(suit, flags.rattr.lostColor, flags.rattr.lostSuit);
-          suit = inv.result;
-        }
-        // ALL.INV
-        if(flags.allInv){
-          usedAllInv = true;
-          const allInv = applyAllInverse(suit, r.avantDernier, r.nextH);
-          if(allInv.result === suit){
-            const reinvMap = {'♠️':'♦️','♦️':'♠️','♣️':'♥️','♥️':'♣️'};
-            suit = reinvMap[suit] || suit;
-          } else {
-            suit = allInv.result;
-          }
-        }
-
-        const ok = parsed.p1.some(c => c.suit === suit);
-        series.push({
-          gameNum: curr.game_number,
-          suitKey: suit,
-          algoUsed: r.algoUsed,
-          status: ok ? 'valid' : 'invalid',
-          allInv: usedAllInv,
-          rattrapage: usedRattr
-        });
-      }catch(e){}
-    }
-  }finally{
-    PURE_CALC_MODE = prevPure;
-    SYNC_SKIP_RATTRAPAGE = prevSkip;
-  }
-  _tgSimCache = { key, series };
-  return series;
-}
-
-function _flagsFromSeries(series, nextNum){
-  const resolved = series.filter(e => e.status === 'valid' || e.status === 'invalid');
-  if(!resolved.length) return { allInv:false, rattr:null };
-  const last = resolved[resolved.length - 1];
-  if(last.gameNum !== nextNum - 1) return { allInv:false, rattr:null };
-  if(last.status !== 'invalid') return { allInv:false, rattr:null };
-
-  // ALL.INV max 2
-  let allInv = false;
-  let consAll = 0;
-  for(let i = resolved.length - 1; i >= 0; i--){
-    if(resolved[i].allInv && resolved[i].status === 'invalid') consAll++;
-    else if(resolved[i].allInv && resolved[i].status === 'valid'){ consAll = -999; break; }
-    else break;
-  }
-  if(consAll !== -999){
-    if(!last.allInv) allInv = true;
-    else allInv = consAll < ALLINV_MAX;
-  }
-
-  // RATTRAPAGE max 2
-  let rattr = null;
-  let consR = 0;
-  for(let i = resolved.length - 1; i >= 0; i--){
-    if(resolved[i].rattrapage && resolved[i].status === 'invalid') consR++;
-    else if(resolved[i].rattrapage && resolved[i].status === 'valid'){ consR = -999; break; }
-    else break;
-  }
-  if(consR !== -999){
-    if(!last.rattrapage || consR < RATTRAPAGE_MAX){
-      rattr = {
-        active: true,
-        algo: last.algoUsed || 'ALGO1',
-        lostSuit: last.suitKey || null,
-        lostColor: last.suitKey ? (isRed(last.suitKey) ? 'rouge' : 'noir') : null,
-        remaining: last.rattrapage ? (RATTRAPAGE_MAX - consR) : RATTRAPAGE_MAX
-      };
-    }
-  }
-  return { allInv, rattr };
-}
-
-// ALL.INV max 2 (semaine) — ANNULÉ samedi/dimanche — série Telegram uniquement
+// Max 2 ALL.INV : série après perte ; stop si gagné ou 2 ALL.INV déjà consommés
 function shouldApplyAllInv(nextNum){
   if(typeof SYNC_SKIP_RATTRAPAGE !== 'undefined' && SYNC_SKIP_RATTRAPAGE) return false;
-  if(PURE_CALC_MODE) return false;
-  if(isWeekendDay()) return false; // week-end : ALL.INV annulé
   try{
-    return !!_flagsFromSeries(buildTelegramSimSeries(), nextNum).allInv;
-  }catch(e){ return false; }
-}
+    const opt1 = loadHistory()
+      .filter(e => histModeKey(e.algoUsed) === 'OPT1' && (e.status === 'valid' || e.status === 'invalid'))
+      .sort((a,b) => a.gameNum - b.gameNum);
+    if(!opt1.length) return false;
+    const last = opt1[opt1.length - 1];
+    if(last.gameNum !== nextNum - 1) return false;
+    if(last.status !== 'invalid') return false;
 
-// Rattrapage max 1 (semaine) — ANNULÉ samedi/dimanche
-// Exception WE : #N1080–1100 → rattrapage RÉACTIVÉ avec max = RATTRAPAGE_MAX+1
-function shouldApplyRattrapage(nextNum){
-  if(typeof SYNC_SKIP_RATTRAPAGE !== 'undefined' && SYNC_SKIP_RATTRAPAGE) return null;
-  if(PURE_CALC_MODE) return null;
-  const weBoost = isWeekendDay() && nextNum >= 1080 && nextNum <= 1100;
-  if(isWeekendDay() && !weBoost) return null; // week-end hors 1080–1100 : annulé
-  try{
-    const series = buildTelegramSimSeries();
-    if(!weBoost){
-      return _flagsFromSeries(series, nextNum).rattr;
-    }
-    // WE 1080–1100 : même logique pertes TG, plafond max+1
-    const maxW = RATTRAPAGE_MAX + 1;
-    const resolved = series.filter(e => e.status === 'valid' || e.status === 'invalid');
-    if(!resolved.length) return null;
-    const last = resolved[resolved.length - 1];
-    if(last.gameNum !== nextNum - 1) return null;
-    if(last.status !== 'invalid') return null;
-    let consR = 0;
-    for(let i = resolved.length - 1; i >= 0; i--){
-      if(resolved[i].rattrapage && resolved[i].status === 'invalid') consR++;
-      else if(resolved[i].rattrapage && resolved[i].status === 'valid') return null;
+    // Compte les ALL.INV consécutifs perdus en fin de série
+    let consecutive = 0;
+    for(let i = opt1.length - 1; i >= 0; i--){
+      if(opt1[i].allInv && opt1[i].status === 'invalid') consecutive++;
+      else if(opt1[i].allInv && opt1[i].status === 'valid') return false; // ALL.INV gagné → stop
       else break;
     }
-    if(last.rattrapage && consR >= maxW) return null;
+    // Départ (perte normale) ou continuation si < max 2
+    if(!last.allInv) return true;
+    return consecutive < ALLINV_MAX;
+  }catch(e){}
+  return false;
+}
+
+// Max 2 RATTRAPAGE : série après perte ; force même ALGO + inv couleur
+function shouldApplyRattrapage(nextNum){
+  if(typeof SYNC_SKIP_RATTRAPAGE !== 'undefined' && SYNC_SKIP_RATTRAPAGE) return null;
+  try{
+    const opt1 = loadHistory()
+      .filter(e => histModeKey(e.algoUsed) === 'OPT1' && (e.status === 'valid' || e.status === 'invalid'))
+      .sort((a,b) => a.gameNum - b.gameNum);
+    if(!opt1.length) return null;
+    const last = opt1[opt1.length - 1];
+    if(last.gameNum !== nextNum - 1) return null;
+    if(last.status !== 'invalid') return null;
+
+    // Compte les rattrapages consécutifs perdus en fin de série
+    let consecutive = 0;
+    for(let i = opt1.length - 1; i >= 0; i--){
+      if(opt1[i].rattrapage && opt1[i].status === 'invalid') consecutive++;
+      else if(opt1[i].rattrapage && opt1[i].status === 'valid') return null; // rattrapage gagné → stop
+      else break;
+    }
+    if(last.rattrapage && consecutive >= RATTRAPAGE_MAX) return null;
+
+    // Départ (perte normale) ou continuation
     return {
       active: true,
       algo: last.algoUsed || 'ALGO1',
       lostSuit: last.suitKey || null,
       lostColor: last.suitKey ? (isRed(last.suitKey) ? 'rouge' : 'noir') : null,
-      remaining: last.rattrapage ? (maxW - consR) : maxW,
-      weBoost: true,
-      max: maxW
+      remaining: last.rattrapage ? (RATTRAPAGE_MAX - consecutive) : RATTRAPAGE_MAX
     };
-  }catch(e){ return null; }
+  }catch(e){}
+  return null;
 }
 
 function onPredictionLost(algo, suitKey, wasRattrapageEntry){
@@ -1203,38 +1080,32 @@ function updateRegimeDisplay(){
   const p1parity = regime.revelationParity;
   const p2parity = p1parity==='PAIR' ? 'IMPAIR' : 'PAIR';
   let rattrapageHtml = '';
-  if(isWeekendDay()){
-    rattrapageHtml = `
-    <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #7a6028">
-      <span class="regime-label" style="color:#ffbf80">📅 WEEK-END</span>
-      <span class="regime-val" style="color:#ffbf80">ALL.INV annulé · RATTR annulé sauf #N1080–1100 (max ${RATTRAPAGE_MAX + 1})</span>
-    </div>`;
-  } else {
-    try{
-      const opt1 = loadHistory()
-        .filter(e => histModeKey(e.algoUsed)==='OPT1' && (e.status==='valid'||e.status==='invalid'))
-        .sort((a,b)=>a.gameNum-b.gameNum);
-      const last = opt1.length ? opt1[opt1.length-1] : null;
-      if(last && last.status==='invalid' && !last.rattrapage){
-        rattrapageHtml = `
+  const liveRattr = shouldApplyRattrapage((regime.revelationNum != null ? regime.revelationNum : 0) + 1);
+  // Affiche le prochain rattrapage potentiel via historique
+  try{
+    const opt1 = loadHistory()
+      .filter(e => histModeKey(e.algoUsed)==='OPT1' && (e.status==='valid'||e.status==='invalid'))
+      .sort((a,b)=>a.gameNum-b.gameNum);
+    const last = opt1.length ? opt1[opt1.length-1] : null;
+    if(last && last.status==='invalid' && !last.rattrapage){
+      rattrapageHtml = `
     <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #7a6028">
       <span class="regime-label" style="color:#ffbf80">⏱ RATTRAPAGE</span>
       <span class="regime-val" style="color:#ffbf80">EN ATTENTE · max ${RATTRAPAGE_MAX} · après perte #N${last.gameNum}</span>
     </div>`;
-      } else {
-        rattrapageHtml = `
-    <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #2a1a1a">
-      <span class="regime-label">Rattrapage</span>
-      <span class="regime-val" style="color:var(--ivory-dim)">Inactif · max ${RATTRAPAGE_MAX} · ALL.INV max ${ALLINV_MAX}</span>
-    </div>`;
-      }
-    }catch(e){
+    } else {
       rattrapageHtml = `
     <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #2a1a1a">
       <span class="regime-label">Rattrapage</span>
-      <span class="regime-val" style="color:var(--ivory-dim)">Inactif · max ${RATTRAPAGE_MAX} · ALL.INV max ${ALLINV_MAX}</span>
+      <span class="regime-val" style="color:var(--ivory-dim)">Inactif · max ${RATTRAPAGE_MAX} après perte</span>
     </div>`;
     }
+  }catch(e){
+    rattrapageHtml = `
+    <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #2a1a1a">
+      <span class="regime-label">Rattrapage</span>
+      <span class="regime-val" style="color:var(--ivory-dim)">Inactif · max ${RATTRAPAGE_MAX} après perte</span>
+    </div>`;
   }
   const fmtOn = (typeof fmtInv !== 'undefined' && fmtInv.globalOn);
   const fmtOne = (typeof fmtInv !== 'undefined' && fmtInv.oneShotNext);
@@ -1427,20 +1298,9 @@ function showAutoValidationFeedback(entry){
 
 // ── Prédiction déterministe "brute" : moteur RÉVÉLATION, sans aucun bouton manuel,
 //    pour servir de référence stable/rejouable identique partout (cible toujours P1)
-// Prédiction déterministe "brute" (méthode unanime Telegram) :
-// même texte de jeu + même cache TG → même résultat partout (cible P1)
 function deterministicPredict(raw){
-  const prevPure = PURE_CALC_MODE;
-  const prevSkip = SYNC_SKIP_RATTRAPAGE;
-  PURE_CALC_MODE = true;
-  SYNC_SKIP_RATTRAPAGE = true;
-  try{
-    const r = runCalc(raw);
-    return {nextNum:r.nextNum, suit:r.finalSuit, side:'P1', algo:r.algoUsed};
-  }finally{
-    PURE_CALC_MODE = prevPure;
-    SYNC_SKIP_RATTRAPAGE = prevSkip;
-  }
+  const r = runCalc(raw);
+  return {nextNum:r.nextNum, suit:r.finalSuit, side:'P1'};
 }
 
 function actualOutcomeSuits(gameRecord){
@@ -2026,113 +1886,8 @@ function runCalc(raw){
     }
   }
 
-  // ── ULTIME BIG INV ──
-  // · 90–110 : toujours ♦️↔♥️ / ♠️↔♣️
-  // · 910–999 : uniquement si avant-dernier chiffre IMPAIR → ♦️↔♥️ / ♠️↔♣️
-  let ultimateBigInv = null;
-  {
-    const bigMap = {'♦️':'♥️','♥️':'♦️','♠️':'♣️','♣️':'♠️'};
-    let applyBig = false;
-    let zone = '';
-    if(nextNum >= 90 && nextNum <= 110){
-      applyBig = true;
-      zone = '90–110';
-    } else if(nextNum >= 910 && nextNum <= 999){
-      if(avantDernier % 2 === 1){
-        applyBig = true;
-        zone = `910–999 · AV-DERN=${avantDernier}(IMPAIR)`;
-      }
-    }
-    if(applyBig){
-      const before = finalSuit;
-      finalSuit = bigMap[finalSuit] || finalSuit;
-      ultimateBigInv = {
-        active: true,
-        zone,
-        before,
-        result: finalSuit,
-        label: `ULTIME BIG INV · #N${nextNum} ∈ ${zone} → ♦️↔♥️ / ♠️↔♣️ · ${SUIT_EMOJI[before]}→${SUIT_EMOJI[finalSuit]}`
-      };
-    }
-  }
-
-  // ── ULTIME INV HORAIRE — 21h00–21h49 et 23h00–23h49 → ♠️↔♣️ / ♥️↔♦️ ──
-  let ultimateHourInv = null;
-  if((nextH === 21 || nextH === 23) && nextM >= 0 && nextM <= 49){
-    const hourMap = {'♠️':'♣️','♣️':'♠️','♥️':'♦️','♦️':'♥️'};
-    const before = finalSuit;
-    finalSuit = hourMap[finalSuit] || finalSuit;
-    ultimateHourInv = {
-      active: true,
-      h: nextH,
-      m: nextM,
-      before,
-      result: finalSuit,
-      label: `ULTIME INV HORAIRE · ${String(nextH).padStart(2,'0')}h${String(nextM).padStart(2,'0')} (zone 00–49) → ♠️↔♣️ / ♥️↔♦️ · ${SUIT_EMOJI[before]}→${SUIT_EMOJI[finalSuit]}`
-    };
-  }
-
-  // ── INV GLOBALE WEEK-END (sam/dim uniquement) ──
-  // AV-DERN PAIR  + dernier PAIR   → ♣️↔♠️ / ♦️↔♥️
-  // AV-DERN PAIR  + dernier IMPAIR → ♥️↔♠️ / ♦️↔♣️
-  // AV-DERN IMPAIR + dernier PAIR  → ♥️↔♠️ / ♦️↔♣️
-  // AV-DERN IMPAIR + dernier IMPAIR→ ♣️↔♠️ / ♦️↔♥️
-  // (rattrapage + ALL.INV déjà annulés le week-end)
-  let weekendGlobalInv = null;
-  if(isWeekendDay()){
-    const avPair = (avantDernier % 2 === 0);
-    const lastPair = (dernierDigit % 2 === 0);
-    const sameParity = (avPair === lastPair);
-    const weMap = sameParity
-      ? {'♣️':'♠️','♠️':'♣️','♦️':'♥️','♥️':'♦️'}
-      : {'♥️':'♠️','♠️':'♥️','♦️':'♣️','♣️':'♦️'};
-    const before = finalSuit;
-    finalSuit = weMap[finalSuit] || finalSuit;
-    const dayName = new Date().getDay() === 0 ? 'dimanche' : 'samedi';
-    const mapLabel = sameParity ? '♣️↔♠️ / ♦️↔♥️' : '♥️↔♠️ / ♦️↔♣️';
-    weekendGlobalInv = {
-      active: true,
-      day: dayName,
-      avantDernier,
-      dernierDigit,
-      sameParity,
-      before,
-      result: finalSuit,
-      label: `INV GLOBALE WEEK-END · ${dayName} · AV=${avantDernier}(${avPair?'PAIR':'IMPAIR'}) · DER=${dernierDigit}(${lastPair?'PAIR':'IMPAIR'}) → ${mapLabel} · ${SUIT_EMOJI[before]}→${SUIT_EMOJI[finalSuit]}`
-    };
-  }
-
-  // ── POST-PRED WEEK-END TRANCHES 991–1500 (sam/dim) ──
-  // Blocs de 10 depuis 991 : phase%4 → 0:♥️↔♣️/♠️↔♦️ · 1:rien · 2:♥️↔♠️/♣️↔♦️ · 3:rien
-  // (protocole continu jusqu'à 1500 — 1200–1399 / 1400–1500 suivent la même cadence)
-  let weekendRangeInv = null;
-  if(isWeekendDay() && nextNum >= 991 && nextNum <= 1500){
-    const block = Math.floor((nextNum - 991) / 10);
-    const phase = block % 4;
-    if(phase === 0 || phase === 2){
-      const mapA = {'♥️':'♣️','♣️':'♥️','♠️':'♦️','♦️':'♠️'}; // ♥️↔♣️ / ♠️↔♦️
-      const mapB = {'♥️':'♠️','♠️':'♥️','♣️':'♦️','♦️':'♣️'}; // ♥️↔♠️ / ♣️↔♦️
-      const useA = (phase === 0);
-      const rMap = useA ? mapA : mapB;
-      const mapLabel = useA ? '♥️↔♣️ / ♠️↔♦️' : '♥️↔♠️ / ♣️↔♦️';
-      const before = finalSuit;
-      finalSuit = rMap[finalSuit] || finalSuit;
-      const rangeLo = 991 + block * 10;
-      const rangeHi = Math.min(rangeLo + 9, 1500);
-      weekendRangeInv = {
-        active: true,
-        phase,
-        block,
-        range: `${rangeLo}–${rangeHi}`,
-        before,
-        result: finalSuit,
-        label: `POST-PRED WE ${rangeLo}–${rangeHi} · phase ${phase} → ${mapLabel} · ${SUIT_EMOJI[before]}→${SUIT_EMOJI[finalSuit]}`
-      };
-    }
-  }
-
   return {num,p1,p2,nextNum,nextH,nextM,avantDernier,dernierDigit,sel,subEngine,algoResult,finalInv,finalSuit,
-          hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,formatSuitInv,globalInvNote,allInvInfo,ultimateBigInv,ultimateHourInv,weekendGlobalInv,weekendRangeInv,
+          hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,formatSuitInv,globalInvNote,allInvInfo,
           isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime},
           rattrapageForced,rattrapageSnapshot,normalAlgo,digitAlgoRule,fmtInvSnapshot:{ globalOn:false }};
 }
@@ -2783,18 +2538,6 @@ function renderResult(r){
     ...(r.allInvInfo && r.allInvInfo.active
       ? [`<div class="badge badge-temporal">⟲ ALL.INV (max ${ALLINV_MAX} · après perte) — ${r.allInvInfo.label}</div>`]
       : []),
-    ...(r.ultimateBigInv && r.ultimateBigInv.active
-      ? [`<div class="badge badge-hyper">⚡ ULTIME BIG INV — ${r.ultimateBigInv.label}</div>`]
-      : []),
-    ...(r.ultimateHourInv && r.ultimateHourInv.active
-      ? [`<div class="badge badge-hyper">🌙 ULTIME INV HORAIRE — ${r.ultimateHourInv.label}</div>`]
-      : []),
-    ...(r.weekendGlobalInv && r.weekendGlobalInv.active
-      ? [`<div class="badge badge-hyper">📅 INV GLOBALE WEEK-END — ${r.weekendGlobalInv.label}</div>`]
-      : []),
-    ...(r.weekendRangeInv && r.weekendRangeInv.active
-      ? [`<div class="badge badge-hyper">📊 POST-PRED WE TRANCHE — ${r.weekendRangeInv.label}</div>`]
-      : []),
     ...(r.formatSuitInv
       ? [`<div class="badge badge-hyper" style="opacity:.45">INV FORMAT — OFF · pred pure</div>`]
       : []),
@@ -2968,23 +2711,17 @@ async function demarrerLive(silent){
     if(data.error) throw new Error(data.error);
 
     telegramHistoryCache = (data.games||[]).slice().sort((a,b)=>a.game_number-b.game_number);
-    _tgSimCache = null;
     if(telegramHistoryCache.length < 2) throw new Error('Pas assez de jeux récupérés depuis Telegram.');
 
-    // Inv. format neutre (OFF) — pred pure
-    fmtInv = { globalOn:false, activeMap:null, oneShotNext:false, lastTriggerNum:null, source:'OFF · pred pure' };
+    // État inversion format IDENTIQUE sur tous les appareils (recalcul depuis Telegram)
+    fmtInv = rebuildFmtInvFromHistory(telegramHistoryCache);
 
-    // RÉVÉLATION depuis Telegram UNIQUEMENT (méthode unanime du fichier de référence)
-    if(statusBox) statusBox.textContent = `${telegramHistoryCache.length} jeux chargés · détection des révélations…`;
+    // Détection automatique de la dernière RÉVÉLATION (3-3) dans les 150 jeux
+    statusBox.textContent = `${telegramHistoryCache.length} jeux chargés · détection des révélations…`;
     const lastRevel = scanHistoryForLatestRevelation(telegramHistoryCache);
-    const pureReg = pureRegimeFromTelegram(null);
-    regime.revelationNum = pureReg.revelationNum;
-    regime.revelationParity = pureReg.revelationParity;
-    regime.source = pureReg.source;
-    _tgSimCache = null;
     updateRegimeDisplay();
 
-    if(statusBox) statusBox.textContent = `${telegramHistoryCache.length} jeux chargés · calcul des statistiques globales…`;
+    statusBox.textContent = `${telegramHistoryCache.length} jeux chargés · calcul des statistiques globales…`;
     globalBacktestStats = computeGlobalBacktestStats(telegramHistoryCache, 50);
 
     // Reconstruction UNANIME depuis Telegram (OPT1 + OPT4) — identique sur tous les appareils
@@ -3128,7 +2865,6 @@ async function fetchLatestTelegramGame(silent=false){
         const hData = await hRes.json();
         if(hData && hData.games && hData.games.length){
           telegramHistoryCache = hData.games.slice().sort((a,b)=>a.game_number-b.game_number);
-          _tgSimCache = null;
         }
       }catch(e){}
       // Enrichir avec le jeu courant
@@ -3136,7 +2872,7 @@ async function fetchLatestTelegramGame(silent=false){
         const idx = telegramHistoryCache.findIndex(g => g.game_number === data.game_number);
         const entry = { game_number: data.game_number, normalized: data.normalized, raw_text: data.raw_text || data.normalized };
         if(idx >= 0) telegramHistoryCache[idx] = entry;
-        else { telegramHistoryCache.push(entry); telegramHistoryCache.sort((a,b)=>a.game_number-b.game_number); _tgSimCache = null; }
+        else { telegramHistoryCache.push(entry); telegramHistoryCache.sort((a,b)=>a.game_number-b.game_number); }
       }
       syncUnanimousStateFromTelegram(data.normalized);
       const revelTag = regime.revelationNum != null ? ` · régime #N${regime.revelationNum}` : '';

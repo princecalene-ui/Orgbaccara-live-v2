@@ -904,7 +904,7 @@ let SYNC_SKIP_RATTRAPAGE = false;
 
 // ── RATTRAPAGE : si un ALGO perd, on le réutilise jusqu'à 3 fois, puis retour au routage normal ──
 const RATTRAPAGE_KEY = 'orgbacc_rattrapage_v1';
-const RATTRAPAGE_MAX = 1; // max 1 rattrapage après perte (semaine) ; ANNULÉ le week-end
+const RATTRAPAGE_MAX = 2; // max 2 rattrapages (semaine & week-end, pertes ou non)
 const ALLINV_MAX = 2;     // max 2 ALL.INV après perte (semaine) ; ANNULÉ le week-end
 
 // Week-end = samedi (6) ou dimanche (0) — heure locale appareil
@@ -1134,11 +1134,11 @@ function shouldApplyAllInv(nextNum){
   }catch(e){ return false; }
 }
 
-// Rattrapage : semaine max 1 · week-end max = RATTRAPAGE_MAX+2 (réactivé WE)
+// Rattrapage max 2 (tous les jours — pertes ou non)
 function shouldApplyRattrapage(nextNum){
   if(typeof SYNC_SKIP_RATTRAPAGE !== 'undefined' && SYNC_SKIP_RATTRAPAGE) return null;
   if(PURE_CALC_MODE) return null;
-  const maxR = isWeekendDay() ? (RATTRAPAGE_MAX + 2) : RATTRAPAGE_MAX;
+  const maxR = RATTRAPAGE_MAX; // 2 partout
   try{
     const series = buildTelegramSimSeries();
     const resolved = series.filter(e => e.status === 'valid' || e.status === 'invalid');
@@ -1159,7 +1159,6 @@ function shouldApplyRattrapage(nextNum){
       lostSuit: last.suitKey || null,
       lostColor: last.suitKey ? (isRed(last.suitKey) ? 'rouge' : 'noir') : null,
       remaining: last.rattrapage ? (maxR - consR) : maxR,
-      weBoost: isWeekendDay(),
       max: maxR
     };
   }catch(e){ return null; }
@@ -1296,7 +1295,7 @@ function updateRegimeDisplay(){
     rattrapageHtml = `
     <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #7a6028">
       <span class="regime-label" style="color:#ffbf80">📅 WEEK-END</span>
-      <span class="regime-val" style="color:#ffbf80">ALL.INV annulé · RATTR max ${RATTRAPAGE_MAX + 2} · auto-apprentissage ON</span>
+      <span class="regime-val" style="color:#ffbf80">ALL.INV annulé · RATTR max ${RATTRAPAGE_MAX} · auto-apprentissage ON</span>
     </div>`;
   } else {
     try{
@@ -2049,8 +2048,11 @@ function runCalc(raw){
   // INV FORMAT OFF (pred pure)
   let formatSuitInv = { active:false, map:null, before:finalSuit, result:finalSuit, reason:'INV FORMAT OFF · pred pure' };
 
-  // ── INV GLOBALES RELAIS (pures · uniquement digits du N° prédit · unanimes) ──
-  // Aucune dépendance à une perte / historique local
+  // ── INV GLOBALE FINAL (digits du N° prédit · pure / unanime) ──
+  // 3ch : AV-imp + 1er-imp → ♣️↔♠️/♦️↔♥️ · AV-pair + 1er-pair → ♠️↔♦️/♣️↔♥️
+  // 2ch : 1er/AV imp → ♣️↔♠️/♦️↔♥️ · 1er/AV pair → ♠️↔♦️/♣️↔♥️
+  // 4ch : (1er pair + 2e pair) ou AV-imp → ♣️↔♠️/♦️↔♥️
+  //       (1er imp + 2e imp) ou AV-pair → ♠️↔♦️/♣️↔♥️
   let globalInvNote = null;
   {
     const str = String(nextNum);
@@ -2059,33 +2061,35 @@ function runCalc(raw){
     const second = len >= 2 ? parseInt(str[1], 10) : null;
     const avDern = len >= 2 ? parseInt(str[len-2], 10) : first;
     const beforeG = finalSuit;
+    const mapA = {'♣️':'♠️','♠️':'♣️','♦️':'♥️','♥️':'♦️'}; // ♣️↔♠️ / ♦️↔♥️
+    const mapB = {'♠️':'♦️','♦️':'♠️','♣️':'♥️','♥️':'♣️'}; // ♠️↔♦️ / ♣️↔♥️
+
     if(len === 3){
       if(avDern % 2 === 1 && first % 2 === 1){
-        const map = {'♣️':'♠️','♠️':'♣️','♦️':'♥️','♥️':'♦️'};
-        finalSuit = map[finalSuit] || finalSuit;
-        globalInvNote = `INV GLOBALE 3ch (av-d imp + 1er imp) · ${SUIT_EMOJI[beforeG]}→${SUIT_EMOJI[finalSuit]}`;
+        finalSuit = mapA[finalSuit] || finalSuit;
+        globalInvNote = `INV GLOBALE 3ch (AV-imp + 1er-imp) → ♣️↔♠️/♦️↔♥️ · ${SUIT_EMOJI[beforeG]}→${SUIT_EMOJI[finalSuit]}`;
       } else if(avDern % 2 === 0 && first % 2 === 0){
-        const map = {'♠️':'♦️','♦️':'♠️','♣️':'♥️','♥️':'♣️'};
-        finalSuit = map[finalSuit] || finalSuit;
-        globalInvNote = `INV GLOBALE 3ch (av-d pair + 1er pair) · ${SUIT_EMOJI[beforeG]}→${SUIT_EMOJI[finalSuit]}`;
+        finalSuit = mapB[finalSuit] || finalSuit;
+        globalInvNote = `INV GLOBALE 3ch (AV-pair + 1er-pair) → ♠️↔♦️/♣️↔♥️ · ${SUIT_EMOJI[beforeG]}→${SUIT_EMOJI[finalSuit]}`;
       }
-    } else if(len === 2 || len === 4){
-      let cond1=false, cond2=false;
-      if(len === 2){
-        cond1 = (avDern % 2 === 1 && first % 2 === 0);
-        cond2 = (avDern % 2 === 0 && first % 2 === 1);
+    } else if(len === 2){
+      // 2 chiffres : 1er = AV-dernier
+      if(first % 2 === 1){
+        finalSuit = mapA[finalSuit] || finalSuit;
+        globalInvNote = `INV GLOBALE 2ch (1er/AV imp) → ♣️↔♠️/♦️↔♥️ · ${SUIT_EMOJI[beforeG]}→${SUIT_EMOJI[finalSuit]}`;
       } else {
-        cond1 = (second % 2 === 0 && first % 2 === 0);
-        cond2 = (avDern % 2 === 0 && first % 2 === 1 && second % 2 === 1);
+        finalSuit = mapB[finalSuit] || finalSuit;
+        globalInvNote = `INV GLOBALE 2ch (1er/AV pair) → ♠️↔♦️/♣️↔♥️ · ${SUIT_EMOJI[beforeG]}→${SUIT_EMOJI[finalSuit]}`;
       }
-      if(cond1){
-        const map = {'♣️':'♦️','♦️':'♣️','♠️':'♥️','♥️':'♠️'};
-        finalSuit = map[finalSuit] || finalSuit;
-        globalInvNote = `INV GLOBALE ${len}ch (cond1) · ${SUIT_EMOJI[beforeG]}→${SUIT_EMOJI[finalSuit]}`;
-      } else if(cond2){
-        const map = {'♠️':'♣️','♣️':'♠️','♦️':'♥️','♥️':'♦️'};
-        finalSuit = map[finalSuit] || finalSuit;
-        globalInvNote = `INV GLOBALE ${len}ch (cond2) · ${SUIT_EMOJI[beforeG]}→${SUIT_EMOJI[finalSuit]}`;
+    } else if(len === 4){
+      const bothPair = (first % 2 === 0 && second % 2 === 0);
+      const bothImp  = (first % 2 === 1 && second % 2 === 1);
+      if(bothPair || (!bothImp && avDern % 2 === 1)){
+        finalSuit = mapA[finalSuit] || finalSuit;
+        globalInvNote = `INV GLOBALE 4ch (${bothPair?'1er+2e pair':'AV-imp'}) → ♣️↔♠️/♦️↔♥️ · ${SUIT_EMOJI[beforeG]}→${SUIT_EMOJI[finalSuit]}`;
+      } else if(bothImp || avDern % 2 === 0){
+        finalSuit = mapB[finalSuit] || finalSuit;
+        globalInvNote = `INV GLOBALE 4ch (${bothImp?'1er+2e imp':'AV-pair'}) → ♠️↔♦️/♣️↔♥️ · ${SUIT_EMOJI[beforeG]}→${SUIT_EMOJI[finalSuit]}`;
       }
     }
   }

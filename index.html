@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ORG_Back RELAIS V9.13</title>
+<title>ORG_Back RELAIS V13.9 PAIR</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&family=Rajdhani:wght@300;400;600;700&family=Courier+Prime:wght@400;700&display=swap');
 
@@ -381,10 +381,10 @@
 <header>
   <div class="title-suite">
     <span class="suit-deco">♠️ ♥️</span>
-    <h1>ORG_Back RELAIS V9.13</h1>
+    <h1>ORG_Back RELAIS V13.9 PAIR</h1>
     <span class="suit-deco">♣️ ♦️</span>
   </div>
-  <div class="subtitle">Pred PURE / UNIVERSELLE · même jeu → même résultat partout · sans état local</div>
+  <div class="subtitle">Pred PURE / UNIVERSELLE · principe PAIR (tous jours) · même jeu → même résultat partout</div>
   <div class="author">AUTEUR : X_Code</div>
 </header>
 
@@ -484,7 +484,7 @@
   </div>
 </main>
 
-<footer>ORG_Back RELAIS V9.13 · X_Code · ♠️ ♥️ ♣️ ♦️</footer>
+<footer>ORG_Back RELAIS V13.9 PAIR · X_Code · ♠️ ♥️ ♣️ ♦️</footer>
 
 <script>
 
@@ -907,7 +907,7 @@ const RATTRAPAGE_KEY = 'orgbacc_rattrapage_v1';
 const RATTRAPAGE_MAX = 2; // max 2 rattrapages après perte puis retour à zéro
 const ALLINV_MAX = 2;     // max 2 ALL.INV après perte puis retour à zéro
 function emptyRattrapage(){
-  return { active:false, algo:null, remaining:0, startedAt:null, lostSuit:null, lostColor:null };
+  return { active:false, algo:null, remaining:0, startedAt:null, lostSuit:null, lostColor:null, lostFormat:null, rattrLevel:0 };
 }
 function loadRattrapage(){
   try{
@@ -920,7 +920,9 @@ function loadRattrapage(){
       remaining: Math.max(0, parseInt(o.remaining,10)||0),
       startedAt: o.startedAt || null,
       lostSuit: o.lostSuit || null,
-      lostColor: o.lostColor || null
+      lostColor: o.lostColor || null,
+      lostFormat: o.lostFormat || null,
+      rattrLevel: Math.max(0, parseInt(o.rattrLevel,10)||0)
     };
   }catch(e){ return emptyRattrapage(); }
 }
@@ -990,6 +992,90 @@ function applyAllInverse(suit, avantDernier, nextH){
   return { result, label, isPair, heurePair, before: suit, applied: result !== suit };
 }
 
+// ── COUCHE SUPÉRIEURE RATTRAPAGE — inv selon format du jeu perdu (2-2 / 3-3 / 2-3)
+// Appliquée AU-DESSUS des autres inversions, uniquement sur les rattrapages.
+// Niveau 1 (1er rattr après perte normale) :
+//   2-2 → ♦️↔♠️ / ♣️↔♥️
+//   3-3 → ♦️↔♣️ / ♠️↔♥️
+//   2-3 → ♠️↔♣️ / ♥️↔♦️
+// Niveau 2 (si le 1er rattr perd) :
+//   2-2 → ♦️↔♣️ / ♠️↔♥️
+//   3-3 → ♠️↔♣️ / ♦️↔♥️
+//   2-3 → ♦️↔♠️ / ♣️↔♥️
+function normalizeLostFormat(fmt){
+  if(!fmt) return null;
+  const f = String(fmt).trim();
+  if(f === '3-3') return '3-3';
+  if(f === '2-2') return '2-2';
+  if(f === '2-3' || f === '3-2') return '2-3';
+  return f;
+}
+function applyRattrapageFormatInv(predSuit, lostFormat, rattrLevel){
+  if(!predSuit) return { result:predSuit, applied:false, detail:'pas de couleur prédite', level:rattrLevel||0, format:lostFormat||null };
+  const fmt = normalizeLostFormat(lostFormat);
+  const level = (rattrLevel === 2) ? 2 : 1;
+  let map = null, label = '';
+  if(level === 1){
+    if(fmt === '2-2'){
+      map = {'♦️':'♠️','♠️':'♦️','♣️':'♥️','♥️':'♣️'};
+      label = 'RATTR1 · format 2-2 → ♦️↔♠️ / ♣️↔♥️';
+    } else if(fmt === '3-3'){
+      map = {'♦️':'♣️','♣️':'♦️','♠️':'♥️','♥️':'♠️'};
+      label = 'RATTR1 · format 3-3 → ♦️↔♣️ / ♠️↔♥️';
+    } else if(fmt === '2-3'){
+      map = {'♠️':'♣️','♣️':'♠️','♥️':'♦️','♦️':'♥️'};
+      label = 'RATTR1 · format 2-3 → ♠️↔♣️ / ♥️↔♦️';
+    }
+  } else {
+    if(fmt === '2-2'){
+      map = {'♦️':'♣️','♣️':'♦️','♠️':'♥️','♥️':'♠️'};
+      label = 'RATTR2 · format 2-2 → ♦️↔♣️ / ♠️↔♥️';
+    } else if(fmt === '3-3'){
+      map = {'♠️':'♣️','♣️':'♠️','♦️':'♥️','♥️':'♦️'};
+      label = 'RATTR2 · format 3-3 → ♠️↔♣️ / ♦️↔♥️';
+    } else if(fmt === '2-3'){
+      map = {'♦️':'♠️','♠️':'♦️','♣️':'♥️','♥️':'♣️'};
+      label = 'RATTR2 · format 2-3 → ♦️↔♠️ / ♣️↔♥️';
+    }
+  }
+  if(!map){
+    return {
+      result: predSuit,
+      applied: false,
+      detail: `RATTR${level} · format ${fmt||'?'} → pas de map (format inconnu)`,
+      level, format: fmt
+    };
+  }
+  const result = map[predSuit] || predSuit;
+  return {
+    result,
+    applied: result !== predSuit,
+    detail: `${label} · ${SUIT_EMOJI[predSuit]||predSuit}→${SUIT_EMOJI[result]||result}`,
+    level, format: fmt, before: predSuit
+  };
+}
+
+function lookupGameFormat(gameNum){
+  if(gameNum == null) return null;
+  try{
+    const hist = loadHistory().find(e => e.gameNum === gameNum && e.actualFormat);
+    if(hist && hist.actualFormat) return normalizeLostFormat(hist.actualFormat);
+  }catch(e){}
+  try{
+    if(telegramHistoryCache && telegramHistoryCache.length){
+      const g = telegramHistoryCache.find(x => x.game_number === gameNum);
+      if(g){
+        const raw = g.normalized || g.raw_text;
+        if(raw){
+          const fmt = detectFormatFromRaw(raw);
+          if(fmt) return normalizeLostFormat(fmt);
+        }
+      }
+    }
+  }catch(e){}
+  return null;
+}
+
 // Max 2 ALL.INV : série après perte ; stop si gagné ou 2 ALL.INV déjà consommés
 function shouldApplyAllInv(nextNum){
   if(typeof SYNC_SKIP_RATTRAPAGE !== 'undefined' && SYNC_SKIP_RATTRAPAGE) return false;
@@ -1016,7 +1102,7 @@ function shouldApplyAllInv(nextNum){
   return false;
 }
 
-// Max 2 RATTRAPAGE : série après perte ; force même ALGO + inv couleur
+// Max 2 RATTRAPAGE : série après perte ; force même ALGO + inv couleur + couche format
 function shouldApplyRattrapage(nextNum){
   if(typeof SYNC_SKIP_RATTRAPAGE !== 'undefined' && SYNC_SKIP_RATTRAPAGE) return null;
   try{
@@ -1037,12 +1123,19 @@ function shouldApplyRattrapage(nextNum){
     }
     if(last.rattrapage && consecutive >= RATTRAPAGE_MAX) return null;
 
-    // Départ (perte normale) ou continuation
+    // Niveau : 1 = 1er rattr (après perte normale), 2 = 2e rattr (après 1er rattr perdu)
+    const rattrLevel = last.rattrapage ? 2 : 1;
+    const lostFormat = last.actualFormat
+      ? normalizeLostFormat(last.actualFormat)
+      : lookupGameFormat(last.gameNum);
+
     return {
       active: true,
       algo: last.algoUsed || 'ALGO1',
       lostSuit: last.suitKey || null,
       lostColor: last.suitKey ? (isRed(last.suitKey) ? 'rouge' : 'noir') : null,
+      lostFormat: lostFormat,
+      rattrLevel: rattrLevel,
       remaining: last.rattrapage ? (RATTRAPAGE_MAX - consecutive) : RATTRAPAGE_MAX
     };
   }catch(e){}
@@ -1088,10 +1181,11 @@ function updateRegimeDisplay(){
       .sort((a,b)=>a.gameNum-b.gameNum);
     const last = opt1.length ? opt1[opt1.length-1] : null;
     if(last && last.status==='invalid' && !last.rattrapage){
+      const fmtHint = last.actualFormat || lookupGameFormat(last.gameNum) || '?';
       rattrapageHtml = `
     <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #7a6028">
       <span class="regime-label" style="color:#ffbf80">⏱ RATTRAPAGE</span>
-      <span class="regime-val" style="color:#ffbf80">EN ATTENTE · max ${RATTRAPAGE_MAX} · après perte #N${last.gameNum}</span>
+      <span class="regime-val" style="color:#ffbf80">EN ATTENTE · max ${RATTRAPAGE_MAX} · après perte #N${last.gameNum} · format ${fmtHint} → couche RATTR1</span>
     </div>`;
     } else {
       rattrapageHtml = `
@@ -1267,6 +1361,14 @@ function resolvePendingHistory(gameNum, p1Cards, p2Cards, rawText){
     if(ok === null) continue;
     entry.status = ok ? 'valid' : 'invalid';
     entry.autoResolved = true;
+    try{
+      if(rawText){
+        const fmt = detectFormatFromRaw(rawText);
+        if(fmt) entry.actualFormat = fmt;
+      } else if(p1Cards && p2Cards){
+        entry.actualFormat = detectHandFormat(p1Cards, p2Cards);
+      }
+    }catch(e){}
     lastEntry = entry;
   }
   saveHistory(list);
@@ -1577,15 +1679,13 @@ function runEngine(num, p1Cards, p2Cards, nextNum){
     if(!algoEven){rule='ALGO IMPAIR × RÉDUIT PAIR → ♣️↔️♦️ / ♠️↔️♥️';const m={'♣️':'♦️','♦️':'♣️','♠️':'♥️','♥️':'♠️'};transformed=m[p2First.suit]||p2First.suit;}
     else{rule='ALGO PAIR × RÉDUIT IMPAIR → ♣️↔️♠️ / ♦️↔️♥️';const m={'♣️':'♠️','♠️':'♣️','♦️':'♥️','♥️':'♦️'};transformed=m[p2First.suit]||p2First.suit;}
   }
-  // POST-INV (heure PAIR ou plage 1400-1441) — logique RELAIS V4
+  // POST-INV — principe PAIR / week-end appliqué TOUS LES JOURS (lundi→dimanche)
+  // V13.9 PAIR : post-inv toujours active (comme heure PAIR), indépendamment du jour réel
   const nextTimeTotal=nextNum-1, nextH=Math.floor(nextTimeTotal/60)%24;
-  const hPair=nextH%2===0, inRange=nextNum>=1400&&nextNum<=1441, postInvActive=hPair||inRange;
+  const hPair=nextH%2===0, inRange=nextNum>=1400&&nextNum<=1441;
+  const postInvActive=true; // FORCE PAIR partout (ex-week-end → toute la semaine)
   const postInvMap={'♠️':'♥️','♥️':'♠️','♣️':'♦️','♦️':'♣️'};
-  let postInvReason='';
-  if(hPair&&inRange) postInvReason=`H=${nextH}(PAIR)+#N${nextNum} 1400-1441→INV ♠️↔️♥️/♣️↔️♦️`;
-  else if(hPair) postInvReason=`H=${nextH}(PAIR)→INV ♠️↔️♥️/♣️↔️♦️`;
-  else if(inRange) postInvReason=`#N${nextNum} 1400-1441→INV ♠️↔️♥️/♣️↔️♦️`;
-  else postInvReason=`H=${nextH}(IMPAIR)&hors 1400-1441→PAS D'INV`;
+  let postInvReason=`V13.9 PAIR · tous jours · INV ♠️↔️♥️/♣️↔️♦️ (H=${nextH}${hPair?' PAIR':' IMPAIR'}${inRange?' +1400-1441':''})`;
   const rawResult=postInvActive?(postInvMap[transformed]||transformed):transformed;
   return {calcNum,calcNextNum,isReduced,time:time.str,p1First,p2First,sHM,sameCol,sColor,sTotal,
           baseAlgo,fibMod,fibVal,fibIdx,fibSeed,algo,algoEven,numEven,reducedDigit,reduceSteps,
@@ -1657,7 +1757,9 @@ function runCalc(raw){
       remaining: rattrInfo.remaining != null ? rattrInfo.remaining : RATTRAPAGE_MAX,
       startedAt: new Date().toISOString(),
       lostSuit: rattrInfo.lostSuit,
-      lostColor: rattrInfo.lostColor
+      lostColor: rattrInfo.lostColor,
+      lostFormat: rattrInfo.lostFormat || null,
+      rattrLevel: rattrInfo.rattrLevel || 1
     };
   } else {
     rattrapage = emptyRattrapage();
@@ -1792,6 +1894,7 @@ function runCalc(raw){
   // ── INV RATTRAPAGE (basée sur la couleur du jeu perdu) ──
   // Appliquée uniquement si on est en cycle de rattrapage
   let rattrapageInv = null;
+  let rattrapageFormatInv = null;
   if(inRattrapage){
     const inv = applyRattrapageInv(finalSuit, rattrapage.lostColor, rattrapage.lostSuit);
     rattrapageInv = {
@@ -1803,6 +1906,18 @@ function runCalc(raw){
       detail: inv.detail
     };
     finalSuit = inv.result;
+
+    // COUCHE SUPÉRIEURE : inv selon format du jeu perdu + niveau rattr (1 ou 2)
+    const finv = applyRattrapageFormatInv(finalSuit, rattrapage.lostFormat, rattrapage.rattrLevel);
+    rattrapageFormatInv = {
+      active: finv.applied,
+      level: finv.level,
+      format: finv.format,
+      before: finalSuit,
+      result: finv.result,
+      detail: finv.detail
+    };
+    if(finv.applied) finalSuit = finv.result;
   }
 
   // Snapshot rattrapage (la consommation se fait uniquement dans calculate(), pas en backtest)
@@ -1813,9 +1928,11 @@ function runCalc(raw){
         remainingBefore:rattrapage.remaining,
         remainingAfter:Math.max(0, rattrapage.remaining-1),
         lostSuit:rattrapage.lostSuit,
-        lostColor:rattrapage.lostColor
+        lostColor:rattrapage.lostColor,
+        lostFormat:rattrapage.lostFormat,
+        rattrLevel:rattrapage.rattrLevel
       }
-    : { forced:false, algo:null, remainingBefore:0, remainingAfter:0, lostSuit:null, lostColor:null };
+    : { forced:false, algo:null, remainingBefore:0, remainingAfter:0, lostSuit:null, lostColor:null, lostFormat:null, rattrLevel:0 };
 
   // INV FORMAT OFF (pred pure)
   let formatSuitInv = { active:false, map:null, before:finalSuit, result:finalSuit, reason:'INV FORMAT OFF · pred pure' };
@@ -1933,7 +2050,7 @@ function runCalc(raw){
   }
 
   return {num,p1,p2,nextNum,nextH,nextM,avantDernier,dernierDigit,sel,subEngine,algoResult,finalInv,finalSuit,
-          hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,formatSuitInv,globalInvNote,allInvInfo,firstDigitImpInv,
+          hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,rattrapageFormatInv,formatSuitInv,globalInvNote,allInvInfo,firstDigitImpInv,
           isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime},
           rattrapageForced,rattrapageSnapshot,normalAlgo,digitAlgoRule,fmtInvSnapshot:{ globalOn:false }};
 }
@@ -1955,6 +2072,32 @@ function playMarkerOnP1Side(raw){
   const dash = raw.search(/\s-\s/);
   const p1Side = dash === -1 ? raw : raw.slice(0, dash);
   return p1Side.indexOf('▶️') !== -1 || p1Side.indexOf('▶') !== -1;
+}
+function playMarkerOnP2Side(raw){
+  const dash = raw.search(/\s-\s/);
+  if(dash === -1) return false;
+  const p2Side = raw.slice(dash);
+  return p2Side.indexOf('▶️') !== -1 || p2Side.indexOf('▶') !== -1;
+}
+// Format effectif pour rattrapage / révélation :
+// • 3-3 confirmé, ou P1 déjà à 3 cartes + ▶️ passé côté P2 → on sait que ce sera 3-3
+// • 2-2 / 2-3 / 3-2 classiques
+function detectFormatFromRaw(raw){
+  if(!raw) return null;
+  try{
+    const parsed = parseGame(raw);
+    const a = (parsed.p1||[]).length;
+    const b = (parsed.p2||[]).length;
+    if(a === 3 && b === 3) return '3-3';
+    if(a === 3 && b === 2 && playMarkerOnP2Side(raw)) return '3-3'; // 3ᵉ P2 annoncée → format final 3-3
+    if(a === 3 && b === 2) return '3-2';
+    if(a === 2 && b === 3) return '2-3';
+    if(a === 2 && b === 2) return '2-2';
+    if(a === 3 && b >= 1) return '3-3'; // P1 complet : on travaille déjà en 3-x
+    return a + '-' + b;
+  }catch(e){
+    return null;
+  }
 }
 function checkGameReadiness(raw){
   if(!raw) return {usable:false, reason:'empty', detail:'Aucune donnée.', waitingThird:false};
@@ -2647,8 +2790,13 @@ function renderResult(r){
           : `<div class="badge badge-transform" style="opacity:.55">⇄ 2 DERNIERS CHIFFRES — ${r.digitAlgoRule.label}</div>`]
       : []),
     ...(r.rattrapageForced
-      ? [`<div class="badge badge-temporal">⏱ RATTRAPAGE — ${r.algoUsed} forcé · réf. perdu ${r.rattrapageSnapshot.lostSuit?SUIT_EMOJI[r.rattrapageSnapshot.lostSuit]:'?'} (${r.rattrapageSnapshot.lostColor||'?'}) · restant ${r.rattrapageSnapshot.remainingAfter}/${RATTRAPAGE_MAX}${r.rattrapageInv&&r.rattrapageInv.active?` · inv ${SUIT_EMOJI[r.rattrapageInv.before]}→${SUIT_EMOJI[r.rattrapageInv.result]}`:''}</div>`]
+      ? [`<div class="badge badge-temporal">⏱ RATTRAPAGE — ${r.algoUsed} forcé · réf. perdu ${r.rattrapageSnapshot.lostSuit?SUIT_EMOJI[r.rattrapageSnapshot.lostSuit]:'?'} (${r.rattrapageSnapshot.lostColor||'?'}) · format ${r.rattrapageSnapshot.lostFormat||'?'} · niv.${r.rattrapageSnapshot.rattrLevel||1} · restant ${r.rattrapageSnapshot.remainingAfter}/${RATTRAPAGE_MAX}${r.rattrapageInv&&r.rattrapageInv.active?` · inv ${SUIT_EMOJI[r.rattrapageInv.before]}→${SUIT_EMOJI[r.rattrapageInv.result]}`:''}</div>`]
       : []),
+    ...(r.rattrapageFormatInv && r.rattrapageFormatInv.active
+      ? [`<div class="badge badge-hyper">⬆ COUCHE FORMAT RATTR — ${r.rattrapageFormatInv.detail}</div>`]
+      : (r.rattrapageForced && r.rattrapageFormatInv
+        ? [`<div class="badge badge-hyper" style="opacity:.55">⬆ COUCHE FORMAT RATTR — ${r.rattrapageFormatInv.detail}</div>`]
+        : [])),
     `<div class="badge badge-selector">🎯 SÉLECTEUR — ${selectorLine}</div>`,
     ...(r.groupCInv && r.groupCInv.active
       ? [`<div class="badge badge-transform">🅲 GROUPE C — ${r.groupCInv.detail}</div>`]
@@ -2705,6 +2853,8 @@ ${r.digitAlgoRule?`<div class="det-row"><span class="det-label" style="color:#e0
 <div class="det-row"><span class="det-label" style="color:#ffbf80">⏱ RATTRAPAGE</span><span class="det-val" style="color:#ffbf80">${r.rattrapageForced?`ACTIF → ${r.algoUsed} forcé (${r.rattrapageSnapshot.remainingBefore}→${r.rattrapageSnapshot.remainingAfter} restant)`:'INACTIF'}</span></div>
 ${r.rattrapageForced?`<div class="det-row"><span class="det-label" style="color:#ffbf80">Réf. jeu perdu</span><span class="det-val" style="color:#ffbf80">${r.rattrapageSnapshot.lostSuit?SUIT_EMOJI[r.rattrapageSnapshot.lostSuit]:'—'} (${r.rattrapageSnapshot.lostColor||'?'})</span></div>`:''}
 ${r.rattrapageInv?`<div class="det-row"><span class="det-label" style="color:#ffbf80">Inv. rattrapage</span><span class="det-val" style="color:#ffbf80">${r.rattrapageInv.detail}${r.rattrapageInv.active?` · ${SUIT_EMOJI[r.rattrapageInv.before]}→${SUIT_EMOJI[r.rattrapageInv.result]}`:''}</span></div>`:''}
+${r.rattrapageFormatInv?`<div class="det-row"><span class="det-label" style="color:#ffaaff">⬆ Couche format rattr</span><span class="det-val" style="color:#ffaaff">${r.rattrapageFormatInv.detail}</span></div>`:''}
+${r.rattrapageForced?`<div class="det-row"><span class="det-label" style="color:#ffaaff">Format jeu perdu / niveau</span><span class="det-val" style="color:#ffaaff">${r.rattrapageSnapshot.lostFormat||'?'} · RATTR ${r.rattrapageSnapshot.rattrLevel||1}</span></div>`:''}
 <div class="det-row"><span class="det-label" style="color:#77ffaa">MOTEUR UTILISÉ</span><span class="det-val" style="color:#77ffaa">${r.algoUsed}${r.rattrapageForced?' (rattrapage)':''}</span></div>
 <hr class="det-sep">
 <div class="det-row"><span class="det-label" style="color:#80e080">🎯 SOUS-MOTEUR SÉLECTIONNÉ</span><span class="det-val hi-green">${r.subEngine}</span></div>
@@ -2872,11 +3022,14 @@ async function demarrerLive(silent){
           const actualSuits = new Set(currParsed.p1.map(c=>c.suit));
           const st = actualSuits.has(pred.suit) ? 'valid' : 'invalid';
           st==='valid' ? validCount++ : invalidCount++;
+          let seedFmt = null;
+          try{ seedFmt = detectFormatFromRaw(curr.normalized || curr.raw_text); }catch(e){}
           rebuilt.push({
             id: 'tg1-'+curr.game_number,
             gameNum: curr.game_number, suitKey: pred.suit, side:'P1',
             algoUsed: 'ALGO-RELAIS', mode:'OPT1',
             status: st, autoResolved:true, source:'live-seed',
+            actualFormat: seedFmt || null,
             ts: new Date().toISOString()
           });
         }

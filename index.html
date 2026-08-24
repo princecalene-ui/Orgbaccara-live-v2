@@ -1693,9 +1693,68 @@ function runEngine(num, p1Cards, p2Cards, nextNum){
           rule,transformed,rawResult,postInvActive,postInvReason};
 }
 
-// ══════════════════════════════════════════════════════
-//  CALCUL PRINCIPAL — RÉVÉLATION (routage ALGO1/ALGO2, cible fixe P1)
-// ══════════════════════════════════════════════════════
+// ── ADAPTATION : couleur de la 1re carte P1 du jeu précédent ──
+// Cette couche intervient uniquement après le calcul existant de finalSuit.
+// Elle ne modifie aucune des règles précédentes.
+function applyPreviousP1FirstCardColorRule(predictedSuit, firstP1Card){
+  const info = {
+    active:false, condition:null,
+    firstSuit:firstP1Card ? firstP1Card.suit : null,
+    firstValue:firstP1Card ? firstP1Card.val : null,
+    firstColor:null,
+    predictedSuitBefore:predictedSuit,
+    predictedSuitAfter:predictedSuit,
+    label:'INV P1 précédente · inactive'
+  };
+  if(!firstP1Card || !firstP1Card.suit || firstP1Card.val == null){
+    info.label='INV P1 précédente · aucune 1re carte P1 exploitable';
+    return {result:predictedSuit,info};
+  }
+  const firstSuit=firstP1Card.suit;
+  const sameSuit=firstSuit===predictedSuit;
+  const firstRed=isRed(firstSuit);
+  const predRed=isRed(predictedSuit);
+  const sameColor=firstRed===predRed;
+  if(sameSuit){
+    info.firstColor=firstRed?'ROUGE':'NOIRE';
+    info.condition='MEME_ENSEIGNE';
+    info.label=`INV P1 précédente · ${SUIT_EMOJI[firstSuit]||firstSuit} = prédiction ${SUIT_EMOJI[predictedSuit]||predictedSuit} → INV inactive`;
+    return {result:predictedSuit,info};
+  }
+  const rawValue=String(firstP1Card.val).trim().toUpperCase();
+  let numericValue=null;
+  if(rawValue==='A') numericValue=1;
+  else if(['10','J','Q','K'].includes(rawValue)) numericValue=0;
+  else numericValue=parseInt(rawValue,10);
+  if(!Number.isFinite(numericValue)){
+    info.firstColor=firstRed?'ROUGE':'NOIRE';
+    info.condition='VALEUR_INCONNUE';
+    info.label=`INV P1 précédente · valeur ${rawValue} non exploitable → inactive`;
+    return {result:predictedSuit,info};
+  }
+  const firstParity=(numericValue%2===0)?'PAIR':'IMPAIR';
+  info.firstColor=firstRed?'ROUGE':'NOIRE';
+  let map=null;
+  if(sameColor && firstParity==='IMPAIR'){
+    map={'♦️':'♠️','♠️':'♦️','♥️':'♣️','♣️':'♥️'};
+    info.active=true;
+    info.condition='MEME_COULEUR_IMPAIR';
+    info.label=`INV P1 précédente · même couleur + valeur ${rawValue}(IMPAIR) → ♦️↔♠️ / ♥️↔♣️`;
+  }else if(!sameColor && firstParity==='PAIR'){
+    // Règle demandée : ♣️↔♥️ / ♦️↔♣️.
+    map={'♣️':'♥️','♥️':'♣️','♦️':'♣️'};
+    info.active=true;
+    info.condition='COULEUR_DIFFERENTE_PAIR';
+    info.label=`INV P1 précédente · couleur différente + valeur ${rawValue}(PAIR) → ♣️↔♥️ / ♦️↔♣️`;
+  }else{
+    info.condition=sameColor?'MEME_COULEUR_PAIR':'COULEUR_DIFFERENTE_IMPAIR';
+    info.label=`INV P1 précédente · ${sameColor?'même couleur':'couleur différente'} + valeur ${rawValue}(${firstParity}) → inactive`;
+  }
+  const result=map?(map[predictedSuit]||predictedSuit):predictedSuit;
+  info.predictedSuitAfter=result;
+  return {result,info};
+}
+
 function runCalc(raw){
   // UNANIME (méthode pure) : régime dérivé UNIQUEMENT de TG + jeu courant — pas de localStorage
   const pureReg = pureRegimeFromTelegram(raw);
@@ -2053,87 +2112,14 @@ function runCalc(raw){
     }
   }
 
-
-  // ── PREVCHECK P1 — comparaison avec la 1re carte P1 du jeu précédent ──
-  // La prédiction normale est déjà calculée. On compare sa couleur avec
-  // la 1re carte P1 du jeu fourni (le jeu précédent = N, qui sert à prédire N+1).
-  let prevCHECK = null;
+  // ── ADAPTATION DEMANDÉE : 1re carte P1 du jeu précédent vs nouvelle prédiction ──
+  // Placée en dernière couche : les fonctions/règles existantes restent inchangées.
+  let previousP1FirstCardInv = null;
   {
-    const predictedSuitBefore = finalSuit;
-    const previousP1 = p1 && p1.length ? p1[0] : null;
-    const previousSuit = previousP1 ? previousP1.suit : null;
-    const previousVal = previousP1 ? previousP1.val : null;
-    const previousNum = previousVal === 'A' ? 1 :
-                        (previousVal === 'J' || previousVal === 'Q' || previousVal === 'K') ? 0 :
-                        parseInt(previousVal, 10);
-
-    const colorOf = s => (s === '♥️' || s === '♦️') ? 'ROUGE' :
-                         (s === '♠️' || s === '♣️') ? 'NOIR' : null;
-    const predictedColor = colorOf(predictedSuitBefore);
-    const previousColor = colorOf(previousSuit);
-    const sameColor = !!(predictedColor && previousColor && predictedColor === previousColor);
-    const gameLength = String(nextNum).replace(/\D/g,'').length;
-
-    if ((gameLength === 3 || gameLength === 4) &&
-        previousSuit && Number.isFinite(previousNum) &&
-        predictedColor && previousColor) {
-
-      let candidate = predictedSuitBefore;
-      let invertTriggered = false;
-      let rule = '';
-
-      if (sameColor && previousNum % 2 === 1) {
-        // IMPAIR + même couleur:
-        // ♦️↔♠️ / ♥️↔♣️
-        const inv = {'♦️':'♠️','♠️':'♦️','♥️':'♣️','♣️':'♥️'};
-        candidate = inv[predictedSuitBefore] || predictedSuitBefore;
-        invertTriggered = true;
-        rule = 'Même couleur + IMPAIRE → INV ♦️↔♠️ / ♥️↔♣️';
-      } else if (!sameColor && previousNum % 2 === 0) {
-        // PAIRE + couleur différente:
-        // règle demandée: ♣️↔♥️ / ♦️↔♣️
-        // La notation fournie comporte ♣️ dans les deux paires; on applique
-        // la transformation déterministe par enseigne ci-dessous.
-        const inv = {
-          '♣️':'♥️',
-          '♥️':'♣️',
-          '♦️':'♣️',
-          '♠️':'♠️'
-        };
-        candidate = inv[predictedSuitBefore] || predictedSuitBefore;
-        invertTriggered = true;
-        rule = 'Couleur différente + PAIRE → INV ♣️↔♥️ / ♦️↔♣️';
-      } else {
-        rule = sameColor
-          ? 'Même couleur + PAIRE → pas d’INV'
-          : 'Couleur différente + IMPAIRE → pas d’INV';
-      }
-
-      // Exception demandée: si l'inversion redonne exactement l'enseigne
-      // déjà prédite, elle n'agit pas.
-      const sameSuitAfterInvert = invertTriggered && candidate === predictedSuitBefore;
-      if (sameSuitAfterInvert) {
-        invertTriggered = false;
-        candidate = predictedSuitBefore;
-        rule += ' · enseigne identique → ❌ pas d’INV';
-      } else if (invertTriggered) {
-        finalSuit = candidate;
-      }
-
-      prevCHECK = {
-        active: true,
-        applied: invertTriggered,
-        gameLength,
-        previousSuit,
-        previousVal,
-        previousColor,
-        predictedBefore: predictedSuitBefore,
-        predictedColor,
-        sameColor,
-        result: finalSuit,
-        rule
-      };
-    }
+    const prevFirstP1=(p1&&p1.length)?p1[0]:null;
+    const invPrev=applyPreviousP1FirstCardColorRule(finalSuit,prevFirstP1);
+    previousP1FirstCardInv=invPrev.info;
+    finalSuit=invPrev.result;
   }
 
   return {num,p1,p2,nextNum,nextH,nextM,avantDernier,dernierDigit,sel,subEngine,algoResult,finalInv,finalSuit,
@@ -2178,8 +2164,7 @@ function detectFormatFromRaw(raw){
     if(a === 3 && b === 2) return '3-2';
     if(a === 2 && b === 3) return '2-3';
     if(a === 2 && b === 2) return '2-2';
-    if(a === 3 && b >= 1) return '3-3';,
-           prevCHECK
+    if(a === 3 && b >= 1) return '3-3';
     return a + '-' + b;
   }catch(e){
     return null;

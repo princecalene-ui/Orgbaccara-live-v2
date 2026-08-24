@@ -1401,7 +1401,7 @@ function showAutoValidationFeedback(entry){
 //    pour servir de référence stable/rejouable identique partout (cible toujours P1)
 function deterministicPredict(raw){
   const r = runCalc(raw);
-  return {nextNum:r.nextNum, suit:r.finalSuit, side:'P1'};
+  return {nextNum:r.nextNum, suit:r.finalSuit, side:'P1',prevCHECK};
 }
 
 function actualOutcomeSuits(gameRecord){
@@ -1688,30 +1688,9 @@ function runEngine(num, p1Cards, p2Cards, nextNum){
   else if(inRange) postInvReason=`#N${nextNum} 1400-1441→INV ♠️↔️♥️/♣️↔️♦️`;
   else postInvReason=`H=${nextH}(IMPAIR)&hors 1400-1441→PAS D'INV`;
   const rawResult=postInvActive?(postInvMap[transformed]||transformed):transformed;
-  // ── INV P1 COULEUR/VALEUR — règle demandée ──
-  const suitColorP1=s => (s==='♥️'||s==='♦️')?'ROUGE':
-                         (s==='♠️'||s==='♣️')?'NOIR':null;
-  const p1v=p1First&&p1First.val;
-  const p1n=p1v==='A'?1:(p1v==='J'||p1v==='Q'||p1v==='K'?0:parseInt(p1v,10));
-  const predColorP1=suitColorP1(rawResult);
-  const prevColorP1=p1First?suitColorP1(p1First.suit):null;
-  let finalResult=rawResult;
-
-  if(p1First&&predColorP1&&prevColorP1&&Number.isFinite(p1n)){
-    if(prevColorP1===predColorP1&&p1n%2===1){
-      const inv={'♦️':'♠️','♠️':'♦️','♥️':'♣️','♣️':'♥️'};
-      const candidate=inv[rawResult]||rawResult;
-      if(candidate!==rawResult) finalResult=candidate;
-    }else if(prevColorP1!==predColorP1&&p1n%2===0){
-      const inv={'♠️':'♥️','♥️':'♠️','♦️':'♣️','♣️':'♦️'};
-      const candidate=inv[rawResult]||rawResult;
-      if(candidate!==rawResult) finalResult=candidate;
-    }
-  }
-
   return {calcNum,calcNextNum,isReduced,time:time.str,p1First,p2First,sHM,sameCol,sColor,sTotal,
           baseAlgo,fibMod,fibVal,fibIdx,fibSeed,algo,algoEven,numEven,reducedDigit,reduceSteps,
-          rule,transformed,rawResult,postInvActive,postInvReason,finalSuit:finalResult};
+          rule,transformed,rawResult,postInvActive,postInvReason};
 }
 
 // ══════════════════════════════════════════════════════
@@ -1856,7 +1835,91 @@ function runCalc(raw){
     }
   }
 
-  // ── INVERSION TEMPORELLE (heure PAIR/IMPAIR × tranches 09-34 / 35-59) ──
+  
+  // ── PREVCHECK P1 — règle selon le nombre de chiffres du jeu ──
+  let prevCHECK = null;
+  {
+    const gameStr = String(nextNum).replace(/\D/g,'');
+    const gameLen = gameStr.length;
+    const p1Suit = p1First && p1First.suit;
+    const p1Val = p1First && p1First.val;
+    const p1Num = p1Val==='A' ? 1 :
+                  (p1Val==='J'||p1Val==='Q'||p1Val==='K') ? 0 :
+                  parseInt(p1Val,10);
+
+    const suitColor = s => (s==='♥️'||s==='♦️') ? 'ROUGE' :
+                           (s==='♠️'||s==='♣️') ? 'NOIR' : null;
+    const predictedColor = suitColor(finalSuit);
+    const previousColor = suitColor(p1Suit);
+    const sameColor = predictedColor && previousColor &&
+                      predictedColor === previousColor;
+
+    if ((gameLen===3 || gameLen===4) && p1Suit &&
+        predictedColor && previousColor && Number.isFinite(p1Num)) {
+
+      let candidate = finalSuit;
+      let shouldInvert = false;
+      let rule = '';
+
+      if (gameLen===3) {
+        if (sameColor && p1Num%2===1) {
+          const inv={'♦️':'♣️','♣️':'♦️','♥️':'♠️','♠️':'♥️'};
+          candidate=inv[finalSuit]||finalSuit;
+          shouldInvert=true;
+          rule='3 chiffres · même couleur + IMPAIRE → ♦️↔♣️ / ♥️↔♠️';
+        } else if (!sameColor && p1Num%2===0) {
+          const inv={'♠️':'♥️','♥️':'♠️','♦️':'♣️','♣️':'♦️'};
+          candidate=inv[finalSuit]||finalSuit;
+          shouldInvert=true;
+          rule='3 chiffres · couleur différente + PAIRE → ♠️↔♥️ / ♦️↔♣️';
+        } else {
+          rule=sameColor
+            ? '3 chiffres · même couleur + PAIRE → pas d’INV'
+            : '3 chiffres · couleur différente + IMPAIRE → pas d’INV';
+        }
+      } else {
+        if (sameColor && p1Num%2===1) {
+          const inv={'♦️':'♠️','♠️':'♦️','♥️':'♣️','♣️':'♥️'};
+          candidate=inv[finalSuit]||finalSuit;
+          shouldInvert=true;
+          rule='4 chiffres · même couleur + IMPAIRE → ♦️↔♠️ / ♥️↔♣️';
+        } else if (!sameColor && p1Num%2===0) {
+          const inv={'♣️':'♥️','♥️':'♣️','♦️':'♠️','♠️':'♦️'};
+          candidate=inv[finalSuit]||finalSuit;
+          shouldInvert=true;
+          rule='4 chiffres · couleur différente + PAIRE → ♣️↔♥️ / ♦️↔♠️';
+        } else {
+          rule=sameColor
+            ? '4 chiffres · même couleur + PAIRE → pas d’INV'
+            : '4 chiffres · couleur différente + IMPAIRE → pas d’INV';
+        }
+      }
+
+      const unchanged = shouldInvert && candidate===finalSuit;
+      if (unchanged) {
+        shouldInvert=false;
+        rule += ' · enseigne identique → ❌ pas d’INV';
+      } else if (shouldInvert) {
+        finalSuit=candidate;
+      }
+
+      // prevCHECK s'affiche dès qu'un des cas de cette règle est contrôlé.
+      prevCHECK = {
+        active:true,
+        applied:shouldInvert,
+        rule,
+        gameLen,
+        p1Suit,
+        p1Val,
+        previousColor,
+        predictedColor,
+        before: unchanged ? candidate : (shouldInvert ? (gameLen===3 ? '' : '') : finalSuit),
+        result:finalSuit
+      };
+    }
+  }
+
+// ── INVERSION TEMPORELLE (heure PAIR/IMPAIR × tranches 09-34 / 35-59) ──
   // Heure IMPAIRE : 09→34 NORMAL · 35→59 ANOMAL → inv ♠️↔♥️ / ♦️↔♣️
   // Heure PAIR   : 09→34 ANOMAL → inv ♠️↔♥️ / ♦️↔♣️ · 35→59 NORMAL
   // Minutes 00-08 : pas d'inversion (non spécifiées)
@@ -2049,77 +2112,6 @@ function runCalc(raw){
     }
   }
 
-  // ── INV COULEUR P1 — nouvelle règle demandée ─────────────────────────
-  // Compare la 1ère carte P1 du jeu précédent avec la prédiction obtenue
-  // juste avant cette couche. Si la prédiction reprend la même enseigne,
-  // aucune inversion n'est appliquée. Sinon :
-  //   • même couleur + valeur impaire de la 1ère carte P1 → ♦↔♠ / ♥↔♣
-  //   • couleur différente + valeur paire de la 1ère carte P1 → ♣↔♥ / ♦↔♠
-  // La valeur de référence est la valeur de la 1ère carte P1 du jeu précédent.
-  let p1ColorParityInv = null;
-  {
-    const prevP1 = p1 && p1.length ? p1[0] : null;
-    if(prevP1 && prevP1.suit){
-      const predictedBefore = finalSuit;
-      const prevColor = isRed(prevP1.suit) ? 'ROUGE' : 'NOIR';
-      const predictedColor = isRed(predictedBefore) ? 'ROUGE' : 'NOIR';
-      const sameSuit = prevP1.suit === predictedBefore;
-      const sameColor = prevColor === predictedColor;
-      const cardValueRaw = prevP1.val;
-      const cardValueNum = getCardValueParity(cardValueRaw);
-      const valueParity = (cardValueNum % 2 === 0) ? 'PAIR' : 'IMPAIR';
-      let applied = false;
-      let mapName = '';
-      let map = null;
-      let reason = '';
-
-      // Priorité absolue : même enseigne → INV inactive.
-      if(sameSuit){
-        reason = `MÊME ENSEIGNE ${SUIT_EMOJI[prevP1.suit]} → INV inactive`;
-      } else if(sameColor && valueParity === 'IMPAIR'){
-        map = {'♦️':'♠️','♠️':'♦️','♥️':'♣️','♣️':'♥️'};
-        mapName = '♦️↔♠️ / ♥️↔♣️';
-        applied = true;
-        reason = `MÊME COULEUR + VALEUR IMPAIRE (${cardValueRaw})`;
-      } else if(!sameColor && valueParity === 'PAIR'){
-        // Interprétation cohérente de la paire demandée « ♣️↔♥️ / ♦️↔♣️ » :
-        // le 2e couple est traité comme ♦️↔♠️ afin d'avoir une vraie inversion bijective.
-        map = {'♣️':'♥️','♥️':'♣️','♦️':'♠️','♠️':'♦️'};
-        mapName = '♣️↔♥️ / ♦️↔♠️';
-        applied = true;
-        reason = `COULEUR DIFFÉRENTE + VALEUR PAIRE (${cardValueRaw})`;
-      } else {
-        reason = `CONDITION NON REMPLIE · ${sameColor?'MÊME':'DIFFÉRENTE'} COULEUR · VALEUR ${valueParity}`;
-      }
-
-      const result = applied ? (map[predictedBefore] || predictedBefore) : predictedBefore;
-      p1ColorParityInv = {
-        active: applied,
-        previousSuit: prevP1.suit,
-        previousValue: cardValueRaw,
-        previousValueParity: valueParity,
-        previousColor: prevColor,
-        predictedColor,
-        sameSuit,
-        sameColor,
-        mapName,
-        before: predictedBefore,
-        result,
-        reason,
-        detail: applied
-          ? `P1 précédent ${SUIT_EMOJI[prevP1.suit]} (${cardValueRaw}, ${valueParity}, ${prevColor}) · ${sameColor?'même':'différente'} couleur → INV ${mapName} · ${SUIT_EMOJI[predictedBefore]}→${SUIT_EMOJI[result]}`
-          : `P1 précédent ${SUIT_EMOJI[prevP1.suit]} (${cardValueRaw}, ${valueParity}, ${prevColor}) · ${reason}`
-      };
-      finalSuit = result;
-    } else {
-      p1ColorParityInv = {
-        active:false, previousSuit:null, previousValue:null, previousValueParity:null,
-        previousColor:null, predictedColor:null, sameSuit:false, sameColor:false,
-        mapName:'', before:finalSuit, result:finalSuit, reason:'1ère carte P1 indisponible'
-      };
-    }
-  }
-
   // ── ALL.INV après perte (max 2) — depuis historique OPT1 unanime ──
   let allInvInfo = null;
   if(shouldApplyAllInv(nextNum)){
@@ -2146,7 +2138,7 @@ function runCalc(raw){
   }
 
   return {num,p1,p2,nextNum,nextH,nextM,avantDernier,dernierDigit,sel,subEngine,algoResult,finalInv,finalSuit,
-          hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,rattrapageFormatInv,formatSuitInv,globalInvNote,allInvInfo,firstDigitImpInv,p1ColorParityInv,
+          hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,rattrapageFormatInv,formatSuitInv,globalInvNote,allInvInfo,firstDigitImpInv,
           isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime},
           rattrapageForced,rattrapageSnapshot,normalAlgo,digitAlgoRule,fmtInvSnapshot:{ globalOn:false }};
 }
@@ -2599,6 +2591,7 @@ function renderTotalResult(r){
   const badges=[
     `<div class="badge badge-engine">◆ OPTION 3 — Total combiné → ${r.prediction}</div>`,
     r.formatInverted ? `<div class="badge badge-temporal">🔄 INV FORMAT — ${r.formatReason} → résultat inversé</div>` : `<div class="badge badge-temporal" style="opacity:.6">INV FORMAT — ${r.formatReason}</div>`,
+    r.prevCHECK?.active ? `<div class="badge" style="background:#f59e0b;color:#fff;font-weight:800">⚠ prevCHECK</div>` : '',
     r.inverted ? `<div class="badge badge-temporal">🔄 INV MOTEUR OPT3 — ${r.invDetail}</div>` : '',
     `<div class="badge badge-algo">⚙ ${r.baseLabel}</div>`,
     `<div class="badge badge-finalinv">✦ RÉSULTAT — <b>${r.prediction}</b></div>`
@@ -2905,11 +2898,6 @@ function renderResult(r){
     ...(r.allInvInfo && r.allInvInfo.active
       ? [`<div class="badge badge-temporal">⟲ ALL.INV (max ${ALLINV_MAX} · après perte) — ${r.allInvInfo.label}</div>`]
       : []),
-    ...(r.p1ColorParityInv
-      ? [r.p1ColorParityInv.active
-          ? `<div class="badge badge-finalinv">🔄 INV P1 COULEUR/VALEUR — ${r.p1ColorParityInv.detail}</div>`
-          : `<div class="badge badge-finalinv" style="opacity:.65">⏸ INV P1 COULEUR/VALEUR — ${r.p1ColorParityInv.detail}</div>`]
-      : []),
     ...(r.formatSuitInv
       ? [`<div class="badge badge-hyper" style="opacity:.45">INV FORMAT — OFF · pred pure</div>`]
       : []),
@@ -2955,13 +2943,6 @@ ${r.rattrapageForced?`<div class="det-row"><span class="det-label" style="color:
 ${r.rattrapageInv?`<div class="det-row"><span class="det-label" style="color:#ffbf80">Inv. rattrapage</span><span class="det-val" style="color:#ffbf80">${r.rattrapageInv.detail}${r.rattrapageInv.active?` · ${SUIT_EMOJI[r.rattrapageInv.before]}→${SUIT_EMOJI[r.rattrapageInv.result]}`:''}</span></div>`:''}
 ${r.rattrapageFormatInv?`<div class="det-row"><span class="det-label" style="color:#ffaaff">⬆ Couche format rattr</span><span class="det-val" style="color:#ffaaff">${r.rattrapageFormatInv.detail}</span></div>`:''}
 ${r.rattrapageForced?`<div class="det-row"><span class="det-label" style="color:#ffaaff">Format jeu perdu / niveau</span><span class="det-val" style="color:#ffaaff">${r.rattrapageSnapshot.lostFormat||'?'} · RATTR ${r.rattrapageSnapshot.rattrLevel||1}</span></div>`:''}
-${r.p1ColorParityInv?`<hr class="det-sep">
-<div class="det-row"><span class="det-label" style="color:#ff99ff">🔄 INV P1 COULEUR / VALEUR</span><span class="det-val hi-pink">${r.p1ColorParityInv.active?'ACTIVE':'INACTIVE'}</span></div>
-<div class="det-row"><span class="det-label">1ère carte P1 précédent</span><span class="det-val">${r.p1ColorParityInv.previousSuit?SUIT_EMOJI[r.p1ColorParityInv.previousSuit]:'—'} ${r.p1ColorParityInv.previousValue||''}</span></div>
-<div class="det-row"><span class="det-label">Couleur P1 / prédiction</span><span class="det-val">${r.p1ColorParityInv.previousColor||'—'} / ${r.p1ColorParityInv.predictedColor||'—'} · ${r.p1ColorParityInv.sameColor?'MÊME':'DIFFÉRENTE'}</span></div>
-<div class="det-row"><span class="det-label">Même enseigne ?</span><span class="det-val">${r.p1ColorParityInv.sameSuit?'OUI → INV OFF':'NON'}</span></div>
-<div class="det-row"><span class="det-label">Parité valeur carte</span><span class="det-val">${r.p1ColorParityInv.previousValueParity||'—'}</span></div>
-<div class="det-row"><span class="det-label">Transformation</span><span class="det-val">${r.p1ColorParityInv.mapName||'Aucune'} · ${SUIT_EMOJI[r.p1ColorParityInv.before]||'—'} → ${SUIT_EMOJI[r.p1ColorParityInv.result]||'—'}</span></div>`:''}
 <div class="det-row"><span class="det-label" style="color:#77ffaa">MOTEUR UTILISÉ</span><span class="det-val" style="color:#77ffaa">${r.algoUsed}${r.rattrapageForced?' (rattrapage)':''}</span></div>
 <hr class="det-sep">
 <div class="det-row"><span class="det-label" style="color:#80e080">🎯 SOUS-MOTEUR SÉLECTIONNÉ</span><span class="det-val hi-green">${r.subEngine}</span></div>

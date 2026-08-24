@@ -1017,6 +1017,7 @@ function shouldApplyAllInv(nextNum){
 }
 
 // Max 2 RATTRAPAGE : série après perte ; force même ALGO + inv couleur
+// Couche sup. : si le jeu perdant (dernier invalid) est 2-2 ou 3-3 → inv ♦️↔♠️ / ♥️↔♣️ sur le prochain rattrapage
 function shouldApplyRattrapage(nextNum){
   if(typeof SYNC_SKIP_RATTRAPAGE !== 'undefined' && SYNC_SKIP_RATTRAPAGE) return null;
   try{
@@ -1037,13 +1038,22 @@ function shouldApplyRattrapage(nextNum){
     }
     if(last.rattrapage && consecutive >= RATTRAPAGE_MAX) return null;
 
-    // Départ (perte normale) ou continuation
+    // Format du jeu perdant (dernier invalid) — 2-2 / 3-3 / 2-3 → couche sup.
+    let lostFormat = last.lostFormat || null;
+    if(!lostFormat) lostFormat = getGameFormatByNum(last.gameNum);
+    // rattrLevel: 1 = 1er rattr (après perte normale), 2 = 2e rattr (après 1er rattr perdu)
+    const rattrLevel = last.rattrapage ? 2 : 1;
+
+    // Départ (perte normale) ou continuation (y compris 1er rattr perdu → 2e rattr)
     return {
       active: true,
       algo: last.algoUsed || 'ALGO1',
       lostSuit: last.suitKey || null,
       lostColor: last.suitKey ? (isRed(last.suitKey) ? 'rouge' : 'noir') : null,
-      remaining: last.rattrapage ? (RATTRAPAGE_MAX - consecutive) : RATTRAPAGE_MAX
+      remaining: last.rattrapage ? (RATTRAPAGE_MAX - consecutive) : RATTRAPAGE_MAX,
+      lostFormat: lostFormat || null,
+      lostGameNum: last.gameNum,
+      rattrLevel
     };
   }catch(e){}
   return null;
@@ -1267,6 +1277,11 @@ function resolvePendingHistory(gameNum, p1Cards, p2Cards, rawText){
     if(ok === null) continue;
     entry.status = ok ? 'valid' : 'invalid';
     entry.autoResolved = true;
+    // Mémorise le format (2-2 / 3-3 anticipé) pour couche sup. rattrapage
+    if(rawText){
+      const fmt = detectGameFormatSmart(rawText);
+      if(fmt) entry.lostFormat = fmt;
+    }
     lastEntry = entry;
   }
   saveHistory(list);
@@ -1649,7 +1664,7 @@ function runCalc(raw){
   const inRattrapage = !!(rattrInfo && rattrInfo.active);
   const algoUsed = inRattrapage ? (rattrInfo.algo || normalAlgo) : normalAlgo;
   const rattrapageForced = inRattrapage;
-  // Snapshot local pour inv couleur (réf. jeu perdu)
+  // Snapshot local pour inv couleur (réf. jeu perdu) + format pour couche sup.
   if(inRattrapage){
     rattrapage = {
       active: true,
@@ -1657,7 +1672,10 @@ function runCalc(raw){
       remaining: rattrInfo.remaining != null ? rattrInfo.remaining : RATTRAPAGE_MAX,
       startedAt: new Date().toISOString(),
       lostSuit: rattrInfo.lostSuit,
-      lostColor: rattrInfo.lostColor
+      lostColor: rattrInfo.lostColor,
+      lostFormat: rattrInfo.lostFormat || null,
+      lostGameNum: rattrInfo.lostGameNum || null,
+      rattrLevel: rattrInfo.rattrLevel || 1
     };
   } else {
     rattrapage = emptyRattrapage();
@@ -1792,6 +1810,7 @@ function runCalc(raw){
   // ── INV RATTRAPAGE (basée sur la couleur du jeu perdu) ──
   // Appliquée uniquement si on est en cycle de rattrapage
   let rattrapageInv = null;
+  let rattrapageSuperInv = null;
   if(inRattrapage){
     const inv = applyRattrapageInv(finalSuit, rattrapage.lostColor, rattrapage.lostSuit);
     rattrapageInv = {
@@ -1803,6 +1822,51 @@ function runCalc(raw){
       detail: inv.detail
     };
     finalSuit = inv.result;
+
+    // ── COUCHE SUPÉRIEURE (au-dessus des autres inv) ──
+    // Rattr 1 (après perte normale) :
+    //   2-2 → ♦️↔♠️ / ♣️↔♥️ · 3-3 → ♦️↔♣️ / ♠️↔♥️ · 2-3/3-2 → ♠️↔♣️ / ♥️↔♦️
+    // Rattr 2 (après 1er rattr perdu) :
+    //   2-2 → ♦️↔♣️ / ♠️↔♥️ · 3-3 → ♠️↔♣️ / ♦️↔♥️ · 2-3/3-2 → ♦️↔♠️ / ♣️↔♥️
+    const lostFmt = rattrapage.lostFormat || (rattrInfo && rattrInfo.lostFormat) || null;
+    const rLevel = rattrapage.rattrLevel || (rattrInfo && rattrInfo.rattrLevel) || 1;
+    if(lostFmt === '2-2' || lostFmt === '3-3' || lostFmt === '2-3' || lostFmt === '3-2'){
+      let superMap, mapLabel;
+      if(rLevel === 1){
+        if(lostFmt === '2-2'){
+          superMap = {'♦️':'♠️','♠️':'♦️','♣️':'♥️','♥️':'♣️'};
+          mapLabel = '♦️↔♠️ / ♣️↔♥️';
+        } else if(lostFmt === '3-3'){
+          superMap = {'♦️':'♣️','♣️':'♦️','♠️':'♥️','♥️':'♠️'};
+          mapLabel = '♦️↔♣️ / ♠️↔♥️';
+        } else {
+          superMap = {'♠️':'♣️','♣️':'♠️','♥️':'♦️','♦️':'♥️'};
+          mapLabel = '♠️↔♣️ / ♥️↔♦️';
+        }
+      } else {
+        if(lostFmt === '2-2'){
+          superMap = {'♦️':'♣️','♣️':'♦️','♠️':'♥️','♥️':'♠️'};
+          mapLabel = '♦️↔♣️ / ♠️↔♥️';
+        } else if(lostFmt === '3-3'){
+          superMap = {'♠️':'♣️','♣️':'♠️','♦️':'♥️','♥️':'♦️'};
+          mapLabel = '♠️↔♣️ / ♦️↔♥️';
+        } else {
+          superMap = {'♦️':'♠️','♠️':'♦️','♣️':'♥️','♥️':'♣️'};
+          mapLabel = '♦️↔♠️ / ♣️↔♥️';
+        }
+      }
+      const beforeS = finalSuit;
+      finalSuit = superMap[finalSuit] || finalSuit;
+      rattrapageSuperInv = {
+        active: true,
+        lostFormat: lostFmt,
+        rattrLevel: rLevel,
+        lostGameNum: rattrapage.lostGameNum || (rattrInfo && rattrInfo.lostGameNum) || null,
+        before: beforeS,
+        result: finalSuit,
+        detail: `COUCHE SUP. RATTR${rLevel} · perdu #N${rattrapage.lostGameNum||'?'} format ${lostFmt} → ${mapLabel} · ${SUIT_EMOJI[beforeS]}→${SUIT_EMOJI[finalSuit]}`
+      };
+    }
   }
 
   // Snapshot rattrapage (la consommation se fait uniquement dans calculate(), pas en backtest)
@@ -1813,9 +1877,12 @@ function runCalc(raw){
         remainingBefore:rattrapage.remaining,
         remainingAfter:Math.max(0, rattrapage.remaining-1),
         lostSuit:rattrapage.lostSuit,
-        lostColor:rattrapage.lostColor
+        lostColor:rattrapage.lostColor,
+        lostFormat: rattrapage.lostFormat || null,
+        lostGameNum: rattrapage.lostGameNum || null,
+        superInv: !!(rattrapageSuperInv && rattrapageSuperInv.active)
       }
-    : { forced:false, algo:null, remainingBefore:0, remainingAfter:0, lostSuit:null, lostColor:null };
+    : { forced:false, algo:null, remainingBefore:0, remainingAfter:0, lostSuit:null, lostColor:null, lostFormat:null, lostGameNum:null, superInv:false };
 
   // INV FORMAT OFF (pred pure)
   let formatSuitInv = { active:false, map:null, before:finalSuit, result:finalSuit, reason:'INV FORMAT OFF · pred pure' };
@@ -1933,7 +2000,7 @@ function runCalc(raw){
   }
 
   return {num,p1,p2,nextNum,nextH,nextM,avantDernier,dernierDigit,sel,subEngine,algoResult,finalInv,finalSuit,
-          hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,formatSuitInv,globalInvNote,allInvInfo,firstDigitImpInv,
+          hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,rattrapageSuperInv,formatSuitInv,globalInvNote,allInvInfo,firstDigitImpInv,
           isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime},
           rattrapageForced,rattrapageSnapshot,normalAlgo,digitAlgoRule,fmtInvSnapshot:{ globalOn:false }};
 }
@@ -1955,6 +2022,43 @@ function playMarkerOnP1Side(raw){
   const dash = raw.search(/\s-\s/);
   const p1Side = dash === -1 ? raw : raw.slice(0, dash);
   return p1Side.indexOf('▶️') !== -1 || p1Side.indexOf('▶') !== -1;
+}
+function playMarkerOnP2Side(raw){
+  const dash = raw.search(/\s-\s/);
+  if(dash === -1) return false;
+  const p2Side = raw.slice(dash);
+  return p2Side.indexOf('▶️') !== -1 || p2Side.indexOf('▶') !== -1;
+}
+// Format réel ou anticipé : 3-3 si P1=3 et (P2=3 OU ▶️ déjà sur P2)
+function detectGameFormatSmart(raw){
+  if(!raw) return null;
+  try{
+    const parsed = parseGame(raw);
+    const a = (parsed.p1||[]).length;
+    const b = (parsed.p2||[]).length;
+    if(a === 3 && b === 3) return '3-3';
+    if(a === 3 && b >= 2 && playMarkerOnP2Side(raw)) return '3-3';
+    if(a === 2 && b === 2) return '2-2';
+    if(a === 2 && b === 3) return '2-3';
+    if(a === 3 && b === 2) return '3-2';
+    return a + '-' + b;
+  }catch(e){ return null; }
+}
+function getGameFormatByNum(gameNum){
+  if(telegramHistoryCache && telegramHistoryCache.length){
+    for(let i = telegramHistoryCache.length - 1; i >= 0; i--){
+      const g = telegramHistoryCache[i];
+      if(g.game_number === gameNum){
+        return detectGameFormatSmart(g.normalized || g.raw_text);
+      }
+    }
+  }
+  try{
+    const list = loadHistory();
+    const e = list.find(x => x.gameNum === gameNum && x.lostFormat);
+    if(e && e.lostFormat) return e.lostFormat;
+  }catch(e){}
+  return null;
 }
 function checkGameReadiness(raw){
   if(!raw) return {usable:false, reason:'empty', detail:'Aucune donnée.', waitingThird:false};
@@ -1985,9 +2089,19 @@ function checkGameReadiness(raw){
     return {usable:false, reason:'p2-display', detail:'Données P2 pas encore affichées — en attente.', waitingThird:false};
   }
 
-  // P1 a déjà 3 cartes = main complète → GO (confirm + pred)
+  // P1 a 3 cartes → GO immédiat (ne pas attendre 3ᵉ carte P2)
+  // Si ▶️ déjà côté P2 → format final 3-3 connu d'avance
   if(p1Count >= 3){
-    return {usable:true, reason:'p1-3-done', detail:'3ᵉ carte P1 reçue → confirmation + pred immédiates.', waitingThird:false};
+    const fmt33 = playMarkerOnP2Side(raw) || p2Count >= 3;
+    return {
+      usable:true,
+      reason: fmt33 ? 'p1-3-done-33' : 'p1-3-done',
+      detail: fmt33
+        ? '3ᵉ carte P1 reçue · ▶️ P2 → format 3-3 anticipé → confirm + pred immédiates.'
+        : '3ᵉ carte P1 reçue → confirmation + pred immédiates (sans attendre P2).',
+      waitingThird:false,
+      formatHint: fmt33 ? '3-3' : (p2Count >= 2 ? '3-2' : null)
+    };
   }
 
   // ▶️ côté P1 = 3ᵉ carte annoncée mais pas encore tirée → ATTENDRE
@@ -2000,13 +2114,15 @@ function checkGameReadiness(raw){
     };
   }
 
-  // 2 cartes P1, plus de ▶️ → pas de 3ᵉ carte → main finale → GO
+  // 2 cartes P1, plus de ▶️ → main finale → GO
   return {
     usable:true,
     reason:'p1-final-2',
     detail:'Main P1 finale (2 cartes, pas de 3ᵉ) → confirm + pred immédiates.',
-    waitingThird:false
+    waitingThird:false,
+    formatHint: (p2Count === 2) ? '2-2' : (p2Count >= 3 ? '2-3' : null)
   };
+}
 }
 
 
@@ -2648,6 +2764,9 @@ function renderResult(r){
       : []),
     ...(r.rattrapageForced
       ? [`<div class="badge badge-temporal">⏱ RATTRAPAGE — ${r.algoUsed} forcé · réf. perdu ${r.rattrapageSnapshot.lostSuit?SUIT_EMOJI[r.rattrapageSnapshot.lostSuit]:'?'} (${r.rattrapageSnapshot.lostColor||'?'}) · restant ${r.rattrapageSnapshot.remainingAfter}/${RATTRAPAGE_MAX}${r.rattrapageInv&&r.rattrapageInv.active?` · inv ${SUIT_EMOJI[r.rattrapageInv.before]}→${SUIT_EMOJI[r.rattrapageInv.result]}`:''}</div>`]
+      : []),
+    ...(r.rattrapageSuperInv && r.rattrapageSuperInv.active
+      ? [`<div class="badge badge-hyper">⬆ COUCHE SUP. RATTRAPAGE — ${r.rattrapageSuperInv.detail}</div>`]
       : []),
     `<div class="badge badge-selector">🎯 SÉLECTEUR — ${selectorLine}</div>`,
     ...(r.groupCInv && r.groupCInv.active

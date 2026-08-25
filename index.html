@@ -218,6 +218,7 @@
   .badge-hyper{background:#181018;border:1px solid #5a3a50;border-left:3px solid #a06080;color:#d0a0b0;font-weight:700}
   .badge-finalinv{background:#181014;border:1px solid #5a3040;border-left:3px solid var(--crimson);color:#e090a0}
   .badge-temporal{background:#1a1410;border:1px solid var(--orange-dim);border-left:3px solid var(--orange);color:#e8b870;font-weight:700}
+  .badge-allcheck{background:#1a1410;border:1px solid var(--orange-dim);border-left:3px solid var(--orange);color:var(--orange);font-weight:700}
 
   .copy-row{display:flex;justify-content:center;margin-bottom:24px}
   .details-toggle{
@@ -345,10 +346,6 @@
   .mode-hint.ready{color:var(--green-ok)}
   .prediction-oui{color:var(--lime)!important}
   .prediction-non{color:#e08080!important}
-  .badge-ctrltour{
-    background:#1a1410;border:1px solid var(--orange);border-left:3px solid var(--orange);
-    color:var(--orange);font-weight:700;
-  }
 
 </style>
 </head>
@@ -966,45 +963,6 @@ function applyRattrapageInv(predSuit, lostColor, lostSuit){
     applied: result !== predSuit,
     detail: `réf. perdu ${ref} (${lostEmoji}) · pred ${predEmoji} → inv ${SUIT_EMOJI[result] || result}`
   };
-}
-
-// ── CtrlTour : confirmation finale du rattrapage ───────────────────────
-// Vérifie la 1re carte P1 du jeu immédiatement précédent, jamais le jeu
-// "perdu" mémorisé. Cette vérification arrive après toutes les inversions.
-// PAIRE + couleur différente → ♦↔♣ / ♥↔♠
-// PAIRE + même couleur → ♣↔♥ / ♦↔♠
-// Exception : même enseigne + paire → aucune inversion.
-function applyCtrlTourConfirmation(predSuit, previousP1First){
-  if(!predSuit || !previousP1First){
-    return {active:false, applied:false, result:predSuit, reason:'CtrlTour inactif · carte P1 précédente absente'};
-  }
-  const firstSuit = SUIT_EMOJI[previousP1First.suit] || previousP1First.suit;
-  const predictedSuit = SUIT_EMOJI[predSuit] || predSuit;
-  const firstValue = cardValue(previousP1First.val);
-  const isPair = firstValue != null && firstValue % 2 === 0;
-  const firstColor = isRed(firstSuit) ? 'rouge' : 'noir';
-  const predColor = isRed(predictedSuit) ? 'rouge' : 'noir';
-
-  if(!isPair){
-    return {active:false, applied:false, result:predSuit, firstSuit, firstValue, firstColor, predColor,
-      reason:`1re carte P1 ${previousP1First.val}${firstSuit} = IMPAIRE → CtrlTour sans inversion`};
-  }
-  if(firstSuit === predictedSuit){
-    return {active:true, applied:false, result:predSuit, firstSuit, firstValue, firstColor, predColor,
-      reason:`1re carte P1 ${previousP1First.val}${firstSuit} PAIRE + prédiction identique ${predictedSuit} → aucune inversion`};
-  }
-
-  let map, mapLabel;
-  if(firstColor !== predColor){
-    map={'♦️':'♣️','♣️':'♦️','♥️':'♠️','♠️':'♥️'};
-    mapLabel='♦️↔♣️ / ♥️↔♠️';
-  }else{
-    map={'♣️':'♥️','♥️':'♣️','♦️':'♠️','♠️':'♦️'};
-    mapLabel='♣️↔♥️ / ♦️↔♠️';
-  }
-  const result=map[predSuit]||predSuit;
-  return {active:true, applied:result!==predSuit, result, firstSuit, firstValue, firstColor, predColor, mapLabel,
-    reason:`1re carte P1 ${previousP1First.val}${firstSuit} PAIRE · ${firstColor===predColor?'même couleur':'couleur différente'} avec ${predictedSuit} → ${mapLabel} · ${predictedSuit}→${SUIT_EMOJI[result]||result}`};
 }
 
 // ── ALL.INV après perte (max 2) — dérivé de l'historique OPT1 unanime ──
@@ -1638,6 +1596,67 @@ function runEngine(num, p1Cards, p2Cards, nextNum){
 // ══════════════════════════════════════════════════════
 //  CALCUL PRINCIPAL — RÉVÉLATION (routage ALGO1/ALGO2, cible fixe P1)
 // ══════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════
+//  ALLCHECKPREV / CTRLTOUR — CONFIRMATION FINALE
+//  Ajoutée après TOUTES les inversions existantes.
+//  Référence : 1re carte P1 du jeu précédent venant d'être joué,
+//  qu'il soit gagnant ou perdant.
+//  Valeur PAIRE :
+//    - couleurs différentes → ♦️↔♣️ / ♥️↔♠️
+//    - même couleur        → ♣️↔♥️ / ♦️↔♠️
+//  Exception : même enseigne → aucune inversion.
+//  Déterministe avec le jeu Telegram courant → même résultat partout.
+// ══════════════════════════════════════════════════════
+function applyAllCheckPrev(predSuit, previousP1First){
+  if(!predSuit || !previousP1First || !previousP1First.suit){
+    return {
+      active:false, applied:false, pair:false,
+      previousSuit: previousP1First && previousP1First.suit ? previousP1First.suit : null,
+      previousValue: previousP1First && previousP1First.val ? previousP1First.val : null,
+      sameColor:null, sameSuit:false,
+      before:predSuit, result:predSuit,
+      detail:'CTRLTOUR — référence P1[1] indisponible'
+    };
+  }
+  const previousSuit = previousP1First.suit;
+  const previousValue = previousP1First.val;
+  const valueParity = getCardValueParity(previousValue);
+  const pair = (valueParity % 2 === 0);
+  const sameSuit = predSuit === previousSuit;
+  const sameColor = isRed(predSuit) === isRed(previousSuit);
+
+  if(!pair){
+    return {
+      active:true, applied:false, pair:false,
+      previousSuit, previousValue, sameColor, sameSuit,
+      before:predSuit, result:predSuit,
+      detail:`CTRLTOUR — P1[1] ${SUIT_EMOJI[previousSuit]||previousSuit} ${previousValue}(IMPAIR) → aucune inversion`
+    };
+  }
+
+  if(sameSuit){
+    return {
+      active:true, applied:false, pair:true,
+      previousSuit, previousValue, sameColor, sameSuit,
+      before:predSuit, result:predSuit,
+      detail:`CTRLTOUR — P1[1] ${SUIT_EMOJI[previousSuit]||previousSuit} ${previousValue}(PAIR) = prédiction ${SUIT_EMOJI[predSuit]||predSuit} → INV OFF (même enseigne)`
+    };
+  }
+
+  const mapDifferentColor = {'♦️':'♣️','♣️':'♦️','♥️':'♠️','♠️':'♥️'};
+  const mapSameColor = {'♣️':'♥️','♥️':'♣️','♦️':'♠️','♠️':'♦️'};
+  const map = sameColor ? mapSameColor : mapDifferentColor;
+  const result = map[predSuit] || predSuit;
+  const rule = sameColor ? 'MÊME COULEUR → ♣️↔♥️ / ♦️↔♠️' : 'COULEURS DIFFÉRENTES → ♦️↔♣️ / ♥️↔♠️';
+
+  return {
+    active:true, applied:result !== predSuit, pair:true,
+    previousSuit, previousValue, sameColor, sameSuit,
+    before:predSuit, result,
+    detail:`CTRLTOUR — P1[1] ${SUIT_EMOJI[previousSuit]||previousSuit} ${previousValue}(PAIR) · ${rule} · ${SUIT_EMOJI[predSuit]||predSuit}→${SUIT_EMOJI[result]||result}`
+  };
+}
+
 function runCalc(raw){
   // UNANIME (méthode pure) : régime dérivé UNIQUEMENT de TG + jeu courant — pas de localStorage
   const pureReg = pureRegimeFromTelegram(raw);
@@ -1975,16 +1994,15 @@ function runCalc(raw){
     }
   }
 
-  // ── CtrlTour : DERNIÈRE vérification, après TOUTES les inversions ──
-  // Actif uniquement pendant les rattrapages 1 et 2.
-  let ctrlTour = null;
-  if(inRattrapage){
-    ctrlTour = applyCtrlTourConfirmation(finalSuit, p1[0]);
-    finalSuit = ctrlTour.result;
-  }
+  // ── ALLCHECKPREV / CTRLTOUR — DERNIÈRE VÉRIFICATION ──
+  // Exécutée après toutes les inversions existantes, y compris Rattrapage/ALL.INV.
+  // Référence : p1[0] du jeu courant (le jeu précédent venant d'être joué).
+  const allCheckPrev = applyAllCheckPrev(finalSuit, p1[0] || null);
+  finalSuit = allCheckPrev.result;
 
   return {num,p1,p2,nextNum,nextH,nextM,avantDernier,dernierDigit,sel,subEngine,algoResult,finalInv,finalSuit,
-          hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,ctrlTour,formatSuitInv,globalInvNote,allInvInfo,firstDigitImpInv,
+          hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,formatSuitInv,globalInvNote,allInvInfo,firstDigitImpInv,
+          allCheckPrev,
           isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime},
           rattrapageForced,rattrapageSnapshot,normalAlgo,digitAlgoRule,fmtInvSnapshot:{ globalOn:false }};
 }
@@ -2700,9 +2718,6 @@ function renderResult(r){
     ...(r.rattrapageForced
       ? [`<div class="badge badge-temporal">⏱ RATTRAPAGE — ${r.algoUsed} forcé · réf. perdu ${r.rattrapageSnapshot.lostSuit?SUIT_EMOJI[r.rattrapageSnapshot.lostSuit]:'?'} (${r.rattrapageSnapshot.lostColor||'?'}) · restant ${r.rattrapageSnapshot.remainingAfter}/${RATTRAPAGE_MAX}${r.rattrapageInv&&r.rattrapageInv.active?` · inv ${SUIT_EMOJI[r.rattrapageInv.before]}→${SUIT_EMOJI[r.rattrapageInv.result]}`:''}</div>`]
       : []),
-    ...(r.ctrlTour
-      ? [`<div class="badge badge-ctrltour">🟠 CtrlTour — ${r.ctrlTour.reason}</div>`]
-      : []),
     `<div class="badge badge-selector">🎯 SÉLECTEUR — ${selectorLine}</div>`,
     ...(r.groupCInv && r.groupCInv.active
       ? [`<div class="badge badge-transform">🅲 GROUPE C — ${r.groupCInv.detail}</div>`]
@@ -2715,6 +2730,9 @@ function renderResult(r){
       : []),
     ...(r.allInvInfo && r.allInvInfo.active
       ? [`<div class="badge badge-temporal">⟲ ALL.INV (max ${ALLINV_MAX} · après perte) — ${r.allInvInfo.label}</div>`]
+      : []),
+    ...(r.allCheckPrev
+      ? [`<div class="badge badge-allcheck">🟠 AllCheckPrev · CtrlTour — ${r.allCheckPrev.detail}</div>`]
       : []),
     ...(r.formatSuitInv
       ? [`<div class="badge badge-hyper" style="opacity:.45">INV FORMAT — OFF · pred pure</div>`]

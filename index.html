@@ -345,6 +345,10 @@
   .mode-hint.ready{color:var(--green-ok)}
   .prediction-oui{color:var(--lime)!important}
   .prediction-non{color:#e08080!important}
+  .badge-ctrltour{
+    background:#1a1410;border:1px solid var(--orange);border-left:3px solid var(--orange);
+    color:var(--orange);font-weight:700;
+  }
 
 </style>
 </head>
@@ -962,6 +966,45 @@ function applyRattrapageInv(predSuit, lostColor, lostSuit){
     applied: result !== predSuit,
     detail: `réf. perdu ${ref} (${lostEmoji}) · pred ${predEmoji} → inv ${SUIT_EMOJI[result] || result}`
   };
+}
+
+// ── CtrlTour : confirmation finale du rattrapage ───────────────────────
+// Vérifie la 1re carte P1 du jeu immédiatement précédent, jamais le jeu
+// "perdu" mémorisé. Cette vérification arrive après toutes les inversions.
+// PAIRE + couleur différente → ♦↔♣ / ♥↔♠
+// PAIRE + même couleur → ♣↔♥ / ♦↔♠
+// Exception : même enseigne + paire → aucune inversion.
+function applyCtrlTourConfirmation(predSuit, previousP1First){
+  if(!predSuit || !previousP1First){
+    return {active:false, applied:false, result:predSuit, reason:'CtrlTour inactif · carte P1 précédente absente'};
+  }
+  const firstSuit = SUIT_EMOJI[previousP1First.suit] || previousP1First.suit;
+  const predictedSuit = SUIT_EMOJI[predSuit] || predSuit;
+  const firstValue = cardValue(previousP1First.val);
+  const isPair = firstValue != null && firstValue % 2 === 0;
+  const firstColor = isRed(firstSuit) ? 'rouge' : 'noir';
+  const predColor = isRed(predictedSuit) ? 'rouge' : 'noir';
+
+  if(!isPair){
+    return {active:false, applied:false, result:predSuit, firstSuit, firstValue, firstColor, predColor,
+      reason:`1re carte P1 ${previousP1First.val}${firstSuit} = IMPAIRE → CtrlTour sans inversion`};
+  }
+  if(firstSuit === predictedSuit){
+    return {active:true, applied:false, result:predSuit, firstSuit, firstValue, firstColor, predColor,
+      reason:`1re carte P1 ${previousP1First.val}${firstSuit} PAIRE + prédiction identique ${predictedSuit} → aucune inversion`};
+  }
+
+  let map, mapLabel;
+  if(firstColor !== predColor){
+    map={'♦️':'♣️','♣️':'♦️','♥️':'♠️','♠️':'♥️'};
+    mapLabel='♦️↔♣️ / ♥️↔♠️';
+  }else{
+    map={'♣️':'♥️','♥️':'♣️','♦️':'♠️','♠️':'♦️'};
+    mapLabel='♣️↔♥️ / ♦️↔♠️';
+  }
+  const result=map[predSuit]||predSuit;
+  return {active:true, applied:result!==predSuit, result, firstSuit, firstValue, firstColor, predColor, mapLabel,
+    reason:`1re carte P1 ${previousP1First.val}${firstSuit} PAIRE · ${firstColor===predColor?'même couleur':'couleur différente'} avec ${predictedSuit} → ${mapLabel} · ${predictedSuit}→${SUIT_EMOJI[result]||result}`};
 }
 
 // ── ALL.INV après perte (max 2) — dérivé de l'historique OPT1 unanime ──
@@ -1932,63 +1975,16 @@ function runCalc(raw){
     }
   }
 
-  // ── CtrlTour : confirmation finale (jeux normaux + rattrapage) ──
-  // Après TOUTES les inversions. Compare couleur de la 1ʳᵉ carte P1 du jeu précédent
-  // avec la couleur de la prédiction courante + parité de la valeur de cette carte.
-  // Noir (♠️♣️) | Rouge (♦️♥️)
-  // • Couleurs DIFFÉRENTES + 1ʳᵉ carte P1 PAIRE → inv ♦️↔♠️ / ♥️↔♣️
-  //   (sauf si même enseigne re-prédite + paire → inv inactive)
-  // • Couleurs IDENTIQUES + 1ʳᵉ carte P1 PAIRE → inv ♠️↔♥️ / ♦️↔♣️
-  //   (sauf si même enseigne que la 1ʳᵉ du précédent + paire → inv inactive)
+  // ── CtrlTour : DERNIÈRE vérification, après TOUTES les inversions ──
+  // Actif uniquement pendant les rattrapages 1 et 2.
   let ctrlTour = null;
-  if(p1 && p1.length){
-    const prevFirst = p1[0];
-    const prevSuit = prevFirst.suit;
-    const prevValRaw = cardValue(prevFirst.val);
-    const prevValEven = (prevValRaw != null) ? (prevValRaw % 2 === 0) : false;
-    const sameColor = isRed(prevSuit) === isRed(finalSuit);
-    const sameSuit = (prevSuit === finalSuit);
-    const beforeCtrl = finalSuit;
-    let applied = false;
-    let reason = '';
-
-    if(prevValEven){
-      if(sameSuit){
-        // Exception : même enseigne re-prédite + paire → inversion n'agit plus
-        reason = `même enseigne ${SUIT_EMOJI[prevSuit]} re-prédite + valeur paire (${prevFirst.val}=${prevValRaw}) → inv inactive`;
-      } else if(!sameColor){
-        // Couleurs différentes + paire → ♦️↔♠️ / ♥️↔♣️
-        const mapDiff = {'♦️':'♠️','♠️':'♦️','♥️':'♣️','♣️':'♥️'};
-        finalSuit = mapDiff[finalSuit] || finalSuit;
-        applied = finalSuit !== beforeCtrl;
-        reason = `couleurs DIFFÉRENTES (P1 ${SUIT_EMOJI[prevSuit]} vs pred ${SUIT_EMOJI[beforeCtrl]}) + 1ʳᵉ carte paire (${prevFirst.val}) → ♦️↔♠️ / ♥️↔♣️`;
-      } else {
-        // Couleurs identiques + paire → ♠️↔♥️ / ♦️↔♣️
-        const mapSame = {'♠️':'♥️','♥️':'♠️','♦️':'♣️','♣️':'♦️'};
-        finalSuit = mapSame[finalSuit] || finalSuit;
-        applied = finalSuit !== beforeCtrl;
-        reason = `couleurs IDENTIQUES (P1 ${SUIT_EMOJI[prevSuit]} = pred ${SUIT_EMOJI[beforeCtrl]}) + 1ʳᵉ carte paire (${prevFirst.val}) → ♠️↔♥️ / ♦️↔♣️`;
-      }
-    } else {
-      reason = `1ʳᵉ carte P1 ${prevFirst.val}${SUIT_EMOJI[prevSuit]} impaire → CtrlTour inactif`;
-    }
-
-    ctrlTour = {
-      active: applied,
-      prevSuit,
-      prevVal: prevFirst.val,
-      prevValEven,
-      sameColor,
-      sameSuit,
-      before: beforeCtrl,
-      result: finalSuit,
-      detail: reason + (applied ? ` · ${SUIT_EMOJI[beforeCtrl]}→${SUIT_EMOJI[finalSuit]}` : '')
-    };
+  if(inRattrapage){
+    ctrlTour = applyCtrlTourConfirmation(finalSuit, p1[0]);
+    finalSuit = ctrlTour.result;
   }
 
   return {num,p1,p2,nextNum,nextH,nextM,avantDernier,dernierDigit,sel,subEngine,algoResult,finalInv,finalSuit,
-          hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,formatSuitInv,globalInvNote,allInvInfo,firstDigitImpInv,
-          ctrlTour,
+          hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,ctrlTour,formatSuitInv,globalInvNote,allInvInfo,firstDigitImpInv,
           isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime},
           rattrapageForced,rattrapageSnapshot,normalAlgo,digitAlgoRule,fmtInvSnapshot:{ globalOn:false }};
 }
@@ -2704,6 +2700,9 @@ function renderResult(r){
     ...(r.rattrapageForced
       ? [`<div class="badge badge-temporal">⏱ RATTRAPAGE — ${r.algoUsed} forcé · réf. perdu ${r.rattrapageSnapshot.lostSuit?SUIT_EMOJI[r.rattrapageSnapshot.lostSuit]:'?'} (${r.rattrapageSnapshot.lostColor||'?'}) · restant ${r.rattrapageSnapshot.remainingAfter}/${RATTRAPAGE_MAX}${r.rattrapageInv&&r.rattrapageInv.active?` · inv ${SUIT_EMOJI[r.rattrapageInv.before]}→${SUIT_EMOJI[r.rattrapageInv.result]}`:''}</div>`]
       : []),
+    ...(r.ctrlTour
+      ? [`<div class="badge badge-ctrltour">🟠 CtrlTour — ${r.ctrlTour.reason}</div>`]
+      : []),
     `<div class="badge badge-selector">🎯 SÉLECTEUR — ${selectorLine}</div>`,
     ...(r.groupCInv && r.groupCInv.active
       ? [`<div class="badge badge-transform">🅲 GROUPE C — ${r.groupCInv.detail}</div>`]
@@ -2716,11 +2715,6 @@ function renderResult(r){
       : []),
     ...(r.allInvInfo && r.allInvInfo.active
       ? [`<div class="badge badge-temporal">⟲ ALL.INV (max ${ALLINV_MAX} · après perte) — ${r.allInvInfo.label}</div>`]
-      : []),
-    ...(r.ctrlTour
-      ? [r.ctrlTour.active
-          ? `<div class="badge" style="background:#1a1410;border:1px solid var(--orange-dim);border-left:3px solid var(--orange);color:var(--orange);font-weight:700">◆ CtrlTour — ${r.ctrlTour.detail}</div>`
-          : `<div class="badge" style="background:#1a1410;border:1px solid var(--orange-dim);border-left:3px solid var(--orange-dim);color:var(--orange-dim);opacity:.7">◆ CtrlTour — ${r.ctrlTour.detail}</div>`]
       : []),
     ...(r.formatSuitInv
       ? [`<div class="badge badge-hyper" style="opacity:.45">INV FORMAT — OFF · pred pure</div>`]
@@ -2765,8 +2759,6 @@ ${r.digitAlgoRule?`<div class="det-row"><span class="det-label" style="color:#e0
 <div class="det-row"><span class="det-label" style="color:#ffbf80">⏱ RATTRAPAGE</span><span class="det-val" style="color:#ffbf80">${r.rattrapageForced?`ACTIF → ${r.algoUsed} forcé (${r.rattrapageSnapshot.remainingBefore}→${r.rattrapageSnapshot.remainingAfter} restant)`:'INACTIF'}</span></div>
 ${r.rattrapageForced?`<div class="det-row"><span class="det-label" style="color:#ffbf80">Réf. jeu perdu</span><span class="det-val" style="color:#ffbf80">${r.rattrapageSnapshot.lostSuit?SUIT_EMOJI[r.rattrapageSnapshot.lostSuit]:'—'} (${r.rattrapageSnapshot.lostColor||'?'})</span></div>`:''}
 ${r.rattrapageInv?`<div class="det-row"><span class="det-label" style="color:#ffbf80">Inv. rattrapage</span><span class="det-val" style="color:#ffbf80">${r.rattrapageInv.detail}${r.rattrapageInv.active?` · ${SUIT_EMOJI[r.rattrapageInv.before]}→${SUIT_EMOJI[r.rattrapageInv.result]}`:''}</span></div>`:''}
-${r.ctrlTour?`<div class="det-row"><span class="det-label" style="color:var(--orange)">◆ CtrlTour</span><span class="det-val" style="color:var(--orange)">${r.ctrlTour.active?'ACTIF':'INACTIF'} · ${r.ctrlTour.detail}</span></div>
-<div class="det-row"><span class="det-label" style="color:var(--orange)">CtrlTour · 1ʳᵉ P1 précédent</span><span class="det-val" style="color:var(--orange)">${r.ctrlTour.prevVal}${SUIT_EMOJI[r.ctrlTour.prevSuit]} (${r.ctrlTour.prevValEven?'PAIRE':'IMPAIRE'}) · ${r.ctrlTour.sameColor?'même couleur':'couleurs ≠'}${r.ctrlTour.sameSuit?' · même enseigne':''}</span></div>`:''}
 <div class="det-row"><span class="det-label" style="color:#77ffaa">MOTEUR UTILISÉ</span><span class="det-val" style="color:#77ffaa">${r.algoUsed}${r.rattrapageForced?' (rattrapage)':''}</span></div>
 <hr class="det-sep">
 <div class="det-row"><span class="det-label" style="color:#80e080">🎯 SOUS-MOTEUR SÉLECTIONNÉ</span><span class="det-val hi-green">${r.subEngine}</span></div>

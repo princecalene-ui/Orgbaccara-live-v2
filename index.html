@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ORG_Back RELAIS V13.10</title>
+<title>ORG_Back RELAIS V9.13</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&family=Rajdhani:wght@300;400;600;700&family=Courier+Prime:wght@400;700&display=swap');
 
@@ -381,10 +381,10 @@
 <header>
   <div class="title-suite">
     <span class="suit-deco">♠️ ♥️</span>
-    <h1>ORG_Back RELAIS V13.10</h1>
+    <h1>ORG_Back RELAIS V9.13</h1>
     <span class="suit-deco">♣️ ♦️</span>
   </div>
-  <div class="subtitle">V13.10 · INV bande horaire · Pred PURE / UNIVERSELLE · même jeu → même résultat partout</div>
+  <div class="subtitle">Pred PURE / UNIVERSELLE · même jeu → même résultat partout · sans état local</div>
   <div class="author">AUTEUR : X_Code</div>
 </header>
 
@@ -484,7 +484,7 @@
   </div>
 </main>
 
-<footer>ORG_Back RELAIS V13.10 · X_Code · ♠️ ♥️ ♣️ ♦️</footer>
+<footer>ORG_Back RELAIS V9.13 · X_Code · ♠️ ♥️ ♣️ ♦️</footer>
 
 <script>
 
@@ -2122,113 +2122,8 @@ function runCalc(raw){
     finalSuit=invPrev.result;
   }
 
-  // ── V13.10 · INV BANDE HORAIRE (finale) ──
-  // 00h–11h59 : ♥️↔♠️ / ♣️↔♦️
-  // 12h–23h59 : ♥️↔♣️ / ♠️↔♦️
-  let hourBandInv = null;
-  {
-    const beforeH = finalSuit;
-    let map, bandLabel;
-    if(nextH >= 0 && nextH <= 11){
-      map = {'♥️':'♠️','♠️':'♥️','♣️':'♦️','♦️':'♣️'};
-      bandLabel = `00-11h59 · ♥️↔♠️ / ♣️↔♦️`;
-    } else {
-      map = {'♥️':'♣️','♣️':'♥️','♠️':'♦️','♦️':'♠️'};
-      bandLabel = `12-23h59 · ♥️↔♣️ / ♠️↔♦️`;
-    }
-    const resultH = map[finalSuit] || finalSuit;
-    hourBandInv = {
-      active: resultH !== beforeH,
-      h: nextH,
-      m: nextM,
-      band: nextH <= 11 ? '00-11' : '12-23',
-      before: beforeH,
-      result: resultH,
-      label: `V13.10 · H=${String(nextH).padStart(2,'0')}h${String(nextM).padStart(2,'0')} · ${bandLabel} · ${SUIT_EMOJI[beforeH]||beforeH}→${SUIT_EMOJI[resultH]||resultH}`
-    };
-    finalSuit = resultH;
-  }
-
-  // ── AllCheckPrev · confirmation finale (après TOUTES inversions) ──
-  // 1re carte P1 du jeu passé (gagnant ou perdant) vs enseigne prédite.
-  // Même enseigne → jamais d'inv. Sinon si valeur PAIR :
-  //   · couleurs DIFFÉRENTES → ♦️↔♣️ / ♥️↔♠️
-  //   · couleurs IDENTIQUES  → ♣️↔♥️ / ♦️↔♠️
-  // IMPAIR → inactive. S'applique jeu normal + rattrapage 1/2.
-  let allCheckPrev = null;
-  {
-    const prevFirstP1 = (p1 && p1.length) ? p1[0] : null;
-    const beforeA = finalSuit;
-    const info = {
-      active: false,
-      condition: null,
-      firstSuit: prevFirstP1 ? prevFirstP1.suit : null,
-      firstValue: prevFirstP1 ? prevFirstP1.val : null,
-      firstColor: null,
-      predColor: null,
-      before: beforeA,
-      result: beforeA,
-      label: 'AllCheckPrev · inactive'
-    };
-    if(!prevFirstP1 || !prevFirstP1.suit || prevFirstP1.val == null){
-      info.label = 'AllCheckPrev · aucune 1re carte P1 exploitable';
-      allCheckPrev = info;
-    } else {
-      const firstSuit = prevFirstP1.suit;
-      const sameSuit = firstSuit === finalSuit;
-      const firstRed = isRed(firstSuit);
-      const predRed = isRed(finalSuit);
-      const sameColor = firstRed === predRed;
-      info.firstColor = firstRed ? 'ROUGE' : 'NOIRE';
-      info.predColor = predRed ? 'ROUGE' : 'NOIRE';
-      if(sameSuit){
-        info.condition = 'MEME_ENSEIGNE';
-        info.label = `AllCheckPrev · CtrlTour OFF · même enseigne ${SUIT_EMOJI[firstSuit]||firstSuit} = pred → inv n'agit plus`;
-        allCheckPrev = info;
-      } else {
-        const rawValue = String(prevFirstP1.val).trim().toUpperCase();
-        let numericValue = null;
-        if(rawValue === 'A') numericValue = 1;
-        else if(['10','J','Q','K'].includes(rawValue)) numericValue = 0;
-        else numericValue = parseInt(rawValue, 10);
-        if(!Number.isFinite(numericValue)){
-          info.condition = 'VALEUR_INCONNUE';
-          info.label = `AllCheckPrev · valeur ${rawValue} non exploitable → inactive`;
-          allCheckPrev = info;
-        } else {
-          const firstParity = (numericValue % 2 === 0) ? 'PAIR' : 'IMPAIR';
-          if(firstParity === 'PAIR'){
-            let map = null;
-            if(!sameColor){
-              // couleurs différentes + PAIR → ♦️↔♣️ / ♥️↔♠️
-              map = {'♦️':'♣️','♣️':'♦️','♥️':'♠️','♠️':'♥️'};
-              info.condition = 'COULEUR_DIFF_PAIR';
-              info.label = `AllCheckPrev · CtrlTour · 1re P1 ${rawValue}${SUIT_EMOJI[firstSuit]||firstSuit}(${info.firstColor}) ≠ pred ${SUIT_EMOJI[finalSuit]||finalSuit}(${info.predColor}) · PAIR → ♦️↔♣️ / ♥️↔♠️`;
-            } else {
-              // même couleur + PAIR → ♣️↔♥️ / ♦️↔♠️
-              map = {'♣️':'♥️','♥️':'♣️','♦️':'♠️','♠️':'♦️'};
-              info.condition = 'MEME_COULEUR_PAIR';
-              info.label = `AllCheckPrev · CtrlTour · 1re P1 ${rawValue}${SUIT_EMOJI[firstSuit]||firstSuit}(${info.firstColor}) = pred ${SUIT_EMOJI[finalSuit]||finalSuit}(${info.predColor}) · PAIR → ♣️↔♥️ / ♦️↔♠️`;
-            }
-            const resultA = map[finalSuit] || finalSuit;
-            info.active = resultA !== beforeA;
-            info.result = resultA;
-            info.label += ` · ${SUIT_EMOJI[beforeA]||beforeA}→${SUIT_EMOJI[resultA]||resultA}`;
-            finalSuit = resultA;
-            allCheckPrev = info;
-          } else {
-            info.condition = sameColor ? 'MEME_COULEUR_IMPAIR' : 'COULEUR_DIFF_IMPAIR';
-            info.label = `AllCheckPrev · 1re P1 ${rawValue}${SUIT_EMOJI[firstSuit]||firstSuit}(${info.firstColor}) · ${firstParity} → inv inactive`;
-            allCheckPrev = info;
-          }
-        }
-      }
-    }
-  }
-
   return {num,p1,p2,nextNum,nextH,nextM,avantDernier,dernierDigit,sel,subEngine,algoResult,finalInv,finalSuit,
           hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,rattrapageFormatInv,formatSuitInv,globalInvNote,allInvInfo,firstDigitImpInv,
-          previousP1FirstCardInv,hourBandInv,allCheckPrev,
           isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime},
           rattrapageForced,rattrapageSnapshot,normalAlgo,digitAlgoRule,fmtInvSnapshot:{ globalOn:false }};
 }
@@ -3005,15 +2900,7 @@ function renderResult(r){
     ...(r.temporalInv ? (r.temporalInv.active
       ? [`<div class="badge badge-temporal">⏱ INV TEMPORELLE — ${r.temporalInv.label} → ${SUIT_EMOJI[r.temporalInv.before]}→${SUIT_EMOJI[r.temporalInv.result]}</div>`]
       : [`<div class="badge badge-temporal" style="opacity:.45">⏱ INV TEMPORELLE — ${r.temporalInv.label}</div>`]
-    ) : []),
-    ...(r.hourBandInv
-      ? [`<div class="badge badge-hyper">🕐 V13.10 INV BANDE HORAIRE — ${r.hourBandInv.label}</div>`]
-      : []),
-    ...(r.allCheckPrev
-      ? [r.allCheckPrev.active
-          ? `<div class="badge badge-temporal" style="border-color:var(--orange);color:var(--orange)">🟠 AllCheckPrev · CtrlTour — ${r.allCheckPrev.label}</div>`
-          : `<div class="badge badge-temporal" style="opacity:.55;border-color:var(--orange-dim);color:var(--orange-dim)">AllCheckPrev — ${r.allCheckPrev.label}</div>`]
-      : [])
+    ) : [])
   ];
   document.getElementById('badge-zone').innerHTML=badges.join('');
 
@@ -3094,27 +2981,10 @@ ${r.temporalInv.active?`<div class="det-row"><span class="det-label" style="colo
 <div class="det-row"><span class="det-label" style="color:#80e080">Principe</span><span class="det-val" style="color:#80e080">Tables A + inv ♣️↔♥️ / ♦️↔♠️</span></div>
 <div class="det-row"><span class="det-label" style="color:#80e080">Après GROUPE C</span><span class="det-val" style="color:#80e080">${SUIT_EMOJI[r.groupCInv.before]} → ${SUIT_EMOJI[r.groupCInv.result]}</span></div>`;
   }
-  if(r.hourBandInv){
-    detailsHTML+=`
-<hr class="det-sep">
-<div class="det-row"><span class="det-label" style="color:#a8e63a">🕐 V13.10 INV BANDE HORAIRE</span><span class="det-val" style="color:#a8e63a">${r.hourBandInv.active?'ACTIF':'IDENTITÉ (même enseigne)'}</span></div>
-<div class="det-row"><span class="det-label" style="color:#a8e63a">Heure prédite</span><span class="det-val" style="color:#a8e63a">${String(r.hourBandInv.h).padStart(2,'0')}h${String(r.hourBandInv.m).padStart(2,'0')} · bande ${r.hourBandInv.band}</span></div>
-<div class="det-row"><span class="det-label" style="color:#a8e63a">Règle</span><span class="det-val" style="color:#a8e63a">${r.hourBandInv.label}</span></div>
-<div class="det-row"><span class="det-label" style="color:#a8e63a">Après INV BANDE</span><span class="det-val" style="color:#a8e63a">${SUIT_EMOJI[r.hourBandInv.before]} → ${SUIT_EMOJI[r.hourBandInv.result]}</span></div>`;
-  }
-  if(r.allCheckPrev){
-    detailsHTML+=`
-<hr class="det-sep">
-<div class="det-row"><span class="det-label" style="color:#c48a3a">🟠 AllCheckPrev · CtrlTour</span><span class="det-val" style="color:#c48a3a">${r.allCheckPrev.active?'ACTIF':'INACTIF'}</span></div>
-<div class="det-row"><span class="det-label" style="color:#c48a3a">1re carte P1 jeu passé</span><span class="det-val" style="color:#c48a3a">${r.allCheckPrev.firstValue||'?'}${r.allCheckPrev.firstSuit?SUIT_EMOJI[r.allCheckPrev.firstSuit]:''} · ${r.allCheckPrev.firstColor||'?'}</span></div>
-<div class="det-row"><span class="det-label" style="color:#c48a3a">Couleur pred / condition</span><span class="det-val" style="color:#c48a3a">${r.allCheckPrev.predColor||'?'} · ${r.allCheckPrev.condition||'—'}</span></div>
-<div class="det-row"><span class="det-label" style="color:#c48a3a">Règle</span><span class="det-val" style="color:#c48a3a">${r.allCheckPrev.label}</span></div>
-${r.allCheckPrev.active?`<div class="det-row"><span class="det-label" style="color:#c48a3a">Après AllCheckPrev</span><span class="det-val" style="color:#c48a3a">${SUIT_EMOJI[r.allCheckPrev.before]} → ${SUIT_EMOJI[r.allCheckPrev.result]}</span></div>`:''}`;
-  }
 
   detailsHTML+=`
 <hr class="det-sep">
-<div class="det-row"><span class="det-label">CIBLE</span><span class="det-val det-result">P1 (JOUEUR) — calcul + inversions + V13.10 + AllCheckPrev final</span></div>
+<div class="det-row"><span class="det-label">CIBLE</span><span class="det-val det-result">P1 (JOUEUR) — calcul brut + inv temporelle si applicable</span></div>
 <div class="det-row"><span class="det-label">RÉSULTAT FINAL</span><span class="det-val det-result">#N${r.nextNum} — ${SUIT_EMOJI[displaySuit]} ${SUIT_NAMES[displaySuit]} — P1</span></div>`;
 
   document.getElementById('details-body').innerHTML=detailsHTML;

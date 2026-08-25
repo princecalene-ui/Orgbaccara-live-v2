@@ -1809,23 +1809,23 @@ function runCalc(raw){
       } else if(prevValue != null){
         const sameColor = isRed(prevSuit) === isRed(finalSuit);
 
-        // Même couleur + enseignes différentes + valeur impaire:
-        // ♠️↔♦️ / ♥️↔♣️
-        if(sameColor && prevValue % 2 === 1){
-          const map = {'♠️':'♦️','♦️':'♠️','♥️':'♣️','♣️':'♥️'};
-          result = map[finalSuit] || finalSuit;
-          applied = result !== finalSuit;
-          detail = `Même couleur · P1 ${prevValue}(IMPAIR) · ${SUIT_EMOJI[prevSuit]||prevSuit} ≠ ${SUIT_EMOJI[predBefore]||predBefore} → INV ♠️↔♦️ / ♥️↔♣️`;
-        }
-        // Même couleur + valeur paire:
-        // ♣️↔♥️ / ♦️↔♣️ (mapping demandé, appliqué tel quel)
-        else if(sameColor && prevValue % 2 === 0){
-          const map = {'♣️':'♥️','♥️':'♣️','♦️':'♣️','♠️':'♠️'};
-          result = map[finalSuit] || finalSuit;
-          applied = result !== finalSuit;
-          detail = `Même couleur · P1 ${prevValue}(PAIR) · ${SUIT_EMOJI[prevSuit]||prevSuit} ≠ ${SUIT_EMOJI[predBefore]||predBefore} → INV ♣️↔♥️ / ♦️↔♣️`;
+        // Valeur paire uniquement pour les rattrapages 1 et 2.
+        if(prevValue % 2 === 0){
+          if(sameColor){
+            // Même couleur + enseignes différentes → ♦️↔♠️ / ♥️↔♣️
+            const map = {'♠️':'♦️','♦️':'♠️','♥️':'♣️','♣️':'♥️'};
+            result = map[finalSuit] || finalSuit;
+            applied = result !== finalSuit;
+            detail = `Même couleur · P1 ${prevValue}(PAIR) · ${SUIT_EMOJI[prevSuit]||prevSuit} ≠ ${SUIT_EMOJI[predBefore]||predBefore} → INV ♦️↔♠️ / ♥️↔♣️`;
+          } else {
+            // Couleur différente → ♣️↔♥️ / ♦️↔♣️
+            const map = {'♣️':'♥️','♥️':'♣️','♦️':'♣️','♠️':'♠️'};
+            result = map[finalSuit] || finalSuit;
+            applied = result !== finalSuit;
+            detail = `Couleur différente · P1 ${prevValue}(PAIR) · ${SUIT_EMOJI[prevSuit]||prevSuit} ≠ ${SUIT_EMOJI[predBefore]||predBefore} → INV ♣️↔♥️ / ♦️↔♣️`;
+          }
         } else {
-          detail = `Couleur différente · P1 ${prevValue}(${prevValue%2===0?'PAIR':'IMPAIR'}) → pas d'INV`;
+          detail = `P1 ${prevValue}(IMPAIR) → pas d'INV`;
         }
       }
     }

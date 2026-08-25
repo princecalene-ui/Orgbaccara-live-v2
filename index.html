@@ -1789,20 +1789,57 @@ function runCalc(raw){
     finalSuit = result;
   }
 
-  // ── INV RATTRAPAGE (basée sur la couleur du jeu perdu) ──
-  // Appliquée uniquement si on est en cycle de rattrapage
+  // ── INV RATTRAPAGE (nouvelle règle : 1re carte P1 du jeu précédent) ──
+  // Uniquement aux rattrapages 1 et 2, après l'échec qui déclenche/continue le cycle.
   let rattrapageInv = null;
   if(inRattrapage){
-    const inv = applyRattrapageInv(finalSuit, rattrapage.lostColor, rattrapage.lostSuit);
+    const prevP1 = p1 && p1.length ? p1[0] : null;
+    const predBefore = finalSuit;
+    let result = finalSuit;
+    let applied = false;
+    let detail = 'Aucune inversion rattrapage';
+
+    if(prevP1 && prevP1.suit && prevP1.val != null){
+      const prevSuit = prevP1.suit;
+      const prevValue = cardValue(prevP1.val);
+
+      // Même enseigne que la prédiction : INV inactive.
+      if(prevSuit === finalSuit){
+        detail = `Même enseigne P1 ${SUIT_EMOJI[prevSuit]||prevSuit} que la prédiction ${SUIT_EMOJI[finalSuit]||finalSuit} → INV inactive`;
+      } else if(prevValue != null){
+        const sameColor = isRed(prevSuit) === isRed(finalSuit);
+
+        // Même couleur + enseignes différentes + valeur impaire:
+        // ♠️↔♦️ / ♥️↔♣️
+        if(sameColor && prevValue % 2 === 1){
+          const map = {'♠️':'♦️','♦️':'♠️','♥️':'♣️','♣️':'♥️'};
+          result = map[finalSuit] || finalSuit;
+          applied = result !== finalSuit;
+          detail = `Même couleur · P1 ${prevValue}(IMPAIR) · ${SUIT_EMOJI[prevSuit]||prevSuit} ≠ ${SUIT_EMOJI[predBefore]||predBefore} → INV ♠️↔♦️ / ♥️↔♣️`;
+        }
+        // Même couleur + valeur paire:
+        // ♣️↔♥️ / ♦️↔♣️ (mapping demandé, appliqué tel quel)
+        else if(sameColor && prevValue % 2 === 0){
+          const map = {'♣️':'♥️','♥️':'♣️','♦️':'♣️','♠️':'♠️'};
+          result = map[finalSuit] || finalSuit;
+          applied = result !== finalSuit;
+          detail = `Même couleur · P1 ${prevValue}(PAIR) · ${SUIT_EMOJI[prevSuit]||prevSuit} ≠ ${SUIT_EMOJI[predBefore]||predBefore} → INV ♣️↔♥️ / ♦️↔♣️`;
+        } else {
+          detail = `Couleur différente · P1 ${prevValue}(${prevValue%2===0?'PAIR':'IMPAIR'}) → pas d'INV`;
+        }
+      }
+    }
+
     rattrapageInv = {
-      active: inv.applied,
-      lostSuit: rattrapage.lostSuit,
-      lostColor: rattrapage.lostColor,
-      before: finalSuit,
-      result: inv.result,
-      detail: inv.detail
+      active: applied,
+      lostSuit: prevP1 ? prevP1.suit : null,
+      lostColor: prevP1 ? (isRed(prevP1.suit) ? 'rouge' : 'noir') : null,
+      previousP1First: prevP1,
+      before: predBefore,
+      result,
+      detail
     };
-    finalSuit = inv.result;
+    finalSuit = result;
   }
 
   // Snapshot rattrapage (la consommation se fait uniquement dans calculate(), pas en backtest)

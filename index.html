@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ORG_Back RELAIS V9.13</title>
+<title>ORG_Back RELAIS V13.10</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&family=Rajdhani:wght@300;400;600;700&family=Courier+Prime:wght@400;700&display=swap');
 
@@ -218,7 +218,6 @@
   .badge-hyper{background:#181018;border:1px solid #5a3a50;border-left:3px solid #a06080;color:#d0a0b0;font-weight:700}
   .badge-finalinv{background:#181014;border:1px solid #5a3040;border-left:3px solid var(--crimson);color:#e090a0}
   .badge-temporal{background:#1a1410;border:1px solid var(--orange-dim);border-left:3px solid var(--orange);color:#e8b870;font-weight:700}
-  .badge-allcheck{background:#1a1410;border:1px solid var(--orange-dim);border-left:3px solid var(--orange);color:var(--orange);font-weight:700}
 
   .copy-row{display:flex;justify-content:center;margin-bottom:24px}
   .details-toggle{
@@ -382,10 +381,10 @@
 <header>
   <div class="title-suite">
     <span class="suit-deco">♠️ ♥️</span>
-    <h1>ORG_Back RELAIS V9.13</h1>
+    <h1>ORG_Back RELAIS V13.10</h1>
     <span class="suit-deco">♣️ ♦️</span>
   </div>
-  <div class="subtitle">Pred PURE / UNIVERSELLE · même jeu → même résultat partout · sans état local</div>
+  <div class="subtitle">V13.10 · INV bande horaire · Pred PURE / UNIVERSELLE · même jeu → même résultat partout</div>
   <div class="author">AUTEUR : X_Code</div>
 </header>
 
@@ -485,7 +484,7 @@
   </div>
 </main>
 
-<footer>ORG_Back RELAIS V9.13 · X_Code · ♠️ ♥️ ♣️ ♦️</footer>
+<footer>ORG_Back RELAIS V13.10 · X_Code · ♠️ ♥️ ♣️ ♦️</footer>
 
 <script>
 
@@ -1736,25 +1735,20 @@ function applyPreviousP1FirstCardColorRule(predictedSuit, firstP1Card){
   const firstParity=(numericValue%2===0)?'PAIR':'IMPAIR';
   info.firstColor=firstRed?'ROUGE':'NOIRE';
   let map=null;
-  // CONTRÔLE FINAL demandé :
-  // - même couleur + valeur PAIRE  → ♣️↔♥️ / ♦️↔♠️
-  // - couleur différente + valeur PAIRE → ♦️↔♣️ / ♥️↔♠️
-  // La même enseigne est une exception : aucune inversion.
-  if(firstParity==='PAIR'){
-    if(sameColor){
-      map={'♣️':'♥️','♥️':'♣️','♦️':'♠️','♠️':'♦️'};
-      info.active=true;
-      info.condition='MEME_COULEUR_PAIR';
-      info.label=`AllCheckPrev · CtrlTour · même couleur + valeur ${rawValue}(PAIR) → ♣️↔♥️ / ♦️↔♠️`;
-    }else{
-      map={'♦️':'♣️','♣️':'♦️','♥️':'♠️','♠️':'♥️'};
-      info.active=true;
-      info.condition='COULEUR_DIFFERENTE_PAIR';
-      info.label=`AllCheckPrev · CtrlTour · couleur différente + valeur ${rawValue}(PAIR) → ♦️↔♣️ / ♥️↔♠️`;
-    }
+  if(sameColor && firstParity==='IMPAIR'){
+    map={'♦️':'♠️','♠️':'♦️','♥️':'♣️','♣️':'♥️'};
+    info.active=true;
+    info.condition='MEME_COULEUR_IMPAIR';
+    info.label=`INV P1 précédente · même couleur + valeur ${rawValue}(IMPAIR) → ♦️↔♠️ / ♥️↔♣️`;
+  }else if(!sameColor && firstParity==='PAIR'){
+    // Règle demandée : ♣️↔♥️ / ♦️↔♣️.
+    map={'♣️':'♥️','♥️':'♣️','♦️':'♣️'};
+    info.active=true;
+    info.condition='COULEUR_DIFFERENTE_PAIR';
+    info.label=`INV P1 précédente · couleur différente + valeur ${rawValue}(PAIR) → ♣️↔♥️ / ♦️↔♣️`;
   }else{
-    info.condition=sameColor?'MEME_COULEUR_IMPAIR':'COULEUR_DIFFERENTE_IMPAIR';
-    info.label=`AllCheckPrev · CtrlTour · ${sameColor?'même couleur':'couleur différente'} + valeur ${rawValue}(IMPAIR) → inactive`;
+    info.condition=sameColor?'MEME_COULEUR_PAIR':'COULEUR_DIFFERENTE_IMPAIR';
+    info.label=`INV P1 précédente · ${sameColor?'même couleur':'couleur différente'} + valeur ${rawValue}(${firstParity}) → inactive`;
   }
   const result=map?(map[predictedSuit]||predictedSuit):predictedSuit;
   info.predictedSuitAfter=result;
@@ -2128,8 +2122,36 @@ function runCalc(raw){
     finalSuit=invPrev.result;
   }
 
+  // ── V13.10 · INV BANDE HORAIRE (finale) ──
+  // 00h–11h59 : ♥️↔♠️ / ♣️↔♦️
+  // 12h–23h59 : ♥️↔♣️ / ♠️↔♦️
+  let hourBandInv = null;
+  {
+    const beforeH = finalSuit;
+    let map, bandLabel;
+    if(nextH >= 0 && nextH <= 11){
+      map = {'♥️':'♠️','♠️':'♥️','♣️':'♦️','♦️':'♣️'};
+      bandLabel = `00-11h59 · ♥️↔♠️ / ♣️↔♦️`;
+    } else {
+      map = {'♥️':'♣️','♣️':'♥️','♠️':'♦️','♦️':'♠️'};
+      bandLabel = `12-23h59 · ♥️↔♣️ / ♠️↔♦️`;
+    }
+    const resultH = map[finalSuit] || finalSuit;
+    hourBandInv = {
+      active: resultH !== beforeH,
+      h: nextH,
+      m: nextM,
+      band: nextH <= 11 ? '00-11' : '12-23',
+      before: beforeH,
+      result: resultH,
+      label: `V13.10 · H=${String(nextH).padStart(2,'0')}h${String(nextM).padStart(2,'0')} · ${bandLabel} · ${SUIT_EMOJI[beforeH]||beforeH}→${SUIT_EMOJI[resultH]||resultH}`
+    };
+    finalSuit = resultH;
+  }
+
   return {num,p1,p2,nextNum,nextH,nextM,avantDernier,dernierDigit,sel,subEngine,algoResult,finalInv,finalSuit,
           hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,rattrapageFormatInv,formatSuitInv,globalInvNote,allInvInfo,firstDigitImpInv,
+          previousP1FirstCardInv,hourBandInv,
           isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime},
           rattrapageForced,rattrapageSnapshot,normalAlgo,digitAlgoRule,fmtInvSnapshot:{ globalOn:false }};
 }
@@ -2868,10 +2890,7 @@ function renderResult(r){
           : `<div class="badge badge-transform" style="opacity:.55">⇄ 2 DERNIERS CHIFFRES — ${r.digitAlgoRule.label}</div>`]
       : []),
     ...(r.rattrapageForced
-      ? [
-          `<div class="badge badge-allcheck">✓ AllCheckPrev · CtrlTour — contrôle final après toutes les inversions</div>`,
-          `<div class="badge badge-temporal">⏱ RATTRAPAGE — ${r.algoUsed} forcé · réf. perdu ${r.rattrapageSnapshot.lostSuit?SUIT_EMOJI[r.rattrapageSnapshot.lostSuit]:'?'} (${r.rattrapageSnapshot.lostColor||'?'}) · format ${r.rattrapageSnapshot.lostFormat||'?'} · niv.${r.rattrapageSnapshot.rattrLevel||1} · restant ${r.rattrapageSnapshot.remainingAfter}/${RATTRAPAGE_MAX}${r.rattrapageInv&&r.rattrapageInv.active?` · inv ${SUIT_EMOJI[r.rattrapageInv.before]}→${SUIT_EMOJI[r.rattrapageInv.result]}`:''}</div>`
-        ]
+      ? [`<div class="badge badge-temporal">⏱ RATTRAPAGE — ${r.algoUsed} forcé · réf. perdu ${r.rattrapageSnapshot.lostSuit?SUIT_EMOJI[r.rattrapageSnapshot.lostSuit]:'?'} (${r.rattrapageSnapshot.lostColor||'?'}) · format ${r.rattrapageSnapshot.lostFormat||'?'} · niv.${r.rattrapageSnapshot.rattrLevel||1} · restant ${r.rattrapageSnapshot.remainingAfter}/${RATTRAPAGE_MAX}${r.rattrapageInv&&r.rattrapageInv.active?` · inv ${SUIT_EMOJI[r.rattrapageInv.before]}→${SUIT_EMOJI[r.rattrapageInv.result]}`:''}</div>`]
       : []),
     ...(r.rattrapageFormatInv && r.rattrapageFormatInv.active
       ? [`<div class="badge badge-hyper">⬆ COUCHE FORMAT RATTR — ${r.rattrapageFormatInv.detail}</div>`]
@@ -2910,8 +2929,8 @@ function renderResult(r){
       ? [`<div class="badge badge-temporal">⏱ INV TEMPORELLE — ${r.temporalInv.label} → ${SUIT_EMOJI[r.temporalInv.before]}→${SUIT_EMOJI[r.temporalInv.result]}</div>`]
       : [`<div class="badge badge-temporal" style="opacity:.45">⏱ INV TEMPORELLE — ${r.temporalInv.label}</div>`]
     ) : []),
-    ...(r.previousP1FirstCardInv && r.previousP1FirstCardInv.active
-      ? [`<div class="badge badge-allcheck">✓ AllCheckPrev · CtrlTour — ${r.previousP1FirstCardInv.label} · ${SUIT_EMOJI[r.previousP1FirstCardInv.predictedSuitBefore]}→${SUIT_EMOJI[r.previousP1FirstCardInv.predictedSuitAfter]}</div>`]
+    ...(r.hourBandInv
+      ? [`<div class="badge badge-hyper">🕐 V13.10 INV BANDE HORAIRE — ${r.hourBandInv.label}</div>`]
       : [])
   ];
   document.getElementById('badge-zone').innerHTML=badges.join('');
@@ -2993,17 +3012,18 @@ ${r.temporalInv.active?`<div class="det-row"><span class="det-label" style="colo
 <div class="det-row"><span class="det-label" style="color:#80e080">Principe</span><span class="det-val" style="color:#80e080">Tables A + inv ♣️↔♥️ / ♦️↔♠️</span></div>
 <div class="det-row"><span class="det-label" style="color:#80e080">Après GROUPE C</span><span class="det-val" style="color:#80e080">${SUIT_EMOJI[r.groupCInv.before]} → ${SUIT_EMOJI[r.groupCInv.result]}</span></div>`;
   }
-
-  if(r.previousP1FirstCardInv){
+  if(r.hourBandInv){
     detailsHTML+=`
 <hr class="det-sep">
-<div class="det-row"><span class="det-label" style="color:var(--orange)">✓ AllCheckPrev · CtrlTour</span><span class="det-val" style="color:var(--orange)">${r.previousP1FirstCardInv.label}</span></div>
-<div class="det-row"><span class="det-label" style="color:var(--orange)">1re carte P1 jeu précédent</span><span class="det-val" style="color:var(--orange)">${r.previousP1FirstCardInv.firstValue != null ? r.previousP1FirstCardInv.firstValue : '—'} ${r.previousP1FirstCardInv.firstSuit ? (SUIT_EMOJI[r.previousP1FirstCardInv.firstSuit]||r.previousP1FirstCardInv.firstSuit) : '—'} · ${r.previousP1FirstCardInv.firstColor||'—'}</span></div>
-<div class="det-row"><span class="det-label" style="color:var(--orange)">Contrôle final</span><span class="det-val" style="color:var(--orange)">${r.previousP1FirstCardInv.predictedSuitBefore ? (SUIT_EMOJI[r.previousP1FirstCardInv.predictedSuitBefore]||r.previousP1FirstCardInv.predictedSuitBefore) : '—'} → ${r.previousP1FirstCardInv.predictedSuitAfter ? (SUIT_EMOJI[r.previousP1FirstCardInv.predictedSuitAfter]||r.previousP1FirstCardInv.predictedSuitAfter) : '—'} · ${r.previousP1FirstCardInv.active?'INVERSION APPLIQUÉE':'INACTIVE'}</span></div>`;
+<div class="det-row"><span class="det-label" style="color:#a8e63a">🕐 V13.10 INV BANDE HORAIRE</span><span class="det-val" style="color:#a8e63a">${r.hourBandInv.active?'ACTIF':'IDENTITÉ (même enseigne)'}</span></div>
+<div class="det-row"><span class="det-label" style="color:#a8e63a">Heure prédite</span><span class="det-val" style="color:#a8e63a">${String(r.hourBandInv.h).padStart(2,'0')}h${String(r.hourBandInv.m).padStart(2,'0')} · bande ${r.hourBandInv.band}</span></div>
+<div class="det-row"><span class="det-label" style="color:#a8e63a">Règle</span><span class="det-val" style="color:#a8e63a">${r.hourBandInv.label}</span></div>
+<div class="det-row"><span class="det-label" style="color:#a8e63a">Après INV BANDE</span><span class="det-val" style="color:#a8e63a">${SUIT_EMOJI[r.hourBandInv.before]} → ${SUIT_EMOJI[r.hourBandInv.result]}</span></div>`;
   }
+
   detailsHTML+=`
 <hr class="det-sep">
-<div class="det-row"><span class="det-label">CIBLE</span><span class="det-val det-result">P1 (JOUEUR) — calcul brut + toutes inversions + AllCheckPrev final</span></div>
+<div class="det-row"><span class="det-label">CIBLE</span><span class="det-val det-result">P1 (JOUEUR) — calcul brut + inv temporelle + V13.10 bande horaire</span></div>
 <div class="det-row"><span class="det-label">RÉSULTAT FINAL</span><span class="det-val det-result">#N${r.nextNum} — ${SUIT_EMOJI[displaySuit]} ${SUIT_NAMES[displaySuit]} — P1</span></div>`;
 
   document.getElementById('details-body').innerHTML=detailsHTML;

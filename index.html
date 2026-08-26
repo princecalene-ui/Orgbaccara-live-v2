@@ -1076,26 +1076,97 @@ function lookupGameFormat(gameNum){
   return null;
 }
 
+// ── Historique OPT1 UNANIME (Telegram uniquement) ───────────────────────────
+// Reconstruit depuis telegramHistoryCache → même série sur tous les appareils.
+// Pas de localStorage comme source de vérité.
+function getUnanimousOpt1Series(){
+  if(!telegramHistoryCache || telegramHistoryCache.length < 2) return null;
+  const series = [];
+  const prevSkip = (typeof SYNC_SKIP_RATTRAPAGE !== 'undefined') ? SYNC_SKIP_RATTRAPAGE : false;
+  try{
+    SYNC_SKIP_RATTRAPAGE = true;
+    const hist = telegramHistoryCache.slice().sort((a,b)=>a.game_number-b.game_number);
+    for(let i=1;i<hist.length;i++){
+      const prev = hist[i-1], curr = hist[i];
+      try{
+        const readiness = checkGameReadiness(curr.raw_text || curr.normalized);
+        if(!readiness.usable) continue;
+        const pred = deterministicPredict(prev.normalized || prev.raw_text);
+        if(pred.nextNum !== curr.game_number) continue;
+        const currParsed = parseGame(curr.normalized || curr.raw_text);
+        if(!currParsed.p1 || !currParsed.p1.length) continue;
+        const actualSuits = new Set(currParsed.p1.map(c=>c.suit));
+        const status = actualSuits.has(pred.suit) ? 'valid' : 'invalid';
+        let fmt = null;
+        try{ fmt = detectFormatFromRaw(curr.normalized || curr.raw_text); }catch(e2){}
+        series.push({
+          gameNum: curr.game_number,
+          suitKey: pred.suit,
+          status,
+          algoUsed: 'ALGO-RELAIS',
+          rattrapage: false,
+          allInv: false,
+          actualFormat: fmt
+        });
+      }catch(e){ continue; }
+    }
+  }finally{
+    SYNC_SKIP_RATTRAPAGE = prevSkip;
+  }
+  // Marque rattrapage / allInv purement depuis la série TG (sans local)
+  for(let i=0;i<series.length;i++){
+    if(i===0) continue;
+    const prev = series[i-1];
+    if(prev.status !== 'invalid') continue;
+    let consecRattr = 0;
+    for(let j=i-1;j>=0;j--){
+      if(series[j].rattrapage && series[j].status==='invalid') consecRattr++;
+      else break;
+    }
+    if(!(prev.rattrapage && consecRattr >= RATTRAPAGE_MAX)){
+      series[i].rattrapage = true;
+    }
+    let consecAll = 0;
+    for(let j=i-1;j>=0;j--){
+      if(series[j].allInv && series[j].status==='invalid') consecAll++;
+      else break;
+    }
+    if(!(prev.allInv && consecAll >= ALLINV_MAX)){
+      series[i].allInv = true;
+    }
+  }
+  return series;
+}
+
+function getOpt1SeriesForRouting(){
+  // Priorité absolue : série reconstruite depuis Telegram (unanime)
+  const tg = getUnanimousOpt1Series();
+  if(tg && tg.length) return tg;
+  // Repli uniquement si TG pas encore sync (affichage local)
+  try{
+    return loadHistory()
+      .filter(e => histModeKey(e.algoUsed) === 'OPT1' && (e.status === 'valid' || e.status === 'invalid'))
+      .sort((a,b) => a.gameNum - b.gameNum);
+  }catch(e){ return []; }
+}
+
 // Max 2 ALL.INV : série après perte ; stop si gagné ou 2 ALL.INV déjà consommés
+// Référence = historique Telegram unanime (pas local)
 function shouldApplyAllInv(nextNum){
   if(typeof SYNC_SKIP_RATTRAPAGE !== 'undefined' && SYNC_SKIP_RATTRAPAGE) return false;
   try{
-    const opt1 = loadHistory()
-      .filter(e => histModeKey(e.algoUsed) === 'OPT1' && (e.status === 'valid' || e.status === 'invalid'))
-      .sort((a,b) => a.gameNum - b.gameNum);
+    const opt1 = getOpt1SeriesForRouting();
     if(!opt1.length) return false;
     const last = opt1[opt1.length - 1];
     if(last.gameNum !== nextNum - 1) return false;
     if(last.status !== 'invalid') return false;
 
-    // Compte les ALL.INV consécutifs perdus en fin de série
     let consecutive = 0;
     for(let i = opt1.length - 1; i >= 0; i--){
       if(opt1[i].allInv && opt1[i].status === 'invalid') consecutive++;
-      else if(opt1[i].allInv && opt1[i].status === 'valid') return false; // ALL.INV gagné → stop
+      else if(opt1[i].allInv && opt1[i].status === 'valid') return false;
       else break;
     }
-    // Départ (perte normale) ou continuation si < max 2
     if(!last.allInv) return true;
     return consecutive < ALLINV_MAX;
   }catch(e){}
@@ -1103,22 +1174,20 @@ function shouldApplyAllInv(nextNum){
 }
 
 // Max 2 RATTRAPAGE : série après perte ; force même ALGO + inv couleur + couche format
+// Référence = historique Telegram unanime (pas local)
 function shouldApplyRattrapage(nextNum){
   if(typeof SYNC_SKIP_RATTRAPAGE !== 'undefined' && SYNC_SKIP_RATTRAPAGE) return null;
   try{
-    const opt1 = loadHistory()
-      .filter(e => histModeKey(e.algoUsed) === 'OPT1' && (e.status === 'valid' || e.status === 'invalid'))
-      .sort((a,b) => a.gameNum - b.gameNum);
+    const opt1 = getOpt1SeriesForRouting();
     if(!opt1.length) return null;
     const last = opt1[opt1.length - 1];
     if(last.gameNum !== nextNum - 1) return null;
     if(last.status !== 'invalid') return null;
 
-    // Compte les rattrapages consécutifs perdus en fin de série
     let consecutive = 0;
     for(let i = opt1.length - 1; i >= 0; i--){
       if(opt1[i].rattrapage && opt1[i].status === 'invalid') consecutive++;
-      else if(opt1[i].rattrapage && opt1[i].status === 'valid') return null; // rattrapage gagné → stop
+      else if(opt1[i].rattrapage && opt1[i].status === 'valid') return null;
       else break;
     }
     if(last.rattrapage && consecutive >= RATTRAPAGE_MAX) return null;
@@ -1173,11 +1242,9 @@ function updateRegimeDisplay(){
   const p2parity = p1parity==='PAIR' ? 'IMPAIR' : 'PAIR';
   let rattrapageHtml = '';
   const liveRattr = shouldApplyRattrapage((regime.revelationNum != null ? regime.revelationNum : 0) + 1);
-  // Affiche le prochain rattrapage potentiel via historique
+  // Affiche le prochain rattrapage potentiel via historique TG unanime
   try{
-    const opt1 = loadHistory()
-      .filter(e => histModeKey(e.algoUsed)==='OPT1' && (e.status==='valid'||e.status==='invalid'))
-      .sort((a,b)=>a.gameNum-b.gameNum);
+    const opt1 = getOpt1SeriesForRouting();
     const last = opt1.length ? opt1[opt1.length-1] : null;
     if(last && last.status==='invalid' && !last.rattrapage){
       const fmtHint = last.actualFormat || lookupGameFormat(last.gameNum) || '?';
@@ -1755,6 +1822,95 @@ function applyPreviousP1FirstCardColorRule(predictedSuit, firstP1Card){
   return {result,info};
 }
 
+// ── AllCheckPrev (CONFIRMATION FINALE · CtrlTour) ───────────────────────────
+// Couche SUPPLÉMENTAIRE — n'altère aucune fonction existante.
+// Après TOUTES les inversions. Déclenchée si :
+//   • rattrapage 1/2 (échec, série TG unanime)  OU
+//   • format du jeu précédent = 2-2 / 3-3 / 2-3 (victoire ou échec)
+// Source 1ʳᵉ carte P1 = jeu précédent (entrée TG) → prédiction universelle.
+//
+// Règles :
+//  • Même enseigne que la 1ʳᵉ P1 → inversion inactive
+//  • Couleur DIFFÉRENTE + valeur PAIR → ♦️↔♠️ / ♥️↔♣️
+//  • Couleur IDENTIQUE + valeur PAIR → ♠️↔♥️ / ♦️↔♣️
+//  • Valeur IMPAIR → inactive
+function applyAllCheckPrev(predictedSuit, firstP1Card, shouldApply){
+  const info = {
+    active: false,
+    condition: null,
+    firstSuit: firstP1Card ? firstP1Card.suit : null,
+    firstValue: firstP1Card ? firstP1Card.val : null,
+    firstColor: null,
+    firstParity: null,
+    predictedSuitBefore: predictedSuit,
+    predictedSuitAfter: predictedSuit,
+    label: 'AllCheckPrev · inactive',
+    shouldApply: !!shouldApply,
+    triggerFormat: null
+  };
+  if(!shouldApply){
+    info.label = 'AllCheckPrev · hors contexte → inactive';
+    return { result: predictedSuit, info };
+  }
+  if(!firstP1Card || !firstP1Card.suit || firstP1Card.val == null){
+    info.label = 'AllCheckPrev · aucune 1ʳᵉ carte P1 exploitable (TG)';
+    return { result: predictedSuit, info };
+  }
+  const firstSuit = firstP1Card.suit;
+  const sameSuit = firstSuit === predictedSuit;
+  const firstRed = isRed(firstSuit);
+  const predRed = isRed(predictedSuit);
+  const sameColor = firstRed === predRed;
+  info.firstColor = firstRed ? 'ROUGE' : 'NOIRE';
+
+  if(sameSuit){
+    info.condition = 'MEME_ENSEIGNE';
+    info.label = `AllCheckPrev · CtrlTour · ${SUIT_EMOJI[firstSuit]||firstSuit} = pred ${SUIT_EMOJI[predictedSuit]||predictedSuit} → INV inactive`;
+    return { result: predictedSuit, info };
+  }
+
+  const rawValue = String(firstP1Card.val).trim().toUpperCase();
+  let numericValue = null;
+  if(rawValue === 'A') numericValue = 1;
+  else if(['10','J','Q','K'].includes(rawValue)) numericValue = 0;
+  else numericValue = parseInt(rawValue, 10);
+  if(!Number.isFinite(numericValue)){
+    info.condition = 'VALEUR_INCONNUE';
+    info.label = `AllCheckPrev · valeur ${rawValue} non exploitable → inactive`;
+    return { result: predictedSuit, info };
+  }
+  const firstParity = (numericValue % 2 === 0) ? 'PAIR' : 'IMPAIR';
+  info.firstParity = firstParity;
+
+  if(firstParity !== 'PAIR'){
+    info.condition = sameColor ? 'MEME_COULEUR_IMPAIR' : 'COULEUR_DIFF_IMPAIR';
+    info.label = `AllCheckPrev · CtrlTour · 1ʳᵉ P1 ${SUIT_EMOJI[firstSuit]||firstSuit}(${rawValue}/${firstParity}) · ${sameColor?'même couleur':'couleur diff'} → inactive (IMPAIR)`;
+    return { result: predictedSuit, info };
+  }
+
+  let map = null;
+  if(!sameColor){
+    map = {'♦️':'♠️','♠️':'♦️','♥️':'♣️','♣️':'♥️'};
+    info.active = true;
+    info.condition = 'COULEUR_DIFF_PAIR';
+    info.label = `AllCheckPrev · CtrlTour · 1ʳᵉ P1 ${SUIT_EMOJI[firstSuit]||firstSuit}(${rawValue}/PAIR) couleur≠pred → ♦️↔♠️ / ♥️↔♣️`;
+  } else {
+    map = {'♠️':'♥️','♥️':'♠️','♦️':'♣️','♣️':'♦️'};
+    info.active = true;
+    info.condition = 'MEME_COULEUR_PAIR';
+    info.label = `AllCheckPrev · CtrlTour · 1ʳᵉ P1 ${SUIT_EMOJI[firstSuit]||firstSuit}(${rawValue}/PAIR) même couleur → ♠️↔♥️ / ♦️↔♣️`;
+  }
+  const result = map[predictedSuit] || predictedSuit;
+  info.predictedSuitAfter = result;
+  if(result !== predictedSuit){
+    info.label += ` · ${SUIT_EMOJI[predictedSuit]||predictedSuit}→${SUIT_EMOJI[result]||result}`;
+  } else {
+    info.active = false;
+    info.label += ' · résultat inchangé';
+  }
+  return { result, info };
+}
+
 function runCalc(raw){
   // UNANIME (méthode pure) : régime dérivé UNIQUEMENT de TG + jeu courant — pas de localStorage
   const pureReg = pureRegimeFromTelegram(raw);
@@ -2122,8 +2278,28 @@ function runCalc(raw){
     finalSuit=invPrev.result;
   }
 
+  // ── AllCheckPrev · CtrlTour — confirmation FINALE (après tout) ──
+  // Déclenché si rattrapage (série TG) OU format précédent 2-2 / 3-3 / 2-3
+  let allCheckPrev = null;
+  {
+    const prevFirstP1 = (p1 && p1.length) ? p1[0] : null;
+    let prevFmt = null;
+    try {
+      prevFmt = detectHandFormat(p1, p2);
+      if(!prevFmt) prevFmt = detectFormatFromRaw(raw);
+    } catch(e) {}
+    const fmtNorm = (prevFmt === '3-2') ? '2-3' : prevFmt;
+    const formatTriggers = (fmtNorm === '2-2' || fmtNorm === '3-3' || fmtNorm === '2-3');
+    const shouldAllCheck = !!(inRattrapage || formatTriggers);
+    const chk = applyAllCheckPrev(finalSuit, prevFirstP1, shouldAllCheck);
+    allCheckPrev = chk.info;
+    if(allCheckPrev) allCheckPrev.triggerFormat = fmtNorm || null;
+    finalSuit = chk.result;
+  }
+
   return {num,p1,p2,nextNum,nextH,nextM,avantDernier,dernierDigit,sel,subEngine,algoResult,finalInv,finalSuit,
           hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,rattrapageFormatInv,formatSuitInv,globalInvNote,allInvInfo,firstDigitImpInv,
+          previousP1FirstCardInv,allCheckPrev,
           isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime},
           rattrapageForced,rattrapageSnapshot,normalAlgo,digitAlgoRule,fmtInvSnapshot:{ globalOn:false }};
 }
@@ -2869,6 +3045,13 @@ function renderResult(r){
       : (r.rattrapageForced && r.rattrapageFormatInv
         ? [`<div class="badge badge-hyper" style="opacity:.55">⬆ COUCHE FORMAT RATTR — ${r.rattrapageFormatInv.detail}</div>`]
         : [])),
+    ...(r.allCheckPrev
+      ? [r.allCheckPrev.active
+          ? `<div class="badge badge-temporal">🟠 AllCheckPrev · CtrlTour — ${r.allCheckPrev.label}${r.allCheckPrev.triggerFormat?` · fmt ${r.allCheckPrev.triggerFormat}`:''}</div>`
+          : (r.allCheckPrev.shouldApply
+            ? `<div class="badge badge-temporal" style="opacity:.55">🟠 AllCheckPrev · CtrlTour — ${r.allCheckPrev.label}${r.allCheckPrev.triggerFormat?` · fmt ${r.allCheckPrev.triggerFormat}`:''}</div>`
+            : '')]
+      : []),
     `<div class="badge badge-selector">🎯 SÉLECTEUR — ${selectorLine}</div>`,
     ...(r.groupCInv && r.groupCInv.active
       ? [`<div class="badge badge-transform">🅲 GROUPE C — ${r.groupCInv.detail}</div>`]
@@ -2927,6 +3110,8 @@ ${r.rattrapageForced?`<div class="det-row"><span class="det-label" style="color:
 ${r.rattrapageInv?`<div class="det-row"><span class="det-label" style="color:#ffbf80">Inv. rattrapage</span><span class="det-val" style="color:#ffbf80">${r.rattrapageInv.detail}${r.rattrapageInv.active?` · ${SUIT_EMOJI[r.rattrapageInv.before]}→${SUIT_EMOJI[r.rattrapageInv.result]}`:''}</span></div>`:''}
 ${r.rattrapageFormatInv?`<div class="det-row"><span class="det-label" style="color:#ffaaff">⬆ Couche format rattr</span><span class="det-val" style="color:#ffaaff">${r.rattrapageFormatInv.detail}</span></div>`:''}
 ${r.rattrapageForced?`<div class="det-row"><span class="det-label" style="color:#ffaaff">Format jeu perdu / niveau</span><span class="det-val" style="color:#ffaaff">${r.rattrapageSnapshot.lostFormat||'?'} · RATTR ${r.rattrapageSnapshot.rattrLevel||1}</span></div>`:''}
+${r.allCheckPrev?`<div class="det-row"><span class="det-label" style="color:#ffbf80">🟠 AllCheckPrev · CtrlTour</span><span class="det-val" style="color:#ffbf80">${r.allCheckPrev.label}${r.allCheckPrev.active?` · ${SUIT_EMOJI[r.allCheckPrev.predictedSuitBefore]||r.allCheckPrev.predictedSuitBefore}→${SUIT_EMOJI[r.allCheckPrev.predictedSuitAfter]||r.allCheckPrev.predictedSuitAfter}`:''}</span></div>`:''}
+${r.allCheckPrev&&r.allCheckPrev.firstSuit?`<div class="det-row"><span class="det-label" style="color:#ffbf80">1ʳᵉ P1 jeu préc. (TG)</span><span class="det-val" style="color:#ffbf80">${r.allCheckPrev.firstValue||'?'}${SUIT_EMOJI[r.allCheckPrev.firstSuit]||r.allCheckPrev.firstSuit} · ${r.allCheckPrev.firstColor||'?'} · ${r.allCheckPrev.firstParity||'?'}${r.allCheckPrev.triggerFormat?` · fmt ${r.allCheckPrev.triggerFormat}`:''}</span></div>`:''}
 <div class="det-row"><span class="det-label" style="color:#77ffaa">MOTEUR UTILISÉ</span><span class="det-val" style="color:#77ffaa">${r.algoUsed}${r.rattrapageForced?' (rattrapage)':''}</span></div>
 <hr class="det-sep">
 <div class="det-row"><span class="det-label" style="color:#80e080">🎯 SOUS-MOTEUR SÉLECTIONNÉ</span><span class="det-val hi-green">${r.subEngine}</span></div>

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ORG_Back RELAIS V9.13</title>
+<title>ORG_Back RELAIS V9.14</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&family=Rajdhani:wght@300;400;600;700&family=Courier+Prime:wght@400;700&display=swap');
 
@@ -381,7 +381,7 @@
 <header>
   <div class="title-suite">
     <span class="suit-deco">♠️ ♥️</span>
-    <h1>ORG_Back RELAIS V9.13</h1>
+    <h1>ORG_Back RELAIS V9.14</h1>
     <span class="suit-deco">♣️ ♦️</span>
   </div>
   <div class="subtitle">Pred PURE / UNIVERSELLE · même jeu → même résultat partout · sans état local</div>
@@ -484,7 +484,7 @@
   </div>
 </main>
 
-<footer>ORG_Back RELAIS V9.13 · X_Code · ♠️ ♥️ ♣️ ♦️</footer>
+<footer>ORG_Back RELAIS V9.14 · X_Code · ♠️ ♥️ ♣️ ♦️</footer>
 
 <script>
 
@@ -1076,9 +1076,8 @@ function lookupGameFormat(gameNum){
   return null;
 }
 
-// ── Historique OPT1 UNANIME (Telegram uniquement) ───────────────────────────
+// ── Historique OPT1 UNANIME (Telegram uniquement) — V9.14 ───────────────────
 // Reconstruit depuis telegramHistoryCache → même série sur tous les appareils.
-// Pas de localStorage comme source de vérité.
 function getUnanimousOpt1Series(){
   if(!telegramHistoryCache || telegramHistoryCache.length < 2) return null;
   const series = [];
@@ -1113,7 +1112,6 @@ function getUnanimousOpt1Series(){
   }finally{
     SYNC_SKIP_RATTRAPAGE = prevSkip;
   }
-  // Marque rattrapage / allInv purement depuis la série TG (sans local)
   for(let i=0;i<series.length;i++){
     if(i===0) continue;
     const prev = series[i-1];
@@ -1123,26 +1121,20 @@ function getUnanimousOpt1Series(){
       if(series[j].rattrapage && series[j].status==='invalid') consecRattr++;
       else break;
     }
-    if(!(prev.rattrapage && consecRattr >= RATTRAPAGE_MAX)){
-      series[i].rattrapage = true;
-    }
+    if(!(prev.rattrapage && consecRattr >= RATTRAPAGE_MAX)) series[i].rattrapage = true;
     let consecAll = 0;
     for(let j=i-1;j>=0;j--){
       if(series[j].allInv && series[j].status==='invalid') consecAll++;
       else break;
     }
-    if(!(prev.allInv && consecAll >= ALLINV_MAX)){
-      series[i].allInv = true;
-    }
+    if(!(prev.allInv && consecAll >= ALLINV_MAX)) series[i].allInv = true;
   }
   return series;
 }
 
 function getOpt1SeriesForRouting(){
-  // Priorité absolue : série reconstruite depuis Telegram (unanime)
   const tg = getUnanimousOpt1Series();
   if(tg && tg.length) return tg;
-  // Repli uniquement si TG pas encore sync (affichage local)
   try{
     return loadHistory()
       .filter(e => histModeKey(e.algoUsed) === 'OPT1' && (e.status === 'valid' || e.status === 'invalid'))
@@ -1150,8 +1142,7 @@ function getOpt1SeriesForRouting(){
   }catch(e){ return []; }
 }
 
-// Max 2 ALL.INV : série après perte ; stop si gagné ou 2 ALL.INV déjà consommés
-// Référence = historique Telegram unanime (pas local)
+// Max 2 ALL.INV — référence = historique Telegram unanime
 function shouldApplyAllInv(nextNum){
   if(typeof SYNC_SKIP_RATTRAPAGE !== 'undefined' && SYNC_SKIP_RATTRAPAGE) return false;
   try{
@@ -1160,7 +1151,6 @@ function shouldApplyAllInv(nextNum){
     const last = opt1[opt1.length - 1];
     if(last.gameNum !== nextNum - 1) return false;
     if(last.status !== 'invalid') return false;
-
     let consecutive = 0;
     for(let i = opt1.length - 1; i >= 0; i--){
       if(opt1[i].allInv && opt1[i].status === 'invalid') consecutive++;
@@ -1173,8 +1163,7 @@ function shouldApplyAllInv(nextNum){
   return false;
 }
 
-// Max 2 RATTRAPAGE : série après perte ; force même ALGO + inv couleur + couche format
-// Référence = historique Telegram unanime (pas local)
+// Max 2 RATTRAPAGE — référence = historique Telegram unanime
 function shouldApplyRattrapage(nextNum){
   if(typeof SYNC_SKIP_RATTRAPAGE !== 'undefined' && SYNC_SKIP_RATTRAPAGE) return null;
   try{
@@ -1183,7 +1172,6 @@ function shouldApplyRattrapage(nextNum){
     const last = opt1[opt1.length - 1];
     if(last.gameNum !== nextNum - 1) return null;
     if(last.status !== 'invalid') return null;
-
     let consecutive = 0;
     for(let i = opt1.length - 1; i >= 0; i--){
       if(opt1[i].rattrapage && opt1[i].status === 'invalid') consecutive++;
@@ -1191,12 +1179,10 @@ function shouldApplyRattrapage(nextNum){
       else break;
     }
     if(last.rattrapage && consecutive >= RATTRAPAGE_MAX) return null;
-
     const rattrLevel = last.rattrapage ? 2 : 1;
     const lostFormat = last.actualFormat
       ? normalizeLostFormat(last.actualFormat)
       : lookupGameFormat(last.gameNum);
-
     return {
       active: true,
       algo: last.algoUsed || 'ALGO1',
@@ -1822,17 +1808,17 @@ function applyPreviousP1FirstCardColorRule(predictedSuit, firstP1Card){
   return {result,info};
 }
 
-// ── AllCheckPrev (CONFIRMATION FINALE · CtrlTour) ───────────────────────────
+// ── AllCheckPrev V9.14 (CONFIRMATION FINALE · CtrlTour) ─────────────────────
 // Couche SUPPLÉMENTAIRE — n'altère aucune fonction existante.
 // Après TOUTES les inversions. Déclenchée si :
 //   • rattrapage 1/2 (échec, série TG unanime)  OU
 //   • format du jeu précédent = 2-2 / 3-3 / 2-3 (victoire ou échec)
-// Source 1ʳᵉ carte P1 = jeu précédent (entrée TG) → prédiction universelle.
+// Source 1ʳᵉ carte P1 = jeu précédent (TG) → prédiction universelle.
 //
-// Règles :
+// Règles V9.14 :
 //  • Même enseigne que la 1ʳᵉ P1 → inversion inactive
-//  • Couleur DIFFÉRENTE + valeur PAIR → ♦️↔♠️ / ♥️↔♣️
-//  • Couleur IDENTIQUE + valeur PAIR → ♠️↔♥️ / ♦️↔♣️
+//  • Couleur DIFFÉRENTE + valeur PAIR → ♦️↔♣️ / ♥️↔♠️
+//  • Couleur IDENTIQUE + valeur PAIR → ♠️↔♥️ / ♦️↔♠️
 //  • Valeur IMPAIR → inactive
 function applyAllCheckPrev(predictedSuit, firstP1Card, shouldApply){
   const info = {
@@ -1890,15 +1876,17 @@ function applyAllCheckPrev(predictedSuit, firstP1Card, shouldApply){
 
   let map = null;
   if(!sameColor){
-    map = {'♦️':'♠️','♠️':'♦️','♥️':'♣️','♣️':'♥️'};
+    // Couleur différente + PAIR → ♦️↔♣️ / ♥️↔♠️
+    map = {'♦️':'♣️','♣️':'♦️','♥️':'♠️','♠️':'♥️'};
     info.active = true;
     info.condition = 'COULEUR_DIFF_PAIR';
-    info.label = `AllCheckPrev · CtrlTour · 1ʳᵉ P1 ${SUIT_EMOJI[firstSuit]||firstSuit}(${rawValue}/PAIR) couleur≠pred → ♦️↔♠️ / ♥️↔♣️`;
+    info.label = `AllCheckPrev · CtrlTour · 1ʳᵉ P1 ${SUIT_EMOJI[firstSuit]||firstSuit}(${rawValue}/PAIR) couleur≠pred → ♦️↔♣️ / ♥️↔♠️`;
   } else {
-    map = {'♠️':'♥️','♥️':'♠️','♦️':'♣️','♣️':'♦️'};
+    // Même couleur + PAIR → ♠️↔♥️ / ♦️↔♠️
+    map = {'♠️':'♥️','♥️':'♠️','♦️':'♠️','♣️':'♦️'};
     info.active = true;
     info.condition = 'MEME_COULEUR_PAIR';
-    info.label = `AllCheckPrev · CtrlTour · 1ʳᵉ P1 ${SUIT_EMOJI[firstSuit]||firstSuit}(${rawValue}/PAIR) même couleur → ♠️↔♥️ / ♦️↔♣️`;
+    info.label = `AllCheckPrev · CtrlTour · 1ʳᵉ P1 ${SUIT_EMOJI[firstSuit]||firstSuit}(${rawValue}/PAIR) même couleur → ♠️↔♥️ / ♦️↔♠️`;
   }
   const result = map[predictedSuit] || predictedSuit;
   info.predictedSuitAfter = result;
@@ -2278,7 +2266,7 @@ function runCalc(raw){
     finalSuit=invPrev.result;
   }
 
-  // ── AllCheckPrev · CtrlTour — confirmation FINALE (après tout) ──
+  // ── AllCheckPrev V9.14 · CtrlTour — confirmation FINALE (après tout) ──
   // Déclenché si rattrapage (série TG) OU format précédent 2-2 / 3-3 / 2-3
   let allCheckPrev = null;
   {

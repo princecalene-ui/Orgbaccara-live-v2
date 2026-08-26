@@ -1076,13 +1076,68 @@ function lookupGameFormat(gameNum){
   return null;
 }
 
-// ALL.INV après perte — ANNULÉ (inv 1 & 2) : cours normal même après perte
+// Max 2 ALL.INV : série après perte ; stop si gagné ou 2 ALL.INV déjà consommés
 function shouldApplyAllInv(nextNum){
+  if(typeof SYNC_SKIP_RATTRAPAGE !== 'undefined' && SYNC_SKIP_RATTRAPAGE) return false;
+  try{
+    const opt1 = loadHistory()
+      .filter(e => histModeKey(e.algoUsed) === 'OPT1' && (e.status === 'valid' || e.status === 'invalid'))
+      .sort((a,b) => a.gameNum - b.gameNum);
+    if(!opt1.length) return false;
+    const last = opt1[opt1.length - 1];
+    if(last.gameNum !== nextNum - 1) return false;
+    if(last.status !== 'invalid') return false;
+
+    // Compte les ALL.INV consécutifs perdus en fin de série
+    let consecutive = 0;
+    for(let i = opt1.length - 1; i >= 0; i--){
+      if(opt1[i].allInv && opt1[i].status === 'invalid') consecutive++;
+      else if(opt1[i].allInv && opt1[i].status === 'valid') return false; // ALL.INV gagné → stop
+      else break;
+    }
+    // Départ (perte normale) ou continuation si < max 2
+    if(!last.allInv) return true;
+    return consecutive < ALLINV_MAX;
+  }catch(e){}
   return false;
 }
 
-// RATTRAPAGE — ANNULÉ : cours normal même après perte (pas de forçage ALGO)
+// Max 2 RATTRAPAGE : série après perte ; force même ALGO + inv couleur + couche format
 function shouldApplyRattrapage(nextNum){
+  if(typeof SYNC_SKIP_RATTRAPAGE !== 'undefined' && SYNC_SKIP_RATTRAPAGE) return null;
+  try{
+    const opt1 = loadHistory()
+      .filter(e => histModeKey(e.algoUsed) === 'OPT1' && (e.status === 'valid' || e.status === 'invalid'))
+      .sort((a,b) => a.gameNum - b.gameNum);
+    if(!opt1.length) return null;
+    const last = opt1[opt1.length - 1];
+    if(last.gameNum !== nextNum - 1) return null;
+    if(last.status !== 'invalid') return null;
+
+    // Compte les rattrapages consécutifs perdus en fin de série
+    let consecutive = 0;
+    for(let i = opt1.length - 1; i >= 0; i--){
+      if(opt1[i].rattrapage && opt1[i].status === 'invalid') consecutive++;
+      else if(opt1[i].rattrapage && opt1[i].status === 'valid') return null; // rattrapage gagné → stop
+      else break;
+    }
+    if(last.rattrapage && consecutive >= RATTRAPAGE_MAX) return null;
+
+    const rattrLevel = last.rattrapage ? 2 : 1;
+    const lostFormat = last.actualFormat
+      ? normalizeLostFormat(last.actualFormat)
+      : lookupGameFormat(last.gameNum);
+
+    return {
+      active: true,
+      algo: last.algoUsed || 'ALGO1',
+      lostSuit: last.suitKey || null,
+      lostColor: last.suitKey ? (isRed(last.suitKey) ? 'rouge' : 'noir') : null,
+      lostFormat: lostFormat,
+      rattrLevel: rattrLevel,
+      remaining: last.rattrapage ? (RATTRAPAGE_MAX - consecutive) : RATTRAPAGE_MAX
+    };
+  }catch(e){}
   return null;
 }
 
@@ -1116,11 +1171,35 @@ function updateRegimeDisplay(){
   if(!el) return;
   const p1parity = regime.revelationParity;
   const p2parity = p1parity==='PAIR' ? 'IMPAIR' : 'PAIR';
-  const rattrapageHtml = `
-    <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #2a1a1a">
-      <span class="regime-label">Rattrapage / ALL.INV</span>
-      <span class="regime-val" style="color:var(--ivory-dim)">ANNULÉS · cours normal (même après perte)</span>
+  let rattrapageHtml = '';
+  const liveRattr = shouldApplyRattrapage((regime.revelationNum != null ? regime.revelationNum : 0) + 1);
+  // Affiche le prochain rattrapage potentiel via historique
+  try{
+    const opt1 = loadHistory()
+      .filter(e => histModeKey(e.algoUsed)==='OPT1' && (e.status==='valid'||e.status==='invalid'))
+      .sort((a,b)=>a.gameNum-b.gameNum);
+    const last = opt1.length ? opt1[opt1.length-1] : null;
+    if(last && last.status==='invalid' && !last.rattrapage){
+      const fmtHint = last.actualFormat || lookupGameFormat(last.gameNum) || '?';
+      rattrapageHtml = `
+    <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #7a6028">
+      <span class="regime-label" style="color:#ffbf80">⏱ RATTRAPAGE</span>
+      <span class="regime-val" style="color:#ffbf80">EN ATTENTE · max ${RATTRAPAGE_MAX} · après perte #N${last.gameNum} · format ${fmtHint} → couche RATTR1</span>
     </div>`;
+    } else {
+      rattrapageHtml = `
+    <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #2a1a1a">
+      <span class="regime-label">Rattrapage</span>
+      <span class="regime-val" style="color:var(--ivory-dim)">Inactif · max ${RATTRAPAGE_MAX} après perte</span>
+    </div>`;
+    }
+  }catch(e){
+    rattrapageHtml = `
+    <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #2a1a1a">
+      <span class="regime-label">Rattrapage</span>
+      <span class="regime-val" style="color:var(--ivory-dim)">Inactif · max ${RATTRAPAGE_MAX} après perte</span>
+    </div>`;
+  }
   const fmtOn = (typeof fmtInv !== 'undefined' && fmtInv.globalOn);
   const fmtOne = (typeof fmtInv !== 'undefined' && fmtInv.oneShotNext);
   const fmtSrc = (typeof fmtInv !== 'undefined' && fmtInv.source) ? fmtInv.source : '—';
@@ -1617,12 +1696,6 @@ function runEngine(num, p1Cards, p2Cards, nextNum){
 // ── ADAPTATION : couleur de la 1re carte P1 du jeu précédent ──
 // Cette couche intervient uniquement après le calcul existant de finalSuit.
 // Elle ne modifie aucune des règles précédentes.
-// ── AllCheckPrev / CtrlTour — confirmation FINALE (après toutes les inversions)
-// Appliquée à tout jeu (gagnant, perdant, normal). Réf. = 1ʳᵉ carte P1 du jeu précédent.
-// • Même enseigne reprédite → INV inactive
-// • Couleurs DIFFÉRENTES + valeur PAIR → ♦️↔♠️ / ♥️↔♣️
-// • Couleurs IDENTIQUES + valeur PAIR → ♠️↔♥️ / ♦️↔♣️
-// • Valeur IMPAIR → inactive
 function applyPreviousP1FirstCardColorRule(predictedSuit, firstP1Card){
   const info = {
     active:false, condition:null,
@@ -1631,10 +1704,10 @@ function applyPreviousP1FirstCardColorRule(predictedSuit, firstP1Card){
     firstColor:null,
     predictedSuitBefore:predictedSuit,
     predictedSuitAfter:predictedSuit,
-    label:'AllCheckPrev · inactive'
+    label:'INV P1 précédente · inactive'
   };
   if(!firstP1Card || !firstP1Card.suit || firstP1Card.val == null){
-    info.label='AllCheckPrev · aucune 1re carte P1 exploitable';
+    info.label='INV P1 précédente · aucune 1re carte P1 exploitable';
     return {result:predictedSuit,info};
   }
   const firstSuit=firstP1Card.suit;
@@ -1642,10 +1715,10 @@ function applyPreviousP1FirstCardColorRule(predictedSuit, firstP1Card){
   const firstRed=isRed(firstSuit);
   const predRed=isRed(predictedSuit);
   const sameColor=firstRed===predRed;
-  info.firstColor=firstRed?'ROUGE':'NOIRE';
   if(sameSuit){
+    info.firstColor=firstRed?'ROUGE':'NOIRE';
     info.condition='MEME_ENSEIGNE';
-    info.label=`AllCheckPrev · ${SUIT_EMOJI[firstSuit]||firstSuit} = pred ${SUIT_EMOJI[predictedSuit]||predictedSuit} → INV inactive`;
+    info.label=`INV P1 précédente · ${SUIT_EMOJI[firstSuit]||firstSuit} = prédiction ${SUIT_EMOJI[predictedSuit]||predictedSuit} → INV inactive`;
     return {result:predictedSuit,info};
   }
   const rawValue=String(firstP1Card.val).trim().toUpperCase();
@@ -1654,31 +1727,31 @@ function applyPreviousP1FirstCardColorRule(predictedSuit, firstP1Card){
   else if(['10','J','Q','K'].includes(rawValue)) numericValue=0;
   else numericValue=parseInt(rawValue,10);
   if(!Number.isFinite(numericValue)){
+    info.firstColor=firstRed?'ROUGE':'NOIRE';
     info.condition='VALEUR_INCONNUE';
-    info.label=`AllCheckPrev · valeur ${rawValue} non exploitable → inactive`;
+    info.label=`INV P1 précédente · valeur ${rawValue} non exploitable → inactive`;
     return {result:predictedSuit,info};
   }
   const firstParity=(numericValue%2===0)?'PAIR':'IMPAIR';
+  info.firstColor=firstRed?'ROUGE':'NOIRE';
   let map=null;
-  if(!sameColor && firstParity==='PAIR'){
+  if(sameColor && firstParity==='IMPAIR'){
     map={'♦️':'♠️','♠️':'♦️','♥️':'♣️','♣️':'♥️'};
     info.active=true;
-    info.condition='COULEUR_DIFFERENTE_PAIR';
-    info.label=`AllCheckPrev · ${info.firstColor} ≠ pred · ${rawValue}(PAIR) → ♦️↔♠️ / ♥️↔♣️`;
-  }else if(sameColor && firstParity==='PAIR'){
-    map={'♠️':'♥️','♥️':'♠️','♦️':'♣️','♣️':'♦️'};
+    info.condition='MEME_COULEUR_IMPAIR';
+    info.label=`INV P1 précédente · même couleur + valeur ${rawValue}(IMPAIR) → ♦️↔♠️ / ♥️↔♣️`;
+  }else if(!sameColor && firstParity==='PAIR'){
+    // Règle demandée : ♣️↔♥️ / ♦️↔♣️.
+    map={'♣️':'♥️','♥️':'♣️','♦️':'♣️'};
     info.active=true;
-    info.condition='MEME_COULEUR_PAIR';
-    info.label=`AllCheckPrev · ${info.firstColor} = pred · ${rawValue}(PAIR) → ♠️↔♥️ / ♦️↔♣️`;
+    info.condition='COULEUR_DIFFERENTE_PAIR';
+    info.label=`INV P1 précédente · couleur différente + valeur ${rawValue}(PAIR) → ♣️↔♥️ / ♦️↔♣️`;
   }else{
-    info.condition=sameColor?'MEME_COULEUR_IMPAIR':'COULEUR_DIFFERENTE_IMPAIR';
-    info.label=`AllCheckPrev · ${sameColor?'même couleur':'couleurs ≠'} + ${rawValue}(${firstParity}) → inactive`;
+    info.condition=sameColor?'MEME_COULEUR_PAIR':'COULEUR_DIFFERENTE_IMPAIR';
+    info.label=`INV P1 précédente · ${sameColor?'même couleur':'couleur différente'} + valeur ${rawValue}(${firstParity}) → inactive`;
   }
   const result=map?(map[predictedSuit]||predictedSuit):predictedSuit;
   info.predictedSuitAfter=result;
-  if(info.active){
-    info.label += ` · ${SUIT_EMOJI[predictedSuit]||predictedSuit}→${SUIT_EMOJI[result]||result}`;
-  }
   return {result,info};
 }
 
@@ -2039,8 +2112,8 @@ function runCalc(raw){
     }
   }
 
-  // ── AllCheckPrev / CtrlTour — confirmation FINALE (après tout)
-  // Réf. = 1ʳᵉ carte P1 du jeu précédent (TG unanime · même résultat partout)
+  // ── ADAPTATION DEMANDÉE : 1re carte P1 du jeu précédent vs nouvelle prédiction ──
+  // Placée en dernière couche : les fonctions/règles existantes restent inchangées.
   let previousP1FirstCardInv = null;
   {
     const prevFirstP1=(p1&&p1.length)?p1[0]:null;
@@ -2051,7 +2124,6 @@ function runCalc(raw){
 
   return {num,p1,p2,nextNum,nextH,nextM,avantDernier,dernierDigit,sel,subEngine,algoResult,finalInv,finalSuit,
           hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,rattrapageFormatInv,formatSuitInv,globalInvNote,allInvInfo,firstDigitImpInv,
-          previousP1FirstCardInv,
           isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime},
           rattrapageForced,rattrapageSnapshot,normalAlgo,digitAlgoRule,fmtInvSnapshot:{ globalOn:false }};
 }
@@ -2828,10 +2900,6 @@ function renderResult(r){
     ...(r.temporalInv ? (r.temporalInv.active
       ? [`<div class="badge badge-temporal">⏱ INV TEMPORELLE — ${r.temporalInv.label} → ${SUIT_EMOJI[r.temporalInv.before]}→${SUIT_EMOJI[r.temporalInv.result]}</div>`]
       : [`<div class="badge badge-temporal" style="opacity:.45">⏱ INV TEMPORELLE — ${r.temporalInv.label}</div>`]
-    ) : []),
-    ...(r.previousP1FirstCardInv ? (r.previousP1FirstCardInv.active
-      ? [`<div class="badge badge-temporal">🟠 AllCheckPrev · CtrlTour — ${r.previousP1FirstCardInv.label}</div>`]
-      : [`<div class="badge badge-temporal" style="opacity:.45">🟠 AllCheckPrev · CtrlTour — ${r.previousP1FirstCardInv.label}</div>`]
     ) : [])
   ];
   document.getElementById('badge-zone').innerHTML=badges.join('');
@@ -2912,16 +2980,6 @@ ${r.temporalInv.active?`<div class="det-row"><span class="det-label" style="colo
 <div class="det-row"><span class="det-label" style="color:#80e080">🅲 GROUPE C (00h–08h44 + 20h–23h59)</span><span class="det-val" style="color:#80e080">ACTIF</span></div>
 <div class="det-row"><span class="det-label" style="color:#80e080">Principe</span><span class="det-val" style="color:#80e080">Tables A + inv ♣️↔♥️ / ♦️↔♠️</span></div>
 <div class="det-row"><span class="det-label" style="color:#80e080">Après GROUPE C</span><span class="det-val" style="color:#80e080">${SUIT_EMOJI[r.groupCInv.before]} → ${SUIT_EMOJI[r.groupCInv.result]}</span></div>`;
-  }
-  if(r.previousP1FirstCardInv){
-    const ac = r.previousP1FirstCardInv;
-    detailsHTML+=`
-<hr class="det-sep">
-<div class="det-row"><span class="det-label" style="color:#ff9a3c">🟠 AllCheckPrev · CtrlTour</span><span class="det-val" style="color:#ff9a3c">${ac.active?'ACTIF':'INACTIF'}</span></div>
-<div class="det-row"><span class="det-label" style="color:#ff9a3c">1ʳᵉ carte P1 jeu précédent</span><span class="det-val" style="color:#ff9a3c">${ac.firstValue||'?'}${SUIT_EMOJI[ac.firstSuit]||ac.firstSuit||'?'} · ${ac.firstColor||'?'} (NOIRE ♠️♣️ | ROUGE ♦️♥️)</span></div>
-<div class="det-row"><span class="det-label" style="color:#ff9a3c">Condition</span><span class="det-val" style="color:#ff9a3c">${ac.condition||'—'}</span></div>
-<div class="det-row"><span class="det-label" style="color:#ff9a3c">Règle</span><span class="det-val" style="color:#ff9a3c">${ac.label||'—'}</span></div>
-${ac.active?`<div class="det-row"><span class="det-label" style="color:#ff9a3c">Après AllCheckPrev</span><span class="det-val" style="color:#ff9a3c">${SUIT_EMOJI[ac.predictedSuitBefore]||ac.predictedSuitBefore} → ${SUIT_EMOJI[ac.predictedSuitAfter]||ac.predictedSuitAfter}</span></div>`:''}`;
   }
 
   detailsHTML+=`

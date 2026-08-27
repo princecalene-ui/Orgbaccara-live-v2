@@ -902,10 +902,10 @@ function syncUnanimousStateFromTelegram(currentRaw){
 }
 let SYNC_SKIP_RATTRAPAGE = false;
 
-// ── RATTRAPAGE : si un ALGO perd, on le réutilise jusqu'à 3 fois, puis retour au routage normal ──
+// ── RATTRAPAGE : si un ALGO perd, on le réutilise 1 fois max, puis retour au routage normal ──
 const RATTRAPAGE_KEY = 'orgbacc_rattrapage_v1';
-const RATTRAPAGE_MAX = 2; // max 2 rattrapages après perte puis retour à zéro
-const ALLINV_MAX = 2;     // max 2 ALL.INV après perte puis retour à zéro
+const RATTRAPAGE_MAX = 1; // max 1 rattrapage après perte puis retour à zéro
+const ALLINV_MAX = 1;     // max 1 ALL.INV après perte puis retour à zéro
 function emptyRattrapage(){
   return { active:false, algo:null, remaining:0, startedAt:null, lostSuit:null, lostColor:null };
 }
@@ -964,7 +964,7 @@ function applyRattrapageInv(predSuit, lostColor, lostSuit){
   };
 }
 
-// ── ALL.INV après perte (max 2) — dérivé de l'historique OPT1 unanime ──
+// ── ALL.INV après perte (max 1) — dérivé de l'historique OPT1 unanime ──
 function applyAllInverse(suit, avantDernier, nextH){
   const isPair = (avantDernier % 2 === 0);
   const heurePair = (nextH % 2 === 0);
@@ -990,7 +990,7 @@ function applyAllInverse(suit, avantDernier, nextH){
   return { result, label, isPair, heurePair, before: suit, applied: result !== suit };
 }
 
-// Max 2 ALL.INV : série après perte ; stop si gagné ou 2 ALL.INV déjà consommés
+// Max 1 ALL.INV : série après perte ; stop si gagné ou 1 ALL.INV déjà consommé
 function shouldApplyAllInv(nextNum){
   if(typeof SYNC_SKIP_RATTRAPAGE !== 'undefined' && SYNC_SKIP_RATTRAPAGE) return false;
   try{
@@ -1009,14 +1009,14 @@ function shouldApplyAllInv(nextNum){
       else if(opt1[i].allInv && opt1[i].status === 'valid') return false; // ALL.INV gagné → stop
       else break;
     }
-    // Départ (perte normale) ou continuation si < max 2
+    // Départ (perte normale) ou continuation si < max 1
     if(!last.allInv) return true;
     return consecutive < ALLINV_MAX;
   }catch(e){}
   return false;
 }
 
-// Max 2 RATTRAPAGE : série après perte ; force même ALGO + inv couleur
+// Max 1 RATTRAPAGE : série après perte ; force même ALGO + inv couleur
 function shouldApplyRattrapage(nextNum){
   if(typeof SYNC_SKIP_RATTRAPAGE !== 'undefined' && SYNC_SKIP_RATTRAPAGE) return null;
   try{
@@ -1643,7 +1643,7 @@ function runCalc(raw){
       : `2 derniers chiffres ${String(lastTwo).padStart(2,'0')} (${digitZone}) → NORMAL (pas de bascule)`
   };
 
-  // RATTRAPAGE max 2 — après perte (historique OPT1 unanime)
+  // RATTRAPAGE max 1 — après perte (historique OPT1 unanime)
   const normalAlgo = baseAlgo;
   const rattrInfo = shouldApplyRattrapage(nextNum);
   const inRattrapage = !!(rattrInfo && rattrInfo.active);
@@ -1907,7 +1907,7 @@ function runCalc(raw){
     }
   }
 
-  // ── ALL.INV après perte (max 2) — depuis historique OPT1 unanime ──
+  // ── ALL.INV après perte (max 1) — depuis historique OPT1 unanime ──
   let allInvInfo = null;
   if(shouldApplyAllInv(nextNum)){
     const allInv = applyAllInverse(finalSuit, avantDernier, nextH);

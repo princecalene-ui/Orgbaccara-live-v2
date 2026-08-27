@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ORG_Back RELAIS V9.13</title>
+<title>ORG_Back RELAIS V9.14</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&family=Rajdhani:wght@300;400;600;700&family=Courier+Prime:wght@400;700&display=swap');
 
@@ -381,7 +381,7 @@
 <header>
   <div class="title-suite">
     <span class="suit-deco">♠️ ♥️</span>
-    <h1>ORG_Back RELAIS V9.13</h1>
+    <h1>ORG_Back RELAIS V9.14</h1>
     <span class="suit-deco">♣️ ♦️</span>
   </div>
   <div class="subtitle">Pred PURE / UNIVERSELLE · même jeu → même résultat partout · sans état local</div>
@@ -484,7 +484,7 @@
   </div>
 </main>
 
-<footer>ORG_Back RELAIS V9.13 · X_Code · ♠️ ♥️ ♣️ ♦️</footer>
+<footer>ORG_Back RELAIS V9.14 · X_Code · ♠️ ♥️ ♣️ ♦️</footer>
 
 <script>
 
@@ -1932,8 +1932,113 @@ function runCalc(raw){
     }
   }
 
+  // ══════════════════════════════════════════════════════
+  //  AllCheckPrev / CtrlTour — CONFIRMATION FINALE (V9.14)
+  //  Après TOUTES les inversions. Source UNIVERSELLE = Telegram.
+  //  1ʳᵉ carte P1 du jeu précédent (TG prioritaire, sinon raw).
+  //  Formats : 2-2 · 2-3 · 3-2 · 3-3 — victoire ET échec.
+  //  Règles (rectifiées) :
+  //   • Couleurs DIFFÉRENTES + valeur PAIR  → ♦️↔♣️ / ♥️↔♠️
+  //   • Couleurs IDENTIQUES  + valeur IMPAIR → ♣️↔♥️ / ♦️↔♠️
+  //  INV activée même si l'enseigne finale reste identique.
+  // ══════════════════════════════════════════════════════
+  let allCheckPrev = null;
+  {
+    // Source TG unanime en priorité (même résultat partout)
+    let srcP1 = p1, srcP2 = p2, srcFmt = null, srcOrigin = 'raw';
+    try{
+      if(typeof telegramHistoryCache !== 'undefined' && telegramHistoryCache && telegramHistoryCache.length){
+        const tgGame = telegramHistoryCache.find(g => g.game_number === num);
+        if(tgGame){
+          const tgParsed = parseGame(tgGame.normalized || tgGame.raw_text);
+          if(tgParsed.p1 && tgParsed.p1.length){
+            srcP1 = tgParsed.p1;
+            srcP2 = tgParsed.p2 || p2;
+            srcOrigin = 'TG';
+          }
+        }
+      }
+    }catch(e){}
+    srcFmt = detectHandFormat(srcP1, srcP2);
+    const fmtOk = (srcFmt === '2-2' || srcFmt === '2-3' || srcFmt === '3-2' || srcFmt === '3-3');
+    if(fmtOk && srcP1 && srcP1.length && srcP1[0] && srcP1[0].suit){
+      const prevCard = srcP1[0];
+      const prevSuit = prevCard.suit;
+      const prevValRaw = prevCard.val;
+      const prevValNum = cardValue(prevValRaw);
+      const prevEven = (prevValNum != null) ? (prevValNum % 2 === 0) : false;
+      const prevOdd  = (prevValNum != null) ? (prevValNum % 2 !== 0) : false;
+      const sameColor = isRed(prevSuit) === isRed(finalSuit);
+      const beforeAC = finalSuit;
+      let applied = false;
+      let ruleLabel = '';
+      // Couleurs différentes + 1ʳᵉ carte PAIR → ♦️↔♣️ / ♥️↔♠️
+      if(!sameColor && prevEven){
+        const mapUsed = {'♦️':'♣️','♣️':'♦️','♥️':'♠️','♠️':'♥️'};
+        finalSuit = mapUsed[finalSuit] || finalSuit;
+        applied = true;
+        ruleLabel = `CtrlTour · couleurs DIFF · 1ʳᵉ P1 ${prevValRaw}${SUIT_EMOJI[prevSuit]} PAIR → ♦️↔♣️ / ♥️↔♠️`;
+      }
+      // Couleurs identiques + 1ʳᵉ carte IMPAIR → ♣️↔♥️ / ♦️↔♠️
+      else if(sameColor && prevOdd){
+        const mapUsed = {'♣️':'♥️','♥️':'♣️','♦️':'♠️','♠️':'♦️'};
+        finalSuit = mapUsed[finalSuit] || finalSuit;
+        applied = true;
+        ruleLabel = `CtrlTour · couleurs MÊME · 1ʳᵉ P1 ${prevValRaw}${SUIT_EMOJI[prevSuit]} IMPAIR → ♣️↔♥️ / ♦️↔♠️`;
+      }
+      if(applied){
+        allCheckPrev = {
+          active: true,
+          fmt: srcFmt,
+          origin: srcOrigin,
+          prevSuit,
+          prevVal: prevValRaw,
+          prevValNum,
+          prevEven,
+          prevOdd,
+          sameColor,
+          before: beforeAC,
+          result: finalSuit,
+          label: `AllCheckPrev · ${ruleLabel} · ${SUIT_EMOJI[beforeAC]}→${SUIT_EMOJI[finalSuit]} · src ${srcOrigin}`,
+          colorNote: sameColor
+            ? `même couleur (${isRed(prevSuit)?'ROUGE ♥️/♦️':'NOIR ♠️/♣️'})`
+            : `couleurs différentes (P1 ${isRed(prevSuit)?'ROUGE':'NOIR'} vs pred ${isRed(beforeAC)?'ROUGE':'NOIR'})`
+        };
+      } else {
+        allCheckPrev = {
+          active: false,
+          fmt: srcFmt,
+          origin: srcOrigin,
+          prevSuit,
+          prevVal: prevValRaw,
+          prevValNum,
+          prevEven,
+          prevOdd,
+          sameColor,
+          before: beforeAC,
+          result: finalSuit,
+          label: `AllCheckPrev · format ${srcFmt} · 1ʳᵉ P1 ${prevValRaw}${SUIT_EMOJI[prevSuit]} · pas d'INV · src ${srcOrigin}`,
+          colorNote: sameColor
+            ? `même couleur (${isRed(prevSuit)?'ROUGE ♥️/♦️':'NOIR ♠️/♣️'})`
+            : `couleurs différentes`
+        };
+      }
+    } else {
+      allCheckPrev = {
+        active: false,
+        fmt: srcFmt || '?',
+        origin: srcOrigin,
+        before: finalSuit,
+        result: finalSuit,
+        label: `AllCheckPrev · format ${srcFmt||'?'} hors 2-2/2-3/3-3 ou P1 absent → skip · src ${srcOrigin}`,
+        colorNote: '—'
+      };
+    }
+  }
+
   return {num,p1,p2,nextNum,nextH,nextM,avantDernier,dernierDigit,sel,subEngine,algoResult,finalInv,finalSuit,
           hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,formatSuitInv,globalInvNote,allInvInfo,firstDigitImpInv,
+          allCheckPrev,
           isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime},
           rattrapageForced,rattrapageSnapshot,normalAlgo,digitAlgoRule,fmtInvSnapshot:{ globalOn:false }};
 }
@@ -2680,7 +2785,12 @@ function renderResult(r){
     ...(r.temporalInv ? (r.temporalInv.active
       ? [`<div class="badge badge-temporal">⏱ INV TEMPORELLE — ${r.temporalInv.label} → ${SUIT_EMOJI[r.temporalInv.before]}→${SUIT_EMOJI[r.temporalInv.result]}</div>`]
       : [`<div class="badge badge-temporal" style="opacity:.45">⏱ INV TEMPORELLE — ${r.temporalInv.label}</div>`]
-    ) : [])
+    ) : []),
+    ...(r.allCheckPrev
+      ? (r.allCheckPrev.active
+          ? [`<div class="badge badge-temporal" style="border-color:var(--orange);color:var(--orange);font-weight:700">🔻 AllCheckPrev · CtrlTour — ${r.allCheckPrev.label}</div>`]
+          : [`<div class="badge badge-temporal" style="opacity:.5;border-color:var(--orange-dim);color:var(--orange-dim)">AllCheckPrev — ${r.allCheckPrev.label}</div>`])
+      : [])
   ];
   document.getElementById('badge-zone').innerHTML=badges.join('');
 
@@ -2760,9 +2870,20 @@ ${r.temporalInv.active?`<div class="det-row"><span class="det-label" style="colo
 <div class="det-row"><span class="det-label" style="color:#80e080">Après GROUPE C</span><span class="det-val" style="color:#80e080">${SUIT_EMOJI[r.groupCInv.before]} → ${SUIT_EMOJI[r.groupCInv.result]}</span></div>`;
   }
 
+  if(r.allCheckPrev){
+    detailsHTML+=`
+<hr class="det-sep">
+<div class="det-row"><span class="det-label" style="color:var(--orange)">🔻 AllCheckPrev · CtrlTour</span><span class="det-val" style="color:var(--orange)">${r.allCheckPrev.active?'ACTIF (INV appliquée)':'INACTIF'}</span></div>
+<div class="det-row"><span class="det-label" style="color:var(--orange)">Source</span><span class="det-val" style="color:var(--orange)">${r.allCheckPrev.origin==='TG'?'Telegram (unanime)':'raw / saisie'} · format ${r.allCheckPrev.fmt||'—'}</span></div>
+<div class="det-row"><span class="det-label" style="color:var(--orange)">1ʳᵉ carte P1 (jeu passé)</span><span class="det-val" style="color:var(--orange)">${r.allCheckPrev.prevVal||'?'}${r.allCheckPrev.prevSuit?SUIT_EMOJI[r.allCheckPrev.prevSuit]:''} · ${r.allCheckPrev.prevEven?'PAIR':(r.allCheckPrev.prevOdd?'IMPAIR':'?')}</span></div>
+<div class="det-row"><span class="det-label" style="color:var(--orange)">Couleurs</span><span class="det-val" style="color:var(--orange)">${r.allCheckPrev.colorNote||'—'}</span></div>
+<div class="det-row"><span class="det-label" style="color:var(--orange)">Règle</span><span class="det-val" style="color:var(--orange)">${r.allCheckPrev.label||'—'}</span></div>
+${r.allCheckPrev.active?`<div class="det-row"><span class="det-label" style="color:var(--orange)">Après AllCheckPrev</span><span class="det-val" style="color:var(--orange)">${SUIT_EMOJI[r.allCheckPrev.before]} → ${SUIT_EMOJI[r.allCheckPrev.result]}</span></div>`:''}`;
+  }
+
   detailsHTML+=`
 <hr class="det-sep">
-<div class="det-row"><span class="det-label">CIBLE</span><span class="det-val det-result">P1 (JOUEUR) — calcul brut + inv temporelle si applicable</span></div>
+<div class="det-row"><span class="det-label">CIBLE</span><span class="det-val det-result">P1 (JOUEUR) — calcul brut + inv + AllCheckPrev (TG)</span></div>
 <div class="det-row"><span class="det-label">RÉSULTAT FINAL</span><span class="det-val det-result">#N${r.nextNum} — ${SUIT_EMOJI[displaySuit]} ${SUIT_NAMES[displaySuit]} — P1</span></div>`;
 
   document.getElementById('details-body').innerHTML=detailsHTML;

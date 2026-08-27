@@ -1076,8 +1076,7 @@ function lookupGameFormat(gameNum){
   return null;
 }
 
-// ── Historique OPT1 UNANIME (Telegram uniquement) — V9.14 ───────────────────
-// Reconstruit depuis telegramHistoryCache → même série sur tous les appareils.
+// ── Historique OPT1 UNANIME (Telegram) — V9.14 ──────────────────────────────
 function getUnanimousOpt1Series(){
   if(!telegramHistoryCache || telegramHistoryCache.length < 2) return null;
   const series = [];
@@ -1098,51 +1097,32 @@ function getUnanimousOpt1Series(){
         const status = actualSuits.has(pred.suit) ? 'valid' : 'invalid';
         let fmt = null;
         try{ fmt = detectFormatFromRaw(curr.normalized || curr.raw_text); }catch(e2){}
-        series.push({
-          gameNum: curr.game_number,
-          suitKey: pred.suit,
-          status,
-          algoUsed: 'ALGO-RELAIS',
-          rattrapage: false,
-          allInv: false,
-          actualFormat: fmt
-        });
+        series.push({ gameNum: curr.game_number, suitKey: pred.suit, status, algoUsed: 'ALGO-RELAIS', rattrapage: false, allInv: false, actualFormat: fmt });
       }catch(e){ continue; }
     }
-  }finally{
-    SYNC_SKIP_RATTRAPAGE = prevSkip;
-  }
+  }finally{ SYNC_SKIP_RATTRAPAGE = prevSkip; }
   for(let i=0;i<series.length;i++){
     if(i===0) continue;
     const prev = series[i-1];
     if(prev.status !== 'invalid') continue;
     let consecRattr = 0;
-    for(let j=i-1;j>=0;j--){
-      if(series[j].rattrapage && series[j].status==='invalid') consecRattr++;
-      else break;
-    }
+    for(let j=i-1;j>=0;j--){ if(series[j].rattrapage && series[j].status==='invalid') consecRattr++; else break; }
     if(!(prev.rattrapage && consecRattr >= RATTRAPAGE_MAX)) series[i].rattrapage = true;
     let consecAll = 0;
-    for(let j=i-1;j>=0;j--){
-      if(series[j].allInv && series[j].status==='invalid') consecAll++;
-      else break;
-    }
+    for(let j=i-1;j>=0;j--){ if(series[j].allInv && series[j].status==='invalid') consecAll++; else break; }
     if(!(prev.allInv && consecAll >= ALLINV_MAX)) series[i].allInv = true;
   }
   return series;
 }
-
 function getOpt1SeriesForRouting(){
   const tg = getUnanimousOpt1Series();
   if(tg && tg.length) return tg;
   try{
-    return loadHistory()
-      .filter(e => histModeKey(e.algoUsed) === 'OPT1' && (e.status === 'valid' || e.status === 'invalid'))
-      .sort((a,b) => a.gameNum - b.gameNum);
+    return loadHistory().filter(e => histModeKey(e.algoUsed)==='OPT1' && (e.status==='valid'||e.status==='invalid')).sort((a,b)=>a.gameNum-b.gameNum);
   }catch(e){ return []; }
 }
 
-// Max 2 ALL.INV — référence = historique Telegram unanime
+// Max 2 ALL.INV — référence Telegram unanime
 function shouldApplyAllInv(nextNum){
   if(typeof SYNC_SKIP_RATTRAPAGE !== 'undefined' && SYNC_SKIP_RATTRAPAGE) return false;
   try{
@@ -1163,7 +1143,7 @@ function shouldApplyAllInv(nextNum){
   return false;
 }
 
-// Max 2 RATTRAPAGE — référence = historique Telegram unanime
+// Max 2 RATTRAPAGE — référence Telegram unanime
 function shouldApplyRattrapage(nextNum){
   if(typeof SYNC_SKIP_RATTRAPAGE !== 'undefined' && SYNC_SKIP_RATTRAPAGE) return null;
   try{
@@ -1180,9 +1160,7 @@ function shouldApplyRattrapage(nextNum){
     }
     if(last.rattrapage && consecutive >= RATTRAPAGE_MAX) return null;
     const rattrLevel = last.rattrapage ? 2 : 1;
-    const lostFormat = last.actualFormat
-      ? normalizeLostFormat(last.actualFormat)
-      : lookupGameFormat(last.gameNum);
+    const lostFormat = last.actualFormat ? normalizeLostFormat(last.actualFormat) : lookupGameFormat(last.gameNum);
     return {
       active: true,
       algo: last.algoUsed || 'ALGO1',
@@ -1811,28 +1789,18 @@ function applyPreviousP1FirstCardColorRule(predictedSuit, firstP1Card){
 // ── AllCheckPrev V9.14 (CONFIRMATION FINALE · CtrlTour) ─────────────────────
 // Couche SUPPLÉMENTAIRE — n'altère aucune fonction existante.
 // Après TOUTES les inversions. Déclenchée si :
-//   • rattrapage 1/2 (échec, série TG unanime)  OU
-//   • format du jeu précédent = 2-2 / 3-3 / 2-3 (victoire ou échec)
-// Source 1ʳᵉ carte P1 = jeu précédent (TG) → prédiction universelle.
+//   • rattrapage 1/2 (série TG)  OU  format préc. 2-2 / 3-3 / 2-3 (victoire ou échec)
 //
-// Règles V9.14 :
-//  • Même enseigne que la 1ʳᵉ P1 → inversion inactive
-//  • Couleur DIFFÉRENTE + valeur PAIR → ♦️↔♣️ / ♥️↔♠️
-//  • Couleur IDENTIQUE + valeur PAIR → ♠️↔♥️ / ♦️↔♠️
-//  • Valeur IMPAIR → inactive
+// V9.13 maps (réf.) : diff+PAIR → ♦️↔♠️/♥️↔♣️ · même+PAIR → ♠️↔♥️/♦️↔♣️
+// V9.14 maps        : diff+PAIR → ♦️↔♣️/♥️↔♠️ · même+PAIR → ♣️↔♥️/♦️↔♠️
 function applyAllCheckPrev(predictedSuit, firstP1Card, shouldApply){
   const info = {
-    active: false,
-    condition: null,
+    active: false, condition: null,
     firstSuit: firstP1Card ? firstP1Card.suit : null,
     firstValue: firstP1Card ? firstP1Card.val : null,
-    firstColor: null,
-    firstParity: null,
-    predictedSuitBefore: predictedSuit,
-    predictedSuitAfter: predictedSuit,
-    label: 'AllCheckPrev · inactive',
-    shouldApply: !!shouldApply,
-    triggerFormat: null
+    firstColor: null, firstParity: null,
+    predictedSuitBefore: predictedSuit, predictedSuitAfter: predictedSuit,
+    label: 'AllCheckPrev · inactive', shouldApply: !!shouldApply, triggerFormat: null
   };
   if(!shouldApply){
     info.label = 'AllCheckPrev · hors contexte → inactive';
@@ -1848,13 +1816,11 @@ function applyAllCheckPrev(predictedSuit, firstP1Card, shouldApply){
   const predRed = isRed(predictedSuit);
   const sameColor = firstRed === predRed;
   info.firstColor = firstRed ? 'ROUGE' : 'NOIRE';
-
   if(sameSuit){
     info.condition = 'MEME_ENSEIGNE';
     info.label = `AllCheckPrev · CtrlTour · ${SUIT_EMOJI[firstSuit]||firstSuit} = pred ${SUIT_EMOJI[predictedSuit]||predictedSuit} → INV inactive`;
     return { result: predictedSuit, info };
   }
-
   const rawValue = String(firstP1Card.val).trim().toUpperCase();
   let numericValue = null;
   if(rawValue === 'A') numericValue = 1;
@@ -1867,26 +1833,24 @@ function applyAllCheckPrev(predictedSuit, firstP1Card, shouldApply){
   }
   const firstParity = (numericValue % 2 === 0) ? 'PAIR' : 'IMPAIR';
   info.firstParity = firstParity;
-
   if(firstParity !== 'PAIR'){
     info.condition = sameColor ? 'MEME_COULEUR_IMPAIR' : 'COULEUR_DIFF_IMPAIR';
-    info.label = `AllCheckPrev · CtrlTour · 1ʳᵉ P1 ${SUIT_EMOJI[firstSuit]||firstSuit}(${rawValue}/${firstParity}) · ${sameColor?'même couleur':'couleur diff'} → inactive (IMPAIR)`;
+    info.label = `AllCheckPrev · CtrlTour · 1ʳᵉ P1 ${SUIT_EMOJI[firstSuit]||firstSuit}(${rawValue}/${firstParity}) → inactive (IMPAIR)`;
     return { result: predictedSuit, info };
   }
-
   let map = null;
   if(!sameColor){
-    // Couleur différente + PAIR → ♦️↔♣️ / ♥️↔♠️
+    // V9.14 : couleur différente + PAIR → ♦️↔♣️ / ♥️↔♠️
     map = {'♦️':'♣️','♣️':'♦️','♥️':'♠️','♠️':'♥️'};
     info.active = true;
     info.condition = 'COULEUR_DIFF_PAIR';
     info.label = `AllCheckPrev · CtrlTour · 1ʳᵉ P1 ${SUIT_EMOJI[firstSuit]||firstSuit}(${rawValue}/PAIR) couleur≠pred → ♦️↔♣️ / ♥️↔♠️`;
   } else {
-    // Même couleur + PAIR → ♠️↔♥️ / ♦️↔♠️
-    map = {'♠️':'♥️','♥️':'♠️','♦️':'♠️','♣️':'♦️'};
+    // V9.14 : même couleur + PAIR → ♣️↔♥️ / ♦️↔♠️
+    map = {'♣️':'♥️','♥️':'♣️','♦️':'♠️','♠️':'♦️'};
     info.active = true;
     info.condition = 'MEME_COULEUR_PAIR';
-    info.label = `AllCheckPrev · CtrlTour · 1ʳᵉ P1 ${SUIT_EMOJI[firstSuit]||firstSuit}(${rawValue}/PAIR) même couleur → ♠️↔♥️ / ♦️↔♠️`;
+    info.label = `AllCheckPrev · CtrlTour · 1ʳᵉ P1 ${SUIT_EMOJI[firstSuit]||firstSuit}(${rawValue}/PAIR) même couleur → ♣️↔♥️ / ♦️↔♠️`;
   }
   const result = map[predictedSuit] || predictedSuit;
   info.predictedSuitAfter = result;
@@ -2267,7 +2231,6 @@ function runCalc(raw){
   }
 
   // ── AllCheckPrev V9.14 · CtrlTour — confirmation FINALE (après tout) ──
-  // Déclenché si rattrapage (série TG) OU format précédent 2-2 / 3-3 / 2-3
   let allCheckPrev = null;
   {
     const prevFirstP1 = (p1 && p1.length) ? p1[0] : null;

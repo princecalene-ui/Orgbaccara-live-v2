@@ -902,10 +902,10 @@ function syncUnanimousStateFromTelegram(currentRaw){
 }
 let SYNC_SKIP_RATTRAPAGE = false;
 
-// ── RATTRAPAGE : si un ALGO perd, on le réutilise jusqu'à 3 fois, puis retour au routage normal ──
+// ── RATTRAPAGE : si un ALGO perd, on le réutilise 1 fois max, puis retour au routage normal ──
 const RATTRAPAGE_KEY = 'orgbacc_rattrapage_v1';
-const RATTRAPAGE_MAX = 2; // max 2 rattrapages après perte puis retour à zéro
-const ALLINV_MAX = 2;     // max 2 ALL.INV après perte puis retour à zéro
+const RATTRAPAGE_MAX = 1; // max 1 rattrapage après perte puis retour à zéro
+const ALLINV_MAX = 1;     // max 1 ALL.INV après perte puis retour à zéro
 function emptyRattrapage(){
   return { active:false, algo:null, remaining:0, startedAt:null, lostSuit:null, lostColor:null };
 }
@@ -964,7 +964,7 @@ function applyRattrapageInv(predSuit, lostColor, lostSuit){
   };
 }
 
-// ── ALL.INV après perte (max 2) — dérivé de l'historique OPT1 unanime ──
+// ── ALL.INV après perte (max 1) — dérivé de l'historique OPT1 unanime ──
 function applyAllInverse(suit, avantDernier, nextH){
   const isPair = (avantDernier % 2 === 0);
   const heurePair = (nextH % 2 === 0);
@@ -990,54 +990,114 @@ function applyAllInverse(suit, avantDernier, nextH){
   return { result, label, isPair, heurePair, before: suit, applied: result !== suit };
 }
 
-// Max 2 ALL.INV : série après perte ; stop si gagné ou 2 ALL.INV déjà consommés
+// ── Série OPT1 UNIVERSELLE (Telegram) — source unique pour rattrapage / ALL.INV ──
+// Rejouée au démarrage et à chaque sync TG → même état sur tous les appareils.
+let tgOpt1Series = []; // [{gameNum, suitKey, status, algoUsed, rattrapage, allInv}]
+let __tgSeriesBuilding = null; // pendant rebuild séquentiel
+
+function getOpt1SeriesForDecision(){
+  if(__tgSeriesBuilding) return __tgSeriesBuilding;
+  if(tgOpt1Series && tgOpt1Series.length) return tgOpt1Series;
+  // fallback local uniquement si TG pas encore chargé
+  try{
+    return loadHistory()
+      .filter(e => histModeKey(e.algoUsed) === 'OPT1' && (e.status === 'valid' || e.status === 'invalid'))
+      .sort((a,b) => a.gameNum - b.gameNum);
+  }catch(e){ return []; }
+}
+
+// Rejoue les ~20 derniers jeux TG en séquence (avec chaîne rattrapage/ALL.INV)
+// → historique identique partout, dès le 1er chargement de l'appareil
+function rebuildTgOpt1Series(){
+  const series = [];
+  if(!telegramHistoryCache || telegramHistoryCache.length < 2){
+    tgOpt1Series = [];
+    return series;
+  }
+  const hist = telegramHistoryCache.slice().sort((a,b)=>a.game_number-b.game_number);
+  const n = hist.length;
+  const startIdx = Math.max(1, n - 20);
+  __tgSeriesBuilding = series; // shouldApply* lit cette série en construction
+  const prevSkip = typeof SYNC_SKIP_RATTRAPAGE !== 'undefined' ? SYNC_SKIP_RATTRAPAGE : false;
+  SYNC_SKIP_RATTRAPAGE = false; // activer la chaîne pendant le rejeu TG
+  try{
+    for(let i = startIdx; i < n; i++){
+      const prev = hist[i-1];
+      const curr = hist[i];
+      const readiness = checkGameReadiness(curr.raw_text || curr.normalized);
+      if(!readiness.usable) continue;
+      let currParsed = null;
+      try{ currParsed = parseGame(curr.normalized || curr.raw_text); }catch(e){ continue; }
+      if(!currParsed || !currParsed.p1 || !currParsed.p1.length) continue;
+      try{
+        const r = runCalc(prev.normalized || prev.raw_text);
+        if(r.nextNum !== curr.game_number) continue;
+        const actualSuits = new Set(currParsed.p1.map(c=>c.suit));
+        const st = actualSuits.has(r.finalSuit) ? 'valid' : 'invalid';
+        series.push({
+          gameNum: curr.game_number,
+          suitKey: r.finalSuit,
+          status: st,
+          algoUsed: r.algoUsed || 'ALGO-RELAIS',
+          rattrapage: !!r.rattrapageForced,
+          allInv: !!(r.allInvInfo && r.allInvInfo.active),
+          autoResolved: true,
+          source: 'tg-series'
+        });
+      }catch(e){ continue; }
+    }
+  }finally{
+    __tgSeriesBuilding = null;
+    SYNC_SKIP_RATTRAPAGE = prevSkip;
+  }
+  tgOpt1Series = series;
+  return series;
+}
+
+// Max 1 ALL.INV — série TG unanime (pas localStorage)
 function shouldApplyAllInv(nextNum){
   if(typeof SYNC_SKIP_RATTRAPAGE !== 'undefined' && SYNC_SKIP_RATTRAPAGE) return false;
   try{
-    const opt1 = loadHistory()
-      .filter(e => histModeKey(e.algoUsed) === 'OPT1' && (e.status === 'valid' || e.status === 'invalid'))
+    const opt1 = getOpt1SeriesForDecision()
+      .filter(e => (e.status === 'valid' || e.status === 'invalid'))
       .sort((a,b) => a.gameNum - b.gameNum);
     if(!opt1.length) return false;
     const last = opt1[opt1.length - 1];
     if(last.gameNum !== nextNum - 1) return false;
     if(last.status !== 'invalid') return false;
 
-    // Compte les ALL.INV consécutifs perdus en fin de série
     let consecutive = 0;
     for(let i = opt1.length - 1; i >= 0; i--){
       if(opt1[i].allInv && opt1[i].status === 'invalid') consecutive++;
-      else if(opt1[i].allInv && opt1[i].status === 'valid') return false; // ALL.INV gagné → stop
+      else if(opt1[i].allInv && opt1[i].status === 'valid') return false;
       else break;
     }
-    // Départ (perte normale) ou continuation si < max 2
     if(!last.allInv) return true;
     return consecutive < ALLINV_MAX;
   }catch(e){}
   return false;
 }
 
-// Max 2 RATTRAPAGE : série après perte ; force même ALGO + inv couleur
+// Max 1 RATTRAPAGE — série TG unanime (pas localStorage)
 function shouldApplyRattrapage(nextNum){
   if(typeof SYNC_SKIP_RATTRAPAGE !== 'undefined' && SYNC_SKIP_RATTRAPAGE) return null;
   try{
-    const opt1 = loadHistory()
-      .filter(e => histModeKey(e.algoUsed) === 'OPT1' && (e.status === 'valid' || e.status === 'invalid'))
+    const opt1 = getOpt1SeriesForDecision()
+      .filter(e => (e.status === 'valid' || e.status === 'invalid'))
       .sort((a,b) => a.gameNum - b.gameNum);
     if(!opt1.length) return null;
     const last = opt1[opt1.length - 1];
     if(last.gameNum !== nextNum - 1) return null;
     if(last.status !== 'invalid') return null;
 
-    // Compte les rattrapages consécutifs perdus en fin de série
     let consecutive = 0;
     for(let i = opt1.length - 1; i >= 0; i--){
       if(opt1[i].rattrapage && opt1[i].status === 'invalid') consecutive++;
-      else if(opt1[i].rattrapage && opt1[i].status === 'valid') return null; // rattrapage gagné → stop
+      else if(opt1[i].rattrapage && opt1[i].status === 'valid') return null;
       else break;
     }
     if(last.rattrapage && consecutive >= RATTRAPAGE_MAX) return null;
 
-    // Départ (perte normale) ou continuation
     return {
       active: true,
       algo: last.algoUsed || 'ALGO1',
@@ -1083,21 +1143,21 @@ function updateRegimeDisplay(){
   const liveRattr = shouldApplyRattrapage((regime.revelationNum != null ? regime.revelationNum : 0) + 1);
   // Affiche le prochain rattrapage potentiel via historique
   try{
-    const opt1 = loadHistory()
-      .filter(e => histModeKey(e.algoUsed)==='OPT1' && (e.status==='valid'||e.status==='invalid'))
+    const opt1 = getOpt1SeriesForDecision()
+      .filter(e => (e.status==='valid'||e.status==='invalid'))
       .sort((a,b)=>a.gameNum-b.gameNum);
     const last = opt1.length ? opt1[opt1.length-1] : null;
     if(last && last.status==='invalid' && !last.rattrapage){
       rattrapageHtml = `
     <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #7a6028">
       <span class="regime-label" style="color:#ffbf80">⏱ RATTRAPAGE</span>
-      <span class="regime-val" style="color:#ffbf80">EN ATTENTE · max ${RATTRAPAGE_MAX} · après perte #N${last.gameNum}</span>
+      <span class="regime-val" style="color:#ffbf80">EN ATTENTE · max ${RATTRAPAGE_MAX} · après perte #N${last.gameNum} · TG</span>
     </div>`;
     } else {
       rattrapageHtml = `
     <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #2a1a1a">
       <span class="regime-label">Rattrapage</span>
-      <span class="regime-val" style="color:var(--ivory-dim)">Inactif · max ${RATTRAPAGE_MAX} après perte</span>
+      <span class="regime-val" style="color:var(--ivory-dim)">Inactif · max ${RATTRAPAGE_MAX} · série TG</span>
     </div>`;
     }
   }catch(e){
@@ -1643,7 +1703,7 @@ function runCalc(raw){
       : `2 derniers chiffres ${String(lastTwo).padStart(2,'0')} (${digitZone}) → NORMAL (pas de bascule)`
   };
 
-  // RATTRAPAGE max 2 — après perte (historique OPT1 unanime)
+  // RATTRAPAGE max 1 — après perte (historique OPT1 unanime)
   const normalAlgo = baseAlgo;
   const rattrInfo = shouldApplyRattrapage(nextNum);
   const inRattrapage = !!(rattrInfo && rattrInfo.active);
@@ -1907,7 +1967,7 @@ function runCalc(raw){
     }
   }
 
-  // ── ALL.INV après perte (max 2) — depuis historique OPT1 unanime ──
+  // ── ALL.INV après perte (max 1) — depuis historique OPT1 unanime ──
   let allInvInfo = null;
   if(shouldApplyAllInv(nextNum)){
     const allInv = applyAllInverse(finalSuit, avantDernier, nextH);
@@ -2969,41 +3029,44 @@ async function demarrerLive(silent){
     statusBox.textContent = `${telegramHistoryCache.length} jeux chargés · calcul des statistiques globales…`;
     globalBacktestStats = computeGlobalBacktestStats(telegramHistoryCache, 50);
 
-    // Reconstruction UNANIME depuis Telegram (OPT1 + OPT4) — identique sur tous les appareils
-    const n = telegramHistoryCache.length;
-    const startIdx = Math.max(1, n-30);
-    let validCount=0, invalidCount=0, skipped=0;
+    // Reconstruction UNANIME depuis Telegram — rejeu des ~20 derniers jeux
+    // (chaîne rattrapage/ALL.INV incluse) → même historique sur tous les appareils
+    statusBox.textContent = `${telegramHistoryCache.length} jeux · rejeu série OPT1 unanime…`;
+    const tgSeries = rebuildTgOpt1Series();
+    let validCount = 0, invalidCount = 0, skipped = 0;
     const rebuilt = [];
-    SYNC_SKIP_RATTRAPAGE = true; // seed pur sans rattrapage local
 
-    for(let i=startIdx;i<n;i++){
+    // Seed historique local depuis la série TG (affichage) — décisions restent TG-only
+    for(const e of tgSeries){
+      if(e.status === 'valid') validCount++;
+      else if(e.status === 'invalid') invalidCount++;
+      rebuilt.push({
+        id: 'tg1-' + e.gameNum,
+        gameNum: e.gameNum,
+        suitKey: e.suitKey,
+        side: 'P1',
+        algoUsed: e.algoUsed || 'ALGO-RELAIS',
+        mode: 'OPT1',
+        status: e.status,
+        rattrapage: !!e.rattrapage,
+        allInv: !!e.allInv,
+        autoResolved: true,
+        source: 'live-seed',
+        ts: new Date().toISOString()
+      });
+    }
+
+    // OPT4 sur les ~15 derniers (déterministe, indépendant rattrapage)
+    const n = telegramHistoryCache.length;
+    const startIdx4 = Math.max(1, n - 15);
+    for(let i = startIdx4; i < n; i++){
       const prev = telegramHistoryCache[i-1];
       const curr = telegramHistoryCache[i];
       const readiness = checkGameReadiness(curr.raw_text || curr.normalized);
       if(!readiness.usable){ skipped++; continue; }
-
-      let currParsed=null;
+      let currParsed = null;
       try{ currParsed = parseGame(curr.normalized || curr.raw_text); }catch(e){ skipped++; continue; }
       if(!currParsed || !currParsed.p1 || !currParsed.p1.length){ skipped++; continue; }
-
-      // ── OPT1 enseigne (déterministe) ──
-      try{
-        const pred = deterministicPredict(prev.normalized || prev.raw_text);
-        if(pred.nextNum === curr.game_number){
-          const actualSuits = new Set(currParsed.p1.map(c=>c.suit));
-          const st = actualSuits.has(pred.suit) ? 'valid' : 'invalid';
-          st==='valid' ? validCount++ : invalidCount++;
-          rebuilt.push({
-            id: 'tg1-'+curr.game_number,
-            gameNum: curr.game_number, suitKey: pred.suit, side:'P1',
-            algoUsed: 'ALGO-RELAIS', mode:'OPT1',
-            status: st, autoResolved:true, source:'live-seed',
-            ts: new Date().toISOString()
-          });
-        }
-      }catch(e){}
-
-      // ── OPT4 pair ALL-INV (déterministe) ──
       try{
         const r4 = runParityAllInvCalc(prev.normalized || prev.raw_text);
         if(r4.nextNum === curr.game_number){
@@ -3029,13 +3092,11 @@ async function demarrerLive(silent){
       }catch(e){}
     }
 
-    SYNC_SKIP_RATTRAPAGE = false;
-    // Garde les entrées "en attente" du jeu courant non encore finalisé (hors fenêtre rebuild)
+    // Uniquement entrées "en attente" du jeu courant non finalisé
     const prevList = loadHistory().filter(e=>e.status===null && !rebuilt.some(r=>r.gameNum===e.gameNum && histModeKey(r.algoUsed)===histModeKey(e.algoUsed)));
     const merged = rebuilt.concat(prevList).sort((a,b)=>b.gameNum-a.gameNum);
     saveHistory(merged);
     renderHistory();
-    // Resync rattrapage réel après reconstruction
     syncUnanimousStateFromTelegram(null);
 
     const revelInfo = lastRevel != null
@@ -3119,6 +3180,8 @@ async function fetchLatestTelegramGame(silent=false){
         if(idx >= 0) telegramHistoryCache[idx] = entry;
         else { telegramHistoryCache.push(entry); telegramHistoryCache.sort((a,b)=>a.game_number-b.game_number); }
       }
+      // Rejeu série OPT1 TG → rattrapage/ALL.INV unanimes avant pred
+      try{ rebuildTgOpt1Series(); }catch(e){}
       syncUnanimousStateFromTelegram(data.normalized);
       const revelTag = regime.revelationNum != null ? ` · régime #N${regime.revelationNum}` : '';
       const calcOk = calculate(true);

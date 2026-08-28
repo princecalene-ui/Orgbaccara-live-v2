@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ORG_Back RELAIS V9.13</title>
+<title>ORG_Back RELAIS V9.15</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&family=Rajdhani:wght@300;400;600;700&family=Courier+Prime:wght@400;700&display=swap');
 
@@ -381,7 +381,7 @@
 <header>
   <div class="title-suite">
     <span class="suit-deco">♠️ ♥️</span>
-    <h1>ORG_Back RELAIS V9.13</h1>
+    <h1>ORG_Back RELAIS V9.15</h1>
     <span class="suit-deco">♣️ ♦️</span>
   </div>
   <div class="subtitle">Pred PURE / UNIVERSELLE · même jeu → même résultat partout · sans état local</div>
@@ -484,7 +484,7 @@
   </div>
 </main>
 
-<footer>ORG_Back RELAIS V9.13 · X_Code · ♠️ ♥️ ♣️ ♦️</footer>
+<footer>ORG_Back RELAIS V9.15 · X_Code · ♠️ ♥️ ♣️ ♦️</footer>
 
 <script>
 
@@ -904,7 +904,7 @@ let SYNC_SKIP_RATTRAPAGE = false;
 
 // ── RATTRAPAGE : si un ALGO perd, on le réutilise jusqu'à 3 fois, puis retour au routage normal ──
 const RATTRAPAGE_KEY = 'orgbacc_rattrapage_v1';
-const RATTRAPAGE_MAX = 2; // max 2 rattrapages après perte puis retour à zéro
+const RATTRAPAGE_MAX = 0; // Rattr:0 — rattrapage désactivé
 const ALLINV_MAX = 2;     // max 2 ALL.INV après perte puis retour à zéro
 function emptyRattrapage(){
   return { active:false, algo:null, remaining:0, startedAt:null, lostSuit:null, lostColor:null, lostFormat:null, rattrLevel:0 };
@@ -1104,6 +1104,8 @@ function shouldApplyAllInv(nextNum){
 
 // Max 2 RATTRAPAGE : série après perte ; force même ALGO + inv couleur + couche format
 function shouldApplyRattrapage(nextNum){
+  // Rattr:0 — rattrapage entièrement désactivé
+  if(RATTRAPAGE_MAX <= 0) return null;
   if(typeof SYNC_SKIP_RATTRAPAGE !== 'undefined' && SYNC_SKIP_RATTRAPAGE) return null;
   try{
     const opt1 = loadHistory()
@@ -1172,6 +1174,13 @@ function updateRegimeDisplay(){
   const p1parity = regime.revelationParity;
   const p2parity = p1parity==='PAIR' ? 'IMPAIR' : 'PAIR';
   let rattrapageHtml = '';
+  if(RATTRAPAGE_MAX <= 0){
+    rattrapageHtml = `
+    <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #2a1a1a">
+      <span class="regime-label">Rattrapage</span>
+      <span class="regime-val" style="color:var(--ivory-dim)">Désactivé · Rattr:0</span>
+    </div>`;
+  } else {
   const liveRattr = shouldApplyRattrapage((regime.revelationNum != null ? regime.revelationNum : 0) + 1);
   // Affiche le prochain rattrapage potentiel via historique
   try{
@@ -1199,6 +1208,7 @@ function updateRegimeDisplay(){
       <span class="regime-label">Rattrapage</span>
       <span class="regime-val" style="color:var(--ivory-dim)">Inactif · max ${RATTRAPAGE_MAX} après perte</span>
     </div>`;
+  }
   }
   const fmtOn = (typeof fmtInv !== 'undefined' && fmtInv.globalOn);
   const fmtOne = (typeof fmtInv !== 'undefined' && fmtInv.oneShotNext);
@@ -1537,6 +1547,12 @@ function cardValue(v){
   if(map[v]!==undefined) return map[v];
   const n=parseInt(v,10);
   return isNaN(n)?null:n;
+}
+// Parité numérique de la valeur d'une carte (A=1, J=11, Q=12, K=13)
+function isCardValueEven(v){
+  const n = cardValue(v);
+  if(n == null) return false;
+  return (n % 2 === 0);
 }
 // ── Accepte tous les formats de jeu : 2-2, 2-3, 3-2, 3-3 (RÉVÉLATION) ──
 function parseGame(raw){
@@ -2053,8 +2069,106 @@ function runCalc(raw){
     }
   }
 
+  // ══════════════════════════════════════════════════════════════
+  //  AllCheckPrev / CtrlTour — confirmation FINALE (après TOUTES les inv)
+  //  Universelle · format passé ∈ {2-2, 3-3, 2-3, 3-2}
+  //  Branche selon parité de la DATE DU JOUR (jour du mois)
+  //
+  //  DATE IMPAIRE :
+  //    DIFF + PAIR  → ♦️↔♣️ / ♥️↔♠️   (enseigne id. → ♠️↔♣️ / ♥️↔♦️)
+  //    MÊME + IMPAIR → ♠️↔♥️ / ♦️↔♠️   (enseigne id. → ♠️↔♣️ / ♥️↔♦️)
+  //  DATE PAIRE :
+  //    MÊME + PAIR  → ♦️↔♠️ / ♥️↔♣️   (enseigne id. → ♠️↔♣️ / ♥️↔♦️)
+  //    DIFF + IMPAIR → ♠️↔♥️ / ♦️↔♣️   (enseigne id. → ♠️↔♣️ / ♥️↔♦️)
+  // ══════════════════════════════════════════════════════════════
+  let allCheckPrev = null;
+  {
+    const prevFmt = detectHandFormat(p1, p2);
+    const fmtOk = (prevFmt === '2-2' || prevFmt === '3-3' || prevFmt === '2-3' || prevFmt === '3-2');
+    const p1FirstCard = p1 && p1[0] ? p1[0] : null;
+    const dayOfMonth = new Date().getDate();
+    const dayEven = (dayOfMonth % 2 === 0);
+    const dayLabel = dayEven ? 'PAIR' : 'IMPAIR';
+    if(fmtOk && p1FirstCard && finalSuit){
+      const prevSuit = p1FirstCard.suit;
+      const prevVal = p1FirstCard.val;
+      const prevEven = isCardValueEven(prevVal);
+      const sameColor = isRed(prevSuit) === isRed(finalSuit);
+      const sameSuit = (prevSuit === finalSuit);
+      const beforeAC = finalSuit;
+      let applied = false;
+      let ruleLabel = '';
+      let mapUsed = null;
+      const MAP_SAME_SUIT = {'♠️':'♣️','♣️':'♠️','♥️':'♦️','♦️':'♥️'};
+
+      if(!dayEven){
+        // ── DATE IMPAIRE ──
+        if(!sameColor && prevEven){
+          mapUsed = sameSuit ? MAP_SAME_SUIT : {'♦️':'♣️','♣️':'♦️','♥️':'♠️','♠️':'♥️'};
+          ruleLabel = sameSuit
+            ? `J${dayOfMonth} IMPAIR · DIFF·PAIR · enseigne id. → ♠️↔♣️ / ♥️↔♦️`
+            : `J${dayOfMonth} IMPAIR · DIFF·PAIR · ${prevVal}${SUIT_EMOJI[prevSuit]} → ♦️↔♣️ / ♥️↔♠️`;
+          finalSuit = mapUsed[finalSuit] || finalSuit;
+          applied = true;
+        } else if(sameColor && !prevEven){
+          mapUsed = sameSuit ? MAP_SAME_SUIT : {'♠️':'♥️','♥️':'♠️','♦️':'♠️','♣️':'♦️'};
+          ruleLabel = sameSuit
+            ? `J${dayOfMonth} IMPAIR · MÊME·IMPAIR · enseigne id. → ♠️↔♣️ / ♥️↔♦️`
+            : `J${dayOfMonth} IMPAIR · MÊME·IMPAIR · ${prevVal}${SUIT_EMOJI[prevSuit]} → ♠️↔♥️ / ♦️↔♠️`;
+          finalSuit = mapUsed[finalSuit] || finalSuit;
+          applied = true;
+        }
+      } else {
+        // ── DATE PAIRE ──
+        if(sameColor && prevEven){
+          mapUsed = sameSuit ? MAP_SAME_SUIT : {'♦️':'♠️','♠️':'♦️','♥️':'♣️','♣️':'♥️'};
+          ruleLabel = sameSuit
+            ? `J${dayOfMonth} PAIR · MÊME·PAIR · enseigne id. → ♠️↔♣️ / ♥️↔♦️`
+            : `J${dayOfMonth} PAIR · MÊME·PAIR · ${prevVal}${SUIT_EMOJI[prevSuit]} → ♦️↔♠️ / ♥️↔♣️`;
+          finalSuit = mapUsed[finalSuit] || finalSuit;
+          applied = true;
+        } else if(!sameColor && !prevEven){
+          mapUsed = sameSuit ? MAP_SAME_SUIT : {'♠️':'♥️','♥️':'♠️','♦️':'♣️','♣️':'♦️'};
+          ruleLabel = sameSuit
+            ? `J${dayOfMonth} PAIR · DIFF·IMPAIR · enseigne id. → ♠️↔♣️ / ♥️↔♦️`
+            : `J${dayOfMonth} PAIR · DIFF·IMPAIR · ${prevVal}${SUIT_EMOJI[prevSuit]} → ♠️↔♥️ / ♦️↔♣️`;
+          finalSuit = mapUsed[finalSuit] || finalSuit;
+          applied = true;
+        }
+      }
+
+      if(applied){
+        allCheckPrev = {
+          active: true,
+          format: prevFmt, dayOfMonth, dayEven, dayLabel,
+          prevSuit, prevVal, prevEven, sameColor, sameSuit,
+          before: beforeAC, result: finalSuit,
+          detail: `AllCheckPrev · format ${prevFmt} · ${ruleLabel} · ${SUIT_EMOJI[beforeAC]}→${SUIT_EMOJI[finalSuit]}`,
+          label: `CtrlTour · ${ruleLabel}`
+        };
+      } else {
+        allCheckPrev = {
+          active: false,
+          format: prevFmt, dayOfMonth, dayEven, dayLabel,
+          prevSuit, prevVal, prevEven, sameColor, sameSuit,
+          before: finalSuit, result: finalSuit,
+          detail: `AllCheckPrev · J${dayOfMonth}(${dayLabel}) · format ${prevFmt} · 1ʳᵉ P1 ${prevVal}${SUIT_EMOJI[prevSuit]} (${prevEven?'PAIR':'IMPAIR'}) · couleurs ${sameColor?'IDENTIQUES':'DIFFÉRENTES'} → pas d'inv`,
+          label: null
+        };
+      }
+    } else {
+      allCheckPrev = {
+        active: false,
+        format: prevFmt || null, dayOfMonth, dayEven, dayLabel,
+        detail: `AllCheckPrev · J${dayOfMonth}(${dayLabel}) · format ${prevFmt||'?'} hors scope → inactif`,
+        label: null
+      };
+    }
+  }
+
   return {num,p1,p2,nextNum,nextH,nextM,avantDernier,dernierDigit,sel,subEngine,algoResult,finalInv,finalSuit,
           hyperGlobal,milieuRule,temporalInv,groupCInv,rattrapageInv,rattrapageFormatInv,formatSuitInv,globalInvNote,allInvInfo,firstDigitImpInv,
+          allCheckPrev,
           isRevelationGame,algoUsed,nextParity,regimeBefore,regimeSnapshot:{...regime},
           rattrapageForced,rattrapageSnapshot,normalAlgo,digitAlgoRule,fmtInvSnapshot:{ globalOn:false }};
 }
@@ -2813,6 +2927,11 @@ function renderResult(r){
     ...(r.allInvInfo && r.allInvInfo.active
       ? [`<div class="badge badge-temporal">⟲ ALL.INV (max ${ALLINV_MAX} · après perte) — ${r.allInvInfo.label}</div>`]
       : []),
+    ...(r.allCheckPrev && r.allCheckPrev.active
+      ? [`<div class="badge badge-temporal" style="border-color:var(--orange);border-left-color:var(--orange);color:var(--orange)">🟠 AllCheckPrev · CtrlTour — ${r.allCheckPrev.label} · ${SUIT_EMOJI[r.allCheckPrev.before]}→${SUIT_EMOJI[r.allCheckPrev.result]}</div>`]
+      : (r.allCheckPrev
+        ? [`<div class="badge badge-temporal" style="opacity:.45;border-color:var(--orange-dim);color:var(--orange-dim)">🟠 AllCheckPrev — inactif (J${r.allCheckPrev.dayOfMonth||'?'} ${r.allCheckPrev.dayLabel||''} · ${r.allCheckPrev.format||'?'})</div>`]
+        : [])),
     ...(r.formatSuitInv
       ? [`<div class="badge badge-hyper" style="opacity:.45">INV FORMAT — OFF · pred pure</div>`]
       : []),
@@ -2911,6 +3030,16 @@ ${r.temporalInv.active?`<div class="det-row"><span class="det-label" style="colo
 <div class="det-row"><span class="det-label" style="color:#80e080">🅲 GROUPE C (00h–08h44 + 20h–23h59)</span><span class="det-val" style="color:#80e080">ACTIF</span></div>
 <div class="det-row"><span class="det-label" style="color:#80e080">Principe</span><span class="det-val" style="color:#80e080">Tables A + inv ♣️↔♥️ / ♦️↔♠️</span></div>
 <div class="det-row"><span class="det-label" style="color:#80e080">Après GROUPE C</span><span class="det-val" style="color:#80e080">${SUIT_EMOJI[r.groupCInv.before]} → ${SUIT_EMOJI[r.groupCInv.result]}</span></div>`;
+  }
+  if(r.allCheckPrev){
+    detailsHTML+=`
+<hr class="det-sep">
+<div class="det-row"><span class="det-label" style="color:var(--orange)">🟠 AllCheckPrev · CtrlTour</span><span class="det-val" style="color:var(--orange)">${r.allCheckPrev.active?'ACTIF':'INACTIF'}</span></div>
+<div class="det-row"><span class="det-label" style="color:var(--orange)">Date du jour</span><span class="det-val" style="color:var(--orange)">J${r.allCheckPrev.dayOfMonth||'?'} (${r.allCheckPrev.dayLabel||'?'})</span></div>
+<div class="det-row"><span class="det-label" style="color:var(--orange)">Format jeu passé</span><span class="det-val" style="color:var(--orange)">${r.allCheckPrev.format||'?'}</span></div>
+${r.allCheckPrev.prevSuit?`<div class="det-row"><span class="det-label" style="color:var(--orange)">1ʳᵉ carte P1 passée</span><span class="det-val" style="color:var(--orange)">${r.allCheckPrev.prevVal||''}${SUIT_EMOJI[r.allCheckPrev.prevSuit]||r.allCheckPrev.prevSuit} (${r.allCheckPrev.prevEven?'PAIR':'IMPAIR'}) · ${r.allCheckPrev.sameColor?'même couleur':'couleurs différentes'}${r.allCheckPrev.sameSuit?' · enseigne identique':''}</span></div>`:''}
+<div class="det-row"><span class="det-label" style="color:var(--orange)">Détail</span><span class="det-val" style="color:var(--orange)">${r.allCheckPrev.detail||'—'}</span></div>
+${r.allCheckPrev.active?`<div class="det-row"><span class="det-label" style="color:var(--orange)">Après CtrlTour</span><span class="det-val" style="color:var(--orange)">${SUIT_EMOJI[r.allCheckPrev.before]} → ${SUIT_EMOJI[r.allCheckPrev.result]}</span></div>`:''}`;
   }
 
   detailsHTML+=`

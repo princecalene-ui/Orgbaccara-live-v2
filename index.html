@@ -1750,9 +1750,35 @@ function runMorgan(raw){
       reinvDetail='P1 val '+p1First.val+'='+p1Val+' IMPAIR → réinv ♥️↔♦️ / ♣️↔♠️ · '+(SUIT_EMOJI[result2]||'')+'→'+(SUIT_EMOJI[finalSuit]||'');
     }
   }
+
+  // ── INV GLOBALE n° de jeu : si les 2 derniers chiffres ont la MÊME parité
+  //    dernier PAIR + avant-dernier PAIR  → ♦️↔♥️ / ♠️↔♣️
+  //    dernier IMPAIR + avant-dernier IMPAIR → ♦️↔♥️ / ♠️↔♣️
+  const M_GLOBAL_INV = {'♦️':'♥️','♥️':'♦️','♠️':'♣️','♣️':'♠️'};
+  let globalInvApplied=false, globalInvDetail='inactif', beforeGlobal=finalSuit;
+  const numStr=String(nextNum);
+  if(numStr.length >= 2){
+    const lastD=parseInt(numStr[numStr.length-1],10);
+    const prevD=parseInt(numStr[numStr.length-2],10);
+    const lastEven=(lastD%2===0);
+    const prevEven=(prevD%2===0);
+    if(lastEven === prevEven){
+      finalSuit=M_GLOBAL_INV[finalSuit]||finalSuit;
+      globalInvApplied=true;
+      const parityLab=lastEven?'PAIR+PAIR':'IMPAIR+IMPAIR';
+      globalInvDetail='n°'+nextNum+' · chiffres '+prevD+''+lastD+' ('+parityLab+') → INV GLOBALE ♦️↔♥️ / ♠️↔♣️ · '+(SUIT_EMOJI[beforeGlobal]||beforeGlobal)+'→'+(SUIT_EMOJI[finalSuit]||finalSuit);
+    } else {
+      globalInvDetail='n°'+nextNum+' · chiffres '+prevD+''+lastD+' (parités différentes) → pas d\'INV GLOBALE';
+    }
+  } else {
+    globalInvDetail='n°'+nextNum+' (< 2 chiffres) → pas d\'INV GLOBALE';
+  }
+
   return {
     num, nextNum, p1First, p2First, p2Val, p2Even, gammeNum, gammeLabel, gammeInverted,
-    result1, result2, isQuinte, expectedQuinte, quinteDetail, reinvApplied, reinvDetail, finalSuit,
+    result1, result2, isQuinte, expectedQuinte, quinteDetail, reinvApplied, reinvDetail,
+    globalInvApplied, globalInvDetail, beforeGlobal,
+    finalSuit,
     algoUsed: 'MORGAN', rattrapageForced: false
   };
 }
@@ -1769,6 +1795,9 @@ function renderMorganResult(r){
     r.reinvApplied
       ? '<div class="badge badge-temporal">⇄ RÉINVERSION — '+r.reinvDetail+'</div>'
       : '<div class="badge badge-temporal" style="opacity:.55">⇄ RÉINVERSION — '+r.reinvDetail+'</div>',
+    r.globalInvApplied
+      ? '<div class="badge badge-hyper">🔄 INV GLOBALE — '+r.globalInvDetail+'</div>'
+      : '<div class="badge badge-hyper" style="opacity:.55">🔄 INV GLOBALE — '+r.globalInvDetail+'</div>',
     '<div class="badge badge-finalinv">✦ FINAL — #N'+r.nextNum+' '+(SUIT_EMOJI[r.finalSuit]||'')+' '+(SUIT_NAMES[r.finalSuit]||'')+' P1</div>'
   ];
   document.getElementById('badge-zone').innerHTML=badges.join('');
@@ -1784,6 +1813,9 @@ function renderMorganResult(r){
 '<div class="det-row"><span class="det-label">Résultat 2</span><span class="det-val hi-violet">'+(SUIT_EMOJI[r.result2]||'')+'</span></div>'+
 '<hr class="det-sep">'+
 '<div class="det-row"><span class="det-label">Réinversion</span><span class="det-val hi">'+r.reinvDetail+'</span></div>'+
+'<hr class="det-sep">'+
+'<div class="det-row"><span class="det-label">INV GLOBALE n°</span><span class="det-val hi-pink">'+(r.globalInvDetail||'')+'</span></div>'+
+(r.globalInvApplied ? '<div class="det-row"><span class="det-label">Après INV GLOBALE</span><span class="det-val hi-pink">'+(SUIT_EMOJI[r.beforeGlobal]||'')+' → '+(SUIT_EMOJI[r.finalSuit]||'')+'</span></div>' : '')+
 '<hr class="det-sep">'+
 '<div class="det-row"><span class="det-label">RÉSULTAT FINAL</span><span class="det-val det-result">#N'+r.nextNum+' — '+(SUIT_EMOJI[r.finalSuit]||'')+' '+(SUIT_NAMES[r.finalSuit]||'')+' P1</span></div>';
   const zone=document.getElementById('result-zone');

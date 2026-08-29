@@ -1360,6 +1360,8 @@ function resolvePendingHistory(gameNum, p1Cards, p2Cards, rawText){
     if(ok === null) continue;
     entry.status = ok ? 'valid' : 'invalid';
     entry.autoResolved = true;
+    if(p1Cards && p1Cards.length) entry.actualP1Count = p1Cards.length;
+    if(p2Cards && p2Cards.length) entry.actualP2Count = p2Cards.length;
     try{
       if(rawText){
         const fmt = detectFormatFromRaw(rawText);
@@ -1368,6 +1370,11 @@ function resolvePendingHistory(gameNum, p1Cards, p2Cards, rawText){
         entry.actualFormat = detectHandFormat(p1Cards, p2Cards);
       }
     }catch(e){}
+    // ULTIME : perte + P1 exactement 2 cartes → prochaine pred inversée
+    if(entry.status === 'invalid' && entry.actualP1Count === 2){
+      entry.ultimeNext = true;
+      try{ localStorage.setItem('morgan_ultime_next', String(entry.gameNum + 1)); }catch(e){}
+    }
     lastEntry = entry;
   }
   saveHistory(list);
@@ -1715,6 +1722,31 @@ function morganCardVal(v){
   if(v==='10') return 10;
   const n=parseInt(v,10); return isNaN(n)?0:n;
 }
+
+// ULTIME INVERSION : si le jeu précédent (nextNum-1) a été PERDU
+// et que P1 n'avait que 2 cartes → inv ♣️↔♠️ / ♥️↔♦️ sur la pred suivante
+const ULTIME_MAP = {'♣️':'♠️','♠️':'♣️','♥️':'♦️','♦️':'♥️'};
+function shouldApplyUltimeInv(nextNum){
+  try{
+    const list = loadHistory()
+      .filter(e => (e.algoUsed === 'MORGAN' || histModeKey(e.algoUsed) === 'OPT1') && (e.status === 'valid' || e.status === 'invalid'))
+      .sort((a,b) => a.gameNum - b.gameNum);
+    const last = list.filter(e => e.gameNum === nextNum - 1).pop();
+    if(!last || last.status !== 'invalid') return false;
+    if(last.actualP1Count === 2) return true;
+    // fallback format 2-x (P1 2 cartes)
+    const f = last.actualFormat || '';
+    if(f === '2-2' || f === '2-3') return true;
+    // flag explicite
+    if(last.ultimeNext) return true;
+    try{
+      const flagged = localStorage.getItem('morgan_ultime_next');
+      if(flagged && parseInt(flagged,10) === nextNum) return true;
+    }catch(e){}
+  }catch(e){}
+  return false;
+}
+
 function runMorgan(raw){
   const {num,p1,p2}=parseGame(raw);
   if(!p1.length||!p2.length) throw new Error('Cartes P1/P2 introuvables');
@@ -1818,10 +1850,34 @@ function runMorgan(raw){
     globalInvDetail='n°'+nextNum+' (< 2 chiffres) → pas d\'INV GLOBALE';
   }
 
+  // ── ULTIME INVERSION (après perte + P1 à 2 cartes uniquement)
+  let ultimeApplied=false, ultimeDetail='inactif', beforeUltime=finalSuit;
+  if(shouldApplyUltimeInv(nextNum)){
+    finalSuit = ULTIME_MAP[finalSuit] || finalSuit;
+    ultimeApplied = true;
+    ultimeDetail = 'perte #'+(nextNum-1)+' · P1 à 2 cartes → ULTIME ♣️↔♠️ / ♥️↔♦️ · '+(SUIT_EMOJI[beforeUltime]||'')+'→'+(SUIT_EMOJI[finalSuit]||'');
+    try{ localStorage.removeItem('morgan_ultime_next'); }catch(e){}
+  }
+
+  // Format + révélation (affichage / suivi)
+  let gameFormat = null;
+  try{ gameFormat = detectFormatFromRaw(raw); }catch(e){}
+  const isRevelation = (p1.length===3 && p2.length===3);
+  if(isRevelation){
+    try{
+      regime.revelationNum = num;
+      regime.revelationParity = (num % 2 === 0) ? 'PAIR' : 'IMPAIR';
+      regime.source = '#N'+num+' (révélation 3-3 · MORGAN)';
+      saveRegime(regime);
+    }catch(e){}
+  }
+
   return {
     num, nextNum, p1First, p2First, p2Val, p2Even, gammeNum, gammeLabel, gammeInverted,
     result1, result2, isQuinte, expectedQuinte, quinteDetail, reinvApplied, reinvDetail,
     globalInvApplied, globalInvDetail, beforeGlobal,
+    ultimeApplied, ultimeDetail, beforeUltime,
+    gameFormat, isRevelation,
     finalSuit,
     algoUsed: 'MORGAN', rattrapageForced: false
   };
@@ -1842,8 +1898,14 @@ function renderMorganResult(r){
     r.globalInvApplied
       ? '<div class="badge badge-hyper">🔄 INV GLOBALE — '+r.globalInvDetail+'</div>'
       : '<div class="badge badge-hyper" style="opacity:.55">🔄 INV GLOBALE — '+r.globalInvDetail+'</div>',
+    r.ultimeApplied
+      ? '<div class="badge badge-finalinv" style="border-color:#ff6b6b;color:#ff8a8a">⚡ ULTIME INV — '+r.ultimeDetail+'</div>'
+      : '',
+    r.isRevelation
+      ? '<div class="badge badge-revelation">🃏 RÉVÉLATION 3-3 · #N'+r.num+' · régime '+(regime.revelationParity||'')+'</div>'
+      : (r.gameFormat ? '<div class="badge badge-parity">📐 FORMAT '+r.gameFormat+'</div>' : ''),
     '<div class="badge badge-finalinv">✦ FINAL — #N'+r.nextNum+' '+(SUIT_EMOJI[r.finalSuit]||'')+' '+(SUIT_NAMES[r.finalSuit]||'')+' P1</div>'
-  ];
+  ].filter(Boolean);
   document.getElementById('badge-zone').innerHTML=badges.join('');
   document.getElementById('details-body').innerHTML=
 '<div class="det-row"><span class="det-label">Jeu fourni</span><span class="det-val">#N'+r.num+'</span></div>'+
@@ -1859,7 +1921,9 @@ function renderMorganResult(r){
 '<div class="det-row"><span class="det-label">Réinversion</span><span class="det-val hi">'+r.reinvDetail+'</span></div>'+
 '<hr class="det-sep">'+
 '<div class="det-row"><span class="det-label">INV GLOBALE n°</span><span class="det-val hi-pink">'+(r.globalInvDetail||'')+'</span></div>'+
-(r.globalInvApplied ? '<div class="det-row"><span class="det-label">Après INV GLOBALE</span><span class="det-val hi-pink">'+(SUIT_EMOJI[r.beforeGlobal]||'')+' → '+(SUIT_EMOJI[r.finalSuit]||'')+'</span></div>' : '')+
+(r.globalInvApplied && !r.ultimeApplied ? '<div class="det-row"><span class="det-label">Après INV GLOBALE</span><span class="det-val hi-pink">'+(SUIT_EMOJI[r.beforeGlobal]||'')+' → '+(SUIT_EMOJI[r.beforeUltime]||r.finalSuit)+'</span></div>' : '')+
+'<div class="det-row"><span class="det-label">ULTIME INV</span><span class="det-val hi-red">'+(r.ultimeDetail||'inactif')+'</span></div>'+
+'<div class="det-row"><span class="det-label">Format / Révélation</span><span class="det-val">'+(r.gameFormat||'?')+(r.isRevelation?' · 🃏 RÉVÉLATION 3-3':'')+'</span></div>'+
 '<hr class="det-sep">'+
 '<div class="det-row"><span class="det-label">RÉSULTAT FINAL</span><span class="det-val det-result">#N'+r.nextNum+' — '+(SUIT_EMOJI[r.finalSuit]||'')+' '+(SUIT_NAMES[r.finalSuit]||'')+' P1</span></div>';
   const zone=document.getElementById('result-zone');

@@ -328,7 +328,9 @@
       <button class="btn-demarrer" id="btn-demarrer-live" onclick="togglePermanentLive()">🟢 LIVE AUTO ACTIF</button>
       <div class="demarrer-desc">
         Scan <b style="color:var(--mint)">0,8 s</b> · @statistika_baccara<br>
-        ▶️ P1 (3ᵉ carte) → attente · dès arrivée → ✅/❌ + pred immédiate.
+        Algo = 1ʳᵉ carte P1 + 1ʳᵉ carte P2.<br>
+        Si <b>▶️ P1</b> (3ᵉ carte annoncée) → on attend le tirage.<br>
+        Dès main P1 finalisée (2 cartes sans ▶️, ou 3 cartes) → ✅/❌ + pred <b style="color:var(--mint)">immédiate</b>.
       </div>
       <div class="demarrer-status" id="demarrer-status">LIVE — démarrage…</div>
     </div>
@@ -695,17 +697,30 @@ function parseGame(raw){
   return {num, p1, p2};
 }
 
+// ── Règle timing prédiction MORGAN ──
+// L’algo n’utilise que la 1ʳᵉ carte P1 + 1ʳᵉ carte P2.
+// Mais on ne lance la pred du PROCHAIN jeu que lorsque la main P1 est finalisée :
+//   • ▶️ / ▶ côté P1  → 3ᵉ carte annoncée → ATTENDRE le tirage
+//   • 3 cartes P1     → GO (3ᵉ reçue) → confirm + pred
+//   • 2 cartes P1 sans ▶️ → GO (pas de 3ᵉ) → confirm + pred
+//   • ▶ côté P2 (banquier) → toujours ignoré pour le timing
 function playMarkerOnP1Side(raw){
   const dash = raw.search(/\s-\s/);
   const p1Side = dash === -1 ? raw : raw.slice(0, dash);
   return p1Side.indexOf('▶️') !== -1 || p1Side.indexOf('▶') !== -1;
+}
+function playMarkerOnP2Side(raw){
+  const dash = raw.search(/\s-\s/);
+  if(dash === -1) return false;
+  const p2Side = raw.slice(dash);
+  return p2Side.indexOf('▶️') !== -1 || p2Side.indexOf('▶') !== -1;
 }
 function checkGameReadiness(raw){
   if(!raw) return {usable:false, reason:'empty', detail:'Aucune donnée.', waitingThird:false};
   const parenIdxs = [];
   for(let i=0;i<raw.length;i++){ if(raw[i]==='(') parenIdxs.push(i); }
   if(parenIdxs.length < 2){
-    return {usable:false, reason:'incomplete', detail:'Distribution P1/P2 pas encore affichée.', waitingThird:false};
+    return {usable:false, reason:'incomplete', detail:'Distribution P1/P2 pas encore affichée — en attente.', waitingThird:false};
   }
   let p1Count=0, p2Count=0;
   try{
@@ -713,15 +728,36 @@ function checkGameReadiness(raw){
     p1Count = (parsed.p1||[]).length;
     p2Count = (parsed.p2||[]).length;
   }catch(e){
-    return {usable:false, reason:'parse', detail:'Format non reconnu.', waitingThird:false};
+    return {usable:false, reason:'parse', detail:'Format non reconnu — en attente.', waitingThird:false};
   }
-  if(p1Count < 2) return {usable:false, reason:'p1-short', detail:"P1 n'a pas encore 2 cartes.", waitingThird:false};
-  if(p2Count < 1) return {usable:false, reason:'p2-display', detail:'Données P2 pas encore affichées.', waitingThird:false};
-  if(p1Count >= 3) return {usable:true, reason:'p1-3-done', detail:'3ᵉ carte P1 reçue.', waitingThird:false};
+  // Besoin au minimum des 2 premières cartes P1 + au moins 1 P2 (1ʳᵉ carte dispo)
+  if(p1Count < 2){
+    return {usable:false, reason:'p1-short', detail:"P1 n'a pas encore 2 cartes — en attente.", waitingThird:false};
+  }
+  if(p2Count < 1){
+    return {usable:false, reason:'p2-display', detail:'Données P2 pas encore affichées — en attente.', waitingThird:false};
+  }
+  // 3 cartes P1 = main complète → GO immédiat (confirm + pred)
+  if(p1Count >= 3){
+    return {usable:true, reason:'p1-3-done', detail:'3ᵉ carte P1 reçue → confirmation + pred immédiates.', waitingThird:false};
+  }
+  // ▶️ côté JOUEUR (P1) = 3ᵉ carte annoncée mais pas encore tirée → ATTENDRE
+  // (▶ côté banquier P2 est ignoré)
   if(playMarkerOnP1Side(raw)){
-    return {usable:false, reason:'waiting-third-p1', detail:'▶️ 3ᵉ carte P1 annoncée — attente…', waitingThird:true};
+    return {
+      usable:false,
+      reason:'waiting-third-p1',
+      detail:'▶️ 3ᵉ carte P1 annoncée — attente du tirage avant pred…',
+      waitingThird:true
+    };
   }
-  return {usable:true, reason:'p1-final-2', detail:'Main P1 finale (2 cartes).', waitingThird:false};
+  // 2 cartes P1, plus de ▶️ → main finale (pas de 3ᵉ) → GO
+  return {
+    usable:true,
+    reason:'p1-final-2',
+    detail:'Main P1 finale (2 cartes, pas de 3ᵉ) → confirm + pred immédiates.',
+    waitingThird:false
+  };
 }
 
 function runMorgan(raw){

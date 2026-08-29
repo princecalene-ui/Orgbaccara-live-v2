@@ -478,17 +478,30 @@ const SUB_KEYS = [
   { key:'Zenith@M9', durationMs:31*24*60*60*1000, label:'31 jours' }
 ];
 const KEY_LEDGER_URL = '';
-const KEY_SESSION_STORE = 'morgan_bacc_sub_v1';
+const KEY_SESSION_STORE = 'orgbacc_sub_session_v2';
+const KEY_SESSION_STORE_LEGACY = 'morgan_bacc_sub_v1';
 let keyTimerInterval = null;
 let systemUnlocked = false;
 
 function loadKeySession(){
   try{
-    const raw = localStorage.getItem(KEY_SESSION_STORE);
+    // Priorité : session ORG/MORGAN commune (conserve les jours restants)
+    let raw = localStorage.getItem(KEY_SESSION_STORE);
+    if(!raw && typeof KEY_SESSION_STORE_LEGACY !== 'undefined'){
+      raw = localStorage.getItem(KEY_SESSION_STORE_LEGACY);
+      if(raw){
+        // Migrer vers la clé commune
+        try{ localStorage.setItem(KEY_SESSION_STORE, raw); localStorage.removeItem(KEY_SESSION_STORE_LEGACY); }catch(e){}
+      }
+    }
     if(!raw) return null;
     const o = JSON.parse(raw);
     if(!o || !o.expiresAt) return null;
-    if(Date.now() >= o.expiresAt){ localStorage.removeItem(KEY_SESSION_STORE); return null; }
+    if(Date.now() >= o.expiresAt){
+      localStorage.removeItem(KEY_SESSION_STORE);
+      try{ if(typeof KEY_SESSION_STORE_LEGACY !== 'undefined') localStorage.removeItem(KEY_SESSION_STORE_LEGACY); }catch(e){}
+      return null;
+    }
     return o;
   }catch(e){ return null; }
 }

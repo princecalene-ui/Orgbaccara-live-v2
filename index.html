@@ -614,7 +614,9 @@ async function submitKey(){
   if(!match){ if(err) err.textContent = '✕ Clé invalide.'; return; }
   const sess = loadKeySession();
   if(sess && sess.keyHash && Date.now() < sess.expiresAt){
-    hideKeyGate(); startKeyTimer(); if(err) err.textContent = ''; return;
+    hideKeyGate(); startKeyTimer(); if(err) err.textContent = '';
+    try{ startPermanentLive(); }catch(e){}
+    return;
   }
   if(err) err.textContent = '⏳ Vérification mondiale de la clé…';
   if(btn){ btn.disabled = true; btn.textContent = 'Vérification…'; }
@@ -627,6 +629,7 @@ async function submitKey(){
       if(input) input.value = '';
       if(err) err.textContent = '';
       hideKeyGate(); startKeyTimer();
+      try{ startPermanentLive(); }catch(e){}
       return;
     }
     if(result.error === 'used'){
@@ -951,7 +954,10 @@ function hideWaiting(){ document.getElementById('waiting-box').style.display='no
 
 function calculate(fromLive){
   hideError(); hideWaiting();
-  if(!requireUnlock()) return false;
+  if(!requireUnlock()){
+    if(fromLive) setLiveStatus('🔐 Clé requise — déverrouillez pour les pred auto');
+    return false;
+  }
   const raw = document.getElementById('game-input').value.trim();
   if(!raw){
     if(!fromLive) showError("Veuillez saisir les données du jeu précédent.");
@@ -1132,14 +1138,17 @@ async function fetchLatestTelegramGame(silent){
     }
 
     document.getElementById('game-input').value = data.normalized;
+    // Toujours recalculer si nouveau jeu utilisable, ou si on sort d'une attente 3ᵉ carte
     const isNew = liveLastUsableGameNum !== data.game_number;
     if(isNew || !silent){
+      const why = readiness.reason === 'p1-3-done' ? '3ᵉ carte reçue' : 'main P1 finale (2 cartes)';
       const calcOk = calculate(true);
       if(calcOk){
         liveLastUsableGameNum = data.game_number;
-        setLiveStatus('⚡ #N'+data.game_number+' → pred MORGAN AUTO');
+        setLiveStatus('⚡ #N'+data.game_number+' · '+why+' → pred MORGAN AUTO');
       } else {
-        setLiveStatus('⏳ #N'+data.game_number+' — recalcul…');
+        // Si calcul échoue (clé / parse), réessayer au prochain scan
+        setLiveStatus('⏳ #N'+data.game_number+' · '+why+' — recalcul au prochain scan…');
       }
     } else {
       setLiveStatus('⚡ #N'+data.game_number+' · déjà traité');
@@ -1156,6 +1165,8 @@ function togglePermanentLive(){
     permanentLiveOn = false;
     if(permanentLiveTimer){ clearInterval(permanentLiveTimer); permanentLiveTimer=null; }
     setPermanentLiveUI(false);
+    const s = document.getElementById('demarrer-status');
+    if(s) s.textContent = '🔴 LIVE OFF';
     return;
   }
   startPermanentLive();
@@ -1166,21 +1177,25 @@ function startPermanentLive(){
   setPermanentLiveUI(true);
   demarrerLive(true);
   if(permanentLiveTimer) clearInterval(permanentLiveTimer);
+  // Scan rapide 0,6 s pour réagir dès que la 3ᵉ carte P1 arrive
   permanentLiveTimer = setInterval(function(){
     if(liveFetchInFlight) return;
     liveFetchInFlight = true;
     Promise.resolve(fetchLatestTelegramGame(true))
       .finally(function(){ liveFetchInFlight = false; });
-  }, 800);
+  }, 600);
   fetchLatestTelegramGame(true);
   const s = document.getElementById('demarrer-status');
-  if(s) s.textContent = '🟢 @statistika_baccara · scan 0,8s';
+  if(s) s.textContent = '🟢 LIVE AUTO · scan 0,6s · pred dès main P1 finale';
 }
 
 window.addEventListener('load', function(){
-  requireUnlock();
+  const unlocked = requireUnlock();
   renderHistory();
-  setTimeout(function(){ startPermanentLive(); }, 250);
+  // LIVE auto dès que possible (si clé OK) — sinon démarrera au déverrouillage
+  setTimeout(function(){
+    if(loadKeySession()) startPermanentLive();
+  }, 300);
 });
 </script>
 </body>

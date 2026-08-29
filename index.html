@@ -1751,24 +1751,57 @@ function runMorgan(raw){
     }
   }
 
-  // ── INV GLOBALE n° de jeu : si les 2 derniers chiffres ont la MÊME parité
-  //    dernier PAIR + avant-dernier PAIR  → ♦️↔♥️ / ♠️↔♣️
-  //    dernier IMPAIR + avant-dernier IMPAIR → ♦️↔♥️ / ♠️↔♣️
-  const M_GLOBAL_INV = {'♦️':'♥️','♥️':'♦️','♠️':'♣️','♣️':'♠️'};
+  // ── INV GLOBALE n° de jeu (MORGAN) ──
+  // 1) Cas effectif selon 1er chiffre + fenêtre 20 du bloc centaine :
+  //    dans chaque centaine (xx00–xx19 = 20 premiers) → on utilise le CONTRAIRE
+  //    du 1er chiffre (ex: 200–219 traitent comme 1er IMPAIR ; 220+ comme 1er PAIR)
+  // 2) Même parité des 2 derniers chiffres :
+  //    · cas PAIR  → ♦️↔♥️ / ♠️↔♣️
+  //    · cas IMPAIR→ ♣️↔♥️ / ♠️↔♦️
+  // 3) Parités différentes (cas IMPAIR seulement) :
+  //    cycle ♦️→♣️→♠️→♥️→♦️
+  const MAP_EVEN_SAME  = {'♦️':'♥️','♥️':'♦️','♠️':'♣️','♣️':'♠️'}; // 1er pair effectif + même parité
+  const MAP_ODD_SAME   = {'♣️':'♥️','♥️':'♣️','♠️':'♦️','♦️':'♠️'}; // 1er impair effectif + même parité
+  const MAP_ODD_DIFF   = {'♦️':'♣️','♣️':'♠️','♠️':'♥️','♥️':'♦️'}; // 1er impair effectif + parités diff
   let globalInvApplied=false, globalInvDetail='inactif', beforeGlobal=finalSuit;
   const numStr=String(nextNum);
   if(numStr.length >= 2){
+    const firstD=parseInt(numStr[0],10);
     const lastD=parseInt(numStr[numStr.length-1],10);
     const prevD=parseInt(numStr[numStr.length-2],10);
     const lastEven=(lastD%2===0);
     const prevEven=(prevD%2===0);
-    if(lastEven === prevEven){
-      finalSuit=M_GLOBAL_INV[finalSuit]||finalSuit;
-      globalInvApplied=true;
-      const parityLab=lastEven?'PAIR+PAIR':'IMPAIR+IMPAIR';
-      globalInvDetail='n°'+nextNum+' · chiffres '+prevD+''+lastD+' ('+parityLab+') → INV GLOBALE ♦️↔♥️ / ♠️↔♣️ · '+(SUIT_EMOJI[beforeGlobal]||beforeGlobal)+'→'+(SUIT_EMOJI[finalSuit]||finalSuit);
+    const sameParity=(lastEven===prevEven);
+    // Parité naturelle du 1er chiffre
+    let firstEven=(firstD%2===0);
+    // 20 premiers de chaque centaine (n%100 < 20) → CONTRAIRE
+    const within = nextNum % 100;
+    const inFirst20 = (within < 20);
+    if(inFirst20) firstEven = !firstEven;
+    const caseLab = firstEven ? 'PAIR' : 'IMPAIR';
+    const winLab = inFirst20 ? ('fenêtre20 n%100='+within+' → contraire') : ('hors fenêtre20 n%100='+within);
+    const parityLab = sameParity ? (lastEven?'PAIR+PAIR':'IMPAIR+IMPAIR') : (prevEven?'PAIR+IMPAIR':'IMPAIR+PAIR');
+
+    if(firstEven){
+      // CAS 1er PAIR effectif
+      if(sameParity){
+        finalSuit = MAP_EVEN_SAME[finalSuit]||finalSuit;
+        globalInvApplied=true;
+        globalInvDetail='n°'+nextNum+' · 1er '+caseLab+' ('+winLab+') · '+prevD+''+lastD+' '+parityLab+' → INV ♦️↔♥️/♠️↔♣️ · '+(SUIT_EMOJI[beforeGlobal]||'')+'→'+(SUIT_EMOJI[finalSuit]||'');
+      } else {
+        globalInvDetail='n°'+nextNum+' · 1er '+caseLab+' ('+winLab+') · '+prevD+''+lastD+' '+parityLab+' → pas d\'INV';
+      }
     } else {
-      globalInvDetail='n°'+nextNum+' · chiffres '+prevD+''+lastD+' (parités différentes) → pas d\'INV GLOBALE';
+      // CAS 1er IMPAIR effectif
+      if(sameParity){
+        finalSuit = MAP_ODD_SAME[finalSuit]||finalSuit;
+        globalInvApplied=true;
+        globalInvDetail='n°'+nextNum+' · 1er '+caseLab+' ('+winLab+') · '+prevD+''+lastD+' '+parityLab+' → INV ♣️↔♥️/♠️↔♦️ · '+(SUIT_EMOJI[beforeGlobal]||'')+'→'+(SUIT_EMOJI[finalSuit]||'');
+      } else {
+        finalSuit = MAP_ODD_DIFF[finalSuit]||finalSuit;
+        globalInvApplied=true;
+        globalInvDetail='n°'+nextNum+' · 1er '+caseLab+' ('+winLab+') · '+prevD+''+lastD+' '+parityLab+' → TRANSFORM ♦️→♣️→♠️→♥️ · '+(SUIT_EMOJI[beforeGlobal]||'')+'→'+(SUIT_EMOJI[finalSuit]||'');
+      }
     }
   } else {
     globalInvDetail='n°'+nextNum+' (< 2 chiffres) → pas d\'INV GLOBALE';

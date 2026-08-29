@@ -1764,7 +1764,17 @@ function runMorgan(raw){
   const MAP_ODD_SAME   = {'♣️':'♥️','♥️':'♣️','♠️':'♦️','♦️':'♠️'}; // 1er impair effectif + même parité
   const MAP_ODD_DIFF   = {'♦️':'♣️','♣️':'♠️','♠️':'♥️','♥️':'♦️'}; // 1er impair effectif + parités diff
   let globalInvApplied=false, globalInvDetail='inactif', beforeGlobal=finalSuit;
-  const numStr=String(nextNum);
+  // À partir de 1200 : le « 1 » initial n'entre plus dans les calculs (1377→377, 1245→245)
+  let effNum = nextNum;
+  let strippedLead1 = false;
+  if(nextNum >= 1200){
+    const full = String(nextNum);
+    if(full[0] === '1' && full.length >= 4){
+      effNum = parseInt(full.slice(1), 10);
+      strippedLead1 = true;
+    }
+  }
+  const numStr = String(effNum);
   if(numStr.length >= 2){
     const firstD=parseInt(numStr[0],10);
     const lastD=parseInt(numStr[numStr.length-1],10);
@@ -1772,13 +1782,14 @@ function runMorgan(raw){
     const lastEven=(lastD%2===0);
     const prevEven=(prevD%2===0);
     const sameParity=(lastEven===prevEven);
-    // Parité naturelle du 1er chiffre
+    // Parité naturelle du 1er chiffre (sur le n° effectif)
     let firstEven=(firstD%2===0);
-    // 20 premiers de chaque centaine (n%100 < 20) → CONTRAIRE
-    const within = nextNum % 100;
+    // 20 premiers de chaque centaine (effNum%100 < 20) → CONTRAIRE
+    const within = effNum % 100;
     const inFirst20 = (within < 20);
     if(inFirst20) firstEven = !firstEven;
     const caseLab = firstEven ? 'PAIR' : 'IMPAIR';
+    const stripLab = strippedLead1 ? ('strip1 '+nextNum+'→'+effNum+' · ') : '';
     const winLab = inFirst20 ? ('fenêtre20 n%100='+within+' → contraire') : ('hors fenêtre20 n%100='+within);
     const parityLab = sameParity ? (lastEven?'PAIR+PAIR':'IMPAIR+IMPAIR') : (prevEven?'PAIR+IMPAIR':'IMPAIR+PAIR');
 
@@ -1787,20 +1798,20 @@ function runMorgan(raw){
       if(sameParity){
         finalSuit = MAP_EVEN_SAME[finalSuit]||finalSuit;
         globalInvApplied=true;
-        globalInvDetail='n°'+nextNum+' · 1er '+caseLab+' ('+winLab+') · '+prevD+''+lastD+' '+parityLab+' → INV ♦️↔♥️/♠️↔♣️ · '+(SUIT_EMOJI[beforeGlobal]||'')+'→'+(SUIT_EMOJI[finalSuit]||'');
+        globalInvDetail='n°'+nextNum+' · '+stripLab+'1er '+caseLab+' ('+winLab+') · '+prevD+''+lastD+' '+parityLab+' → INV ♦️↔♥️/♠️↔♣️ · '+(SUIT_EMOJI[beforeGlobal]||'')+'→'+(SUIT_EMOJI[finalSuit]||'');
       } else {
-        globalInvDetail='n°'+nextNum+' · 1er '+caseLab+' ('+winLab+') · '+prevD+''+lastD+' '+parityLab+' → pas d\'INV';
+        globalInvDetail='n°'+nextNum+' · '+stripLab+'1er '+caseLab+' ('+winLab+') · '+prevD+''+lastD+' '+parityLab+' → pas d\'INV';
       }
     } else {
       // CAS 1er IMPAIR effectif
       if(sameParity){
         finalSuit = MAP_ODD_SAME[finalSuit]||finalSuit;
         globalInvApplied=true;
-        globalInvDetail='n°'+nextNum+' · 1er '+caseLab+' ('+winLab+') · '+prevD+''+lastD+' '+parityLab+' → INV ♣️↔♥️/♠️↔♦️ · '+(SUIT_EMOJI[beforeGlobal]||'')+'→'+(SUIT_EMOJI[finalSuit]||'');
+        globalInvDetail='n°'+nextNum+' · '+stripLab+'1er '+caseLab+' ('+winLab+') · '+prevD+''+lastD+' '+parityLab+' → INV ♣️↔♥️/♠️↔♦️ · '+(SUIT_EMOJI[beforeGlobal]||'')+'→'+(SUIT_EMOJI[finalSuit]||'');
       } else {
         finalSuit = MAP_ODD_DIFF[finalSuit]||finalSuit;
         globalInvApplied=true;
-        globalInvDetail='n°'+nextNum+' · 1er '+caseLab+' ('+winLab+') · '+prevD+''+lastD+' '+parityLab+' → TRANSFORM ♦️→♣️→♠️→♥️ · '+(SUIT_EMOJI[beforeGlobal]||'')+'→'+(SUIT_EMOJI[finalSuit]||'');
+        globalInvDetail='n°'+nextNum+' · '+stripLab+'1er '+caseLab+' ('+winLab+') · '+prevD+''+lastD+' '+parityLab+' → TRANSFORM ♦️→♣️→♠️→♥️ · '+(SUIT_EMOJI[beforeGlobal]||'')+'→'+(SUIT_EMOJI[finalSuit]||'');
       }
     }
   } else {

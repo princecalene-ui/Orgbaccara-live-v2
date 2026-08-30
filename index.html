@@ -904,7 +904,7 @@ let SYNC_SKIP_RATTRAPAGE = false;
 
 // ── RATTRAPAGE : si un ALGO perd, on le réutilise jusqu'à 3 fois, puis retour au routage normal ──
 const RATTRAPAGE_KEY = 'orgbacc_rattrapage_v1';
-const RATTRAPAGE_MAX = 2; // max 2 rattrapages après perte puis retour à zéro
+const RATTRAPAGE_MAX = 3; // max 3 rattrapages MORGAN après perte
 const ALLINV_MAX = 2;     // max 2 ALL.INV après perte puis retour à zéro
 function emptyRattrapage(){
   return { active:false, algo:null, remaining:0, startedAt:null, lostSuit:null, lostColor:null, lostFormat:null, rattrLevel:0 };
@@ -1375,6 +1375,50 @@ function resolvePendingHistory(gameNum, p1Cards, p2Cards, rawText){
       entry.ultimeNext = true;
       try{ localStorage.setItem('morgan_ultime_next', String(entry.gameNum + 1)); }catch(e){}
     }
+    // ── RATTRAPAGE MORGAN (max 3) ──
+    // Perte → démarre/continue rattrapage : lostSuit = suit prédite perdue
+    // (sera utilisée à la place de la 1ʳᵉ carte P1 au prochain calcul)
+    try{
+      const isMorgan = (entry.algoUsed === 'MORGAN' || histModeKey(entry.algoUsed) === 'OPT1');
+      if(isMorgan && (entry.suitKey === '♥️' || entry.suitKey === '♦️' || entry.suitKey === '♠️' || entry.suitKey === '♣️')){
+        if(entry.status === 'valid'){
+          if(rattrapage && rattrapage.active){
+            rattrapage = emptyRattrapage();
+            saveRattrapage(rattrapage);
+            try{ updateRegimeDisplay(); }catch(e){}
+          }
+        } else if(entry.status === 'invalid'){
+          if(!rattrapage || !rattrapage.active){
+            rattrapage = {
+              active: true,
+              algo: 'MORGAN',
+              remaining: RATTRAPAGE_MAX,
+              startedAt: entry.gameNum,
+              lostSuit: entry.suitKey,
+              lostColor: (entry.suitKey==='♥️'||entry.suitKey==='♦️') ? 'rouge' : 'noir',
+              lostFormat: entry.actualFormat || null,
+              rattrLevel: 1
+            };
+          } else {
+            // Rattrapage déjà actif et re-perdu → niveau suivant, lostSuit = pred échouée
+            const nextLevel = (rattrapage.rattrLevel || 1) + 1;
+            if(nextLevel > RATTRAPAGE_MAX){
+              rattrapage = emptyRattrapage();
+            } else {
+              rattrapage.lostSuit = entry.suitKey;
+              rattrapage.lostColor = (entry.suitKey==='♥️'||entry.suitKey==='♦️') ? 'rouge' : 'noir';
+              rattrapage.lostFormat = entry.actualFormat || rattrapage.lostFormat;
+              rattrapage.rattrLevel = nextLevel;
+              rattrapage.remaining = Math.max(0, RATTRAPAGE_MAX - nextLevel + 1);
+              rattrapage.active = true;
+              rattrapage.algo = 'MORGAN';
+            }
+          }
+          saveRattrapage(rattrapage);
+          try{ updateRegimeDisplay(); }catch(e){}
+        }
+      }
+    }catch(e){}
     lastEntry = entry;
   }
   saveHistory(list);
@@ -1750,7 +1794,23 @@ function shouldApplyUltimeInv(nextNum){
 function runMorgan(raw){
   const {num,p1,p2}=parseGame(raw);
   if(!p1.length||!p2.length) throw new Error('Cartes P1/P2 introuvables');
-  const p1First=p1[0], p2First=p2[0], nextNum=num+1;
+  let p1First=p1[0], p2First=p2[0], nextNum=num+1;
+  // RATTRAPAGE MORGAN : remplacer 1ʳᵉ P1 par la suit prédite perdue (biaise)
+  let rattrMode=false, rattrInfo=null;
+  try{
+    if(typeof rattrapage !== 'undefined' && rattrapage && rattrapage.active && rattrapage.lostSuit){
+      rattrMode = true;
+      const synthVal = (p1First && p1First.val) ? p1First.val : '2'; // valeur neutre/paire → pas de réinv forcée
+      p1First = { val: synthVal, suit: rattrapage.lostSuit };
+      rattrInfo = {
+        level: rattrapage.rattrLevel || 1,
+        remaining: rattrapage.remaining,
+        lostSuit: rattrapage.lostSuit,
+        note: 'RATTR'+ (rattrapage.rattrLevel||1) +' · P1 synthétique = ' + (typeof SUIT_EMOJI!=='undefined' ? (SUIT_EMOJI[rattrapage.lostSuit]||rattrapage.lostSuit) : rattrapage.lostSuit) + ' (pred perdue) à la place de la 1ʳᵉ P1 réelle'
+      };
+    }
+  }catch(e){}
+
   const p2Val=morganCardVal(p2First.val);
   const p2Even=(p2Val%2===0);
   let gammeNum=p2Even?1:2;
@@ -1878,8 +1938,10 @@ function runMorgan(raw){
     globalInvApplied, globalInvDetail, beforeGlobal,
     ultimeApplied, ultimeDetail, beforeUltime,
     gameFormat, isRevelation,
+    rattrMode, rattrInfo,
     finalSuit,
-    algoUsed: 'MORGAN', rattrapageForced: false
+    algoUsed: 'MORGAN',
+    rattrapageForced: !!rattrMode
   };
 }
 function renderMorganResult(r){
@@ -1888,8 +1950,11 @@ function renderMorganResult(r){
   document.getElementById('res-suit-emoji').innerHTML='<span style="color:'+(red?'#cc4444':'var(--ivory)')+'">'+(SUIT_EMOJI[r.finalSuit]||r.finalSuit)+'</span>';
   document.getElementById('res-suit-label').textContent=SUIT_NAMES[r.finalSuit]||'';
   document.getElementById('res-side').innerHTML='<span class="side-tag">P1 · MORGAN</span>';
-  upsertHistoryEntry(r.nextNum, r.finalSuit, 'MORGAN', false, false);
+  upsertHistoryEntry(r.nextNum, r.finalSuit, 'MORGAN', !!r.rattrMode, false);
   const badges=[
+    r.rattrMode && r.rattrInfo
+      ? '<div class="badge badge-temporal" style="border-color:#ffbf80;color:#ffbf80">♻️ RATTRAPAGE '+r.rattrInfo.level+'/'+RATTRAPAGE_MAX+' — '+r.rattrInfo.note+'</div>'
+      : '',
     '<div class="badge badge-engine">◆ '+r.gammeLabel+' → '+(SUIT_EMOJI[r.p2First.suit]||'')+'→'+(SUIT_EMOJI[r.result1]||'')+'</div>',
     '<div class="badge badge-transform">◈ QUINTE — '+r.quinteDetail+'</div>',
     r.reinvApplied

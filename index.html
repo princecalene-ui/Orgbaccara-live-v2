@@ -1572,14 +1572,6 @@ function reduceToDigit(n){
   while(n>9){n=String(n).split('').reduce((a,c)=>a+parseInt(c,10),0);steps.push(n);}
   return {digit:n,steps};
 }
-// N° à 4 chiffres : 1er chiffre de calcul = somme des 2 premiers chiffres
-// Ex: 1123 → 223 (1+1=2) · 1265 → 365 (1+2=3) · 1196 → 296 (1+1=2)
-function calcNum4(n){
-  const s = String(n);
-  if(s.length < 4) return n;
-  const sum = parseInt(s[0],10) + parseInt(s[1],10);
-  return parseInt(String(sum) + s.slice(2), 10);
-}
 function fibonacci(n){
   n=Math.max(2,Math.min(25,parseInt(n,10)||10));
   const seq=[0,1];
@@ -1654,10 +1646,9 @@ function applyFinalInv(suit, invKey, lastDigit){
 //  tranche/réinversion, sans ALL INVERSE, sans rattrapage)
 // ══════════════════════════════════════════════════════
 function runEngine(num, p1Cards, p2Cards, nextNum){
-  // 4 chiffres : 1er chiffre = somme des 2 premiers (1123→223, 1265→365)
-  const calcNum=calcNum4(num);
-  const isReduced=(calcNum !== num);
-  const calcNextNum=calcNum4(nextNum);
+  const isReduced=String(num).length>=4;
+  const calcNum=isReduced?parseInt(String(num).slice(1),10):num;
+  const calcNextNum=calcNum+1;
   const time=numToTime(calcNum);
   const p1First=p1Cards[0], p2First=p2Cards[0];
   const sHM=signHM(time.h,time.m);
@@ -1677,7 +1668,7 @@ function runEngine(num, p1Cards, p2Cards, nextNum){
   if(fibMod===1) algo=1;
   else if(fibMod===2) algo=2;
   else if(fibMod===3) algo=(baseAlgo===1?2:1);
-  const {digit:reducedDigit,steps:reduceSteps}=reduceToDigit(calcNextNum);
+  const {digit:reducedDigit,steps:reduceSteps}=reduceToDigit(nextNum);
   const algoEven=algo%2===0, numEven=reducedDigit%2===0;
   let rule,transformed;
   if(algoEven===numEven){
@@ -1773,10 +1764,17 @@ function runMorgan(raw){
   const MAP_ODD_SAME   = {'♣️':'♥️','♥️':'♣️','♠️':'♦️','♦️':'♠️'}; // 1er impair effectif + même parité
   const MAP_ODD_DIFF   = {'♦️':'♣️','♣️':'♠️','♠️':'♥️','♥️':'♦️'}; // 1er impair effectif + parités diff
   let globalInvApplied=false, globalInvDetail='inactif', beforeGlobal=finalSuit;
-  // 4 chiffres : 1er chiffre calc = somme des 2 premiers (1123→223, 1265→365)
-  const calcNext = calcNum4(nextNum);
-  const numStr=String(calcNext);
-  const sumNote = (calcNext !== nextNum) ? (' [calc '+calcNext+']') : '';
+  // À partir de 1200 : le « 1 » initial n'entre plus dans les calculs (1377→377, 1245→245)
+  let effNum = nextNum;
+  let strippedLead1 = false;
+  if(nextNum >= 1200){
+    const full = String(nextNum);
+    if(full[0] === '1' && full.length >= 4){
+      effNum = parseInt(full.slice(1), 10);
+      strippedLead1 = true;
+    }
+  }
+  const numStr = String(effNum);
   if(numStr.length >= 2){
     const firstD=parseInt(numStr[0],10);
     const lastD=parseInt(numStr[numStr.length-1],10);
@@ -1784,39 +1782,44 @@ function runMorgan(raw){
     const lastEven=(lastD%2===0);
     const prevEven=(prevD%2===0);
     const sameParity=(lastEven===prevEven);
+    // Parité naturelle du 1er chiffre (sur le n° effectif)
     let firstEven=(firstD%2===0);
-    const within = calcNext % 100;
+    // 20 premiers de chaque centaine (effNum%100 < 20) → CONTRAIRE
+    const within = effNum % 100;
     const inFirst20 = (within < 20);
     if(inFirst20) firstEven = !firstEven;
     const caseLab = firstEven ? 'PAIR' : 'IMPAIR';
+    const stripLab = strippedLead1 ? ('strip1 '+nextNum+'→'+effNum+' · ') : '';
     const winLab = inFirst20 ? ('fenêtre20 n%100='+within+' → contraire') : ('hors fenêtre20 n%100='+within);
     const parityLab = sameParity ? (lastEven?'PAIR+PAIR':'IMPAIR+IMPAIR') : (prevEven?'PAIR+IMPAIR':'IMPAIR+PAIR');
 
     if(firstEven){
+      // CAS 1er PAIR effectif
       if(sameParity){
         finalSuit = MAP_EVEN_SAME[finalSuit]||finalSuit;
         globalInvApplied=true;
-        globalInvDetail='n°'+nextNum+sumNote+' · 1er '+caseLab+' ('+winLab+') · '+prevD+''+lastD+' '+parityLab+' → INV ♦️↔♥️/♠️↔♣️ · '+(SUIT_EMOJI[beforeGlobal]||'')+'→'+(SUIT_EMOJI[finalSuit]||'');
+        globalInvDetail='n°'+nextNum+' · '+stripLab+'1er '+caseLab+' ('+winLab+') · '+prevD+''+lastD+' '+parityLab+' → INV ♦️↔♥️/♠️↔♣️ · '+(SUIT_EMOJI[beforeGlobal]||'')+'→'+(SUIT_EMOJI[finalSuit]||'');
       } else {
-        globalInvDetail='n°'+nextNum+sumNote+' · 1er '+caseLab+' ('+winLab+') · '+prevD+''+lastD+' '+parityLab+' → pas d\'INV';
+        globalInvDetail='n°'+nextNum+' · '+stripLab+'1er '+caseLab+' ('+winLab+') · '+prevD+''+lastD+' '+parityLab+' → pas d\'INV';
       }
     } else {
+      // CAS 1er IMPAIR effectif
       if(sameParity){
         finalSuit = MAP_ODD_SAME[finalSuit]||finalSuit;
         globalInvApplied=true;
-        globalInvDetail='n°'+nextNum+sumNote+' · 1er '+caseLab+' ('+winLab+') · '+prevD+''+lastD+' '+parityLab+' → INV ♣️↔♥️/♠️↔♦️ · '+(SUIT_EMOJI[beforeGlobal]||'')+'→'+(SUIT_EMOJI[finalSuit]||'');
+        globalInvDetail='n°'+nextNum+' · '+stripLab+'1er '+caseLab+' ('+winLab+') · '+prevD+''+lastD+' '+parityLab+' → INV ♣️↔♥️/♠️↔♦️ · '+(SUIT_EMOJI[beforeGlobal]||'')+'→'+(SUIT_EMOJI[finalSuit]||'');
       } else {
         finalSuit = MAP_ODD_DIFF[finalSuit]||finalSuit;
         globalInvApplied=true;
-        globalInvDetail='n°'+nextNum+sumNote+' · 1er '+caseLab+' ('+winLab+') · '+prevD+''+lastD+' '+parityLab+' → TRANSFORM ♦️→♣️→♠️→♥️ · '+(SUIT_EMOJI[beforeGlobal]||'')+'→'+(SUIT_EMOJI[finalSuit]||'');
+        globalInvDetail='n°'+nextNum+' · '+stripLab+'1er '+caseLab+' ('+winLab+') · '+prevD+''+lastD+' '+parityLab+' → TRANSFORM ♦️→♣️→♠️→♥️ · '+(SUIT_EMOJI[beforeGlobal]||'')+'→'+(SUIT_EMOJI[finalSuit]||'');
       }
     }
   } else {
-    globalInvDetail='n°'+nextNum+sumNote+' (< 2 chiffres) → pas d\'INV GLOBALE';
+    globalInvDetail='n°'+nextNum+' (< 2 chiffres) → pas d\'INV GLOBALE';
   }
 
   return {
-    num, nextNum, calcNext, p1First, p2First, p2Val, p2Even, gammeNum, gammeLabel, gammeInverted,
+    num, nextNum, p1First, p2First, p2Val, p2Even, gammeNum, gammeLabel, gammeInverted,
     result1, result2, isQuinte, expectedQuinte, quinteDetail, reinvApplied, reinvDetail,
     globalInvApplied, globalInvDetail, beforeGlobal,
     finalSuit,
@@ -1844,7 +1847,7 @@ function renderMorganResult(r){
   document.getElementById('badge-zone').innerHTML=badges.join('');
   document.getElementById('details-body').innerHTML=
 '<div class="det-row"><span class="det-label">Jeu fourni</span><span class="det-val">#N'+r.num+'</span></div>'+
-'<div class="det-row"><span class="det-label">Jeu prédit</span><span class="det-val">#N'+r.nextNum+(r.calcNext!=null && r.calcNext!==r.nextNum?' <span class="hi">(calc '+r.calcNext+')</span>':'')+'</span></div>'+
+'<div class="det-row"><span class="det-label">Jeu prédit</span><span class="det-val">#N'+r.nextNum+'</span></div>'+
 '<hr class="det-sep">'+
 '<div class="det-row"><span class="det-label">1ʳᵉ carte Banquier (P2)</span><span class="det-val hi">'+r.p2First.val+(SUIT_EMOJI[r.p2First.suit]||'')+' · val='+r.p2Val+' ('+(r.p2Even?'PAIR':'IMPAIR')+')</span></div>'+
 '<div class="det-row"><span class="det-label">Gamme</span><span class="det-val hi">GAMME'+(r.p2Even?1:2)+' → '+(SUIT_EMOJI[r.result1]||'')+'</span></div>'+

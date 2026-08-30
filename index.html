@@ -1261,10 +1261,12 @@ function saveHistory(list){
 }
 
 // Une entrée par (gameNum + mode OPT1/OPT4) — statut uniquement auto (Telegram)
-function upsertHistoryEntry(gameNum, suitKey, algoUsed, isRattrapage, isAllInv){
+function upsertHistoryEntry(gameNum, suitKey, algoUsed, isRattrapage, isAllInv, meta){
   const list = loadHistory();
   const mode = histModeKey(algoUsed);
   const existing = list.find(e=>e.gameNum===gameNum && histModeKey(e.algoUsed)===mode);
+  const isQuinteFlag = !!(meta && meta.isQuinte);
+  const smartInvFlag = !!(meta && meta.smartInv);
 
   if(existing){
     // Ne jamais écraser un résultat déjà auto-résolu (unanime)
@@ -1273,6 +1275,8 @@ function upsertHistoryEntry(gameNum, suitKey, algoUsed, isRattrapage, isAllInv){
       existing.algoUsed = algoUsed;
       if(isRattrapage) existing.rattrapage = true;
       if(isAllInv) existing.allInv = true;
+      if(meta && meta.isQuinte != null) existing.isQuinte = isQuinteFlag;
+      if(meta && meta.smartInv != null) existing.smartInv = smartInvFlag;
       saveHistory(list);
       renderHistory();
     }
@@ -1285,6 +1289,8 @@ function upsertHistoryEntry(gameNum, suitKey, algoUsed, isRattrapage, isAllInv){
     status: null, // null=en attente | 'valid' | 'invalid' — UNIQUEMENT auto
     rattrapage: !!isRattrapage,
     allInv: !!isAllInv,
+    isQuinte: isQuinteFlag,
+    smartInv: smartInvFlag,
     autoResolved: false,
     ts: new Date().toISOString()
   });
@@ -1764,17 +1770,7 @@ function runMorgan(raw){
   const MAP_ODD_SAME   = {'♣️':'♥️','♥️':'♣️','♠️':'♦️','♦️':'♠️'}; // 1er impair effectif + même parité
   const MAP_ODD_DIFF   = {'♦️':'♣️','♣️':'♠️','♠️':'♥️','♥️':'♦️'}; // 1er impair effectif + parités diff
   let globalInvApplied=false, globalInvDetail='inactif', beforeGlobal=finalSuit;
-  // À partir de 1200 : le « 1 » initial n'entre plus dans les calculs (1377→377, 1245→245)
-  let effNum = nextNum;
-  let strippedLead1 = false;
-  if(nextNum >= 1200){
-    const full = String(nextNum);
-    if(full[0] === '1' && full.length >= 4){
-      effNum = parseInt(full.slice(1), 10);
-      strippedLead1 = true;
-    }
-  }
-  const numStr = String(effNum);
+  const numStr=String(nextNum);
   if(numStr.length >= 2){
     const firstD=parseInt(numStr[0],10);
     const lastD=parseInt(numStr[numStr.length-1],10);
@@ -1782,14 +1778,13 @@ function runMorgan(raw){
     const lastEven=(lastD%2===0);
     const prevEven=(prevD%2===0);
     const sameParity=(lastEven===prevEven);
-    // Parité naturelle du 1er chiffre (sur le n° effectif)
+    // Parité naturelle du 1er chiffre
     let firstEven=(firstD%2===0);
-    // 20 premiers de chaque centaine (effNum%100 < 20) → CONTRAIRE
-    const within = effNum % 100;
+    // 20 premiers de chaque centaine (n%100 < 20) → CONTRAIRE
+    const within = nextNum % 100;
     const inFirst20 = (within < 20);
     if(inFirst20) firstEven = !firstEven;
     const caseLab = firstEven ? 'PAIR' : 'IMPAIR';
-    const stripLab = strippedLead1 ? ('strip1 '+nextNum+'→'+effNum+' · ') : '';
     const winLab = inFirst20 ? ('fenêtre20 n%100='+within+' → contraire') : ('hors fenêtre20 n%100='+within);
     const parityLab = sameParity ? (lastEven?'PAIR+PAIR':'IMPAIR+IMPAIR') : (prevEven?'PAIR+IMPAIR':'IMPAIR+PAIR');
 
@@ -1798,30 +1793,99 @@ function runMorgan(raw){
       if(sameParity){
         finalSuit = MAP_EVEN_SAME[finalSuit]||finalSuit;
         globalInvApplied=true;
-        globalInvDetail='n°'+nextNum+' · '+stripLab+'1er '+caseLab+' ('+winLab+') · '+prevD+''+lastD+' '+parityLab+' → INV ♦️↔♥️/♠️↔♣️ · '+(SUIT_EMOJI[beforeGlobal]||'')+'→'+(SUIT_EMOJI[finalSuit]||'');
+        globalInvDetail='n°'+nextNum+' · 1er '+caseLab+' ('+winLab+') · '+prevD+''+lastD+' '+parityLab+' → INV ♦️↔♥️/♠️↔♣️ · '+(SUIT_EMOJI[beforeGlobal]||'')+'→'+(SUIT_EMOJI[finalSuit]||'');
       } else {
-        globalInvDetail='n°'+nextNum+' · '+stripLab+'1er '+caseLab+' ('+winLab+') · '+prevD+''+lastD+' '+parityLab+' → pas d\'INV';
+        globalInvDetail='n°'+nextNum+' · 1er '+caseLab+' ('+winLab+') · '+prevD+''+lastD+' '+parityLab+' → pas d\'INV';
       }
     } else {
       // CAS 1er IMPAIR effectif
       if(sameParity){
         finalSuit = MAP_ODD_SAME[finalSuit]||finalSuit;
         globalInvApplied=true;
-        globalInvDetail='n°'+nextNum+' · '+stripLab+'1er '+caseLab+' ('+winLab+') · '+prevD+''+lastD+' '+parityLab+' → INV ♣️↔♥️/♠️↔♦️ · '+(SUIT_EMOJI[beforeGlobal]||'')+'→'+(SUIT_EMOJI[finalSuit]||'');
+        globalInvDetail='n°'+nextNum+' · 1er '+caseLab+' ('+winLab+') · '+prevD+''+lastD+' '+parityLab+' → INV ♣️↔♥️/♠️↔♦️ · '+(SUIT_EMOJI[beforeGlobal]||'')+'→'+(SUIT_EMOJI[finalSuit]||'');
       } else {
         finalSuit = MAP_ODD_DIFF[finalSuit]||finalSuit;
         globalInvApplied=true;
-        globalInvDetail='n°'+nextNum+' · '+stripLab+'1er '+caseLab+' ('+winLab+') · '+prevD+''+lastD+' '+parityLab+' → TRANSFORM ♦️→♣️→♠️→♥️ · '+(SUIT_EMOJI[beforeGlobal]||'')+'→'+(SUIT_EMOJI[finalSuit]||'');
+        globalInvDetail='n°'+nextNum+' · 1er '+caseLab+' ('+winLab+') · '+prevD+''+lastD+' '+parityLab+' → TRANSFORM ♦️→♣️→♠️→♥️ · '+(SUIT_EMOJI[beforeGlobal]||'')+'→'+(SUIT_EMOJI[finalSuit]||'');
       }
     }
   } else {
     globalInvDetail='n°'+nextNum+' (< 2 chiffres) → pas d\'INV GLOBALE';
   }
 
+  // ── INV SMART (système intelligent) ──
+  // Après une PERTE MORGAN dont le calcul avait une QUINTE validée,
+  // si la pred suivante a la MÊME COULEUR que la pred échouée
+  // → INVERSION ♠️↔♥️ / ♦️↔♣️
+  let smartInv = null;
+  {
+    const MAP_SMART = {'♠️':'♥️','♥️':'♠️','♦️':'♣️','♣️':'♦️'};
+    try{
+      const hist = loadHistory()
+        .filter(e=>{
+          const a = String(e.algoUsed||'');
+          const mode = (typeof histModeKey==='function') ? histModeKey(a) : 'OPT1';
+          const isSuitPred = (mode==='OPT1') || (a === 'MORGAN' || a.indexOf('MORGAN')>=0) || (a.indexOf('ALGO')>=0);
+          const isSuit = e.suitKey==='♠️'||e.suitKey==='♥️'||e.suitKey==='♦️'||e.suitKey==='♣️';
+          return isSuitPred && isSuit && (e.status==='valid' || e.status==='invalid');
+        })
+        .sort((a,b)=>a.gameNum-b.gameNum);
+      const last = hist.length ? hist[hist.length-1] : null;
+      if(last && last.status==='invalid' && last.gameNum === nextNum - 1){
+        // Quinte validée sur le calcul de la prédiction perdue ?
+        let quinteWasTrue = !!last.isQuinte;
+        if(!quinteWasTrue){
+          // Recalcul depuis le cache Telegram : jeu d'entrée = last.gameNum - 1
+          const inputNum = last.gameNum - 1;
+          let inputRaw = null;
+          if(telegramHistoryCache && telegramHistoryCache.length){
+            const g = telegramHistoryCache.find(x => x.game_number === inputNum);
+            if(g) inputRaw = g.normalized || g.raw_text;
+          }
+          if(inputRaw){
+            try{
+              const parsed = parseGame(inputRaw);
+              if(parsed.p1 && parsed.p1.length && parsed.p2 && parsed.p2.length){
+                const expQ = M_QUINTE[parsed.p2[0].suit];
+                quinteWasTrue = (parsed.p1[0].suit === expQ);
+              }
+            }catch(e){}
+          }
+        }
+        if(quinteWasTrue){
+          const lostColor = isRed(last.suitKey) ? 'rouge' : 'noir';
+          const curColor  = isRed(finalSuit) ? 'rouge' : 'noir';
+          if(lostColor === curColor){
+            const before = finalSuit;
+            finalSuit = MAP_SMART[finalSuit] || finalSuit;
+            smartInv = {
+              active: true,
+              lostSuit: last.suitKey,
+              lostGame: last.gameNum,
+              before,
+              result: finalSuit,
+              detail: 'perte #N'+last.gameNum+' '+(SUIT_EMOJI[last.suitKey]||last.suitKey)+' + quinte validée + même couleur ('+curColor+') → INV ♠️↔♥️ / ♦️↔♣️ · '+(SUIT_EMOJI[before]||before)+'→'+(SUIT_EMOJI[finalSuit]||finalSuit)
+            };
+          } else {
+            smartInv = {
+              active: false,
+              lostSuit: last.suitKey,
+              lostGame: last.gameNum,
+              before: finalSuit,
+              result: finalSuit,
+              detail: 'perte #N'+last.gameNum+' + quinte OK mais couleur différente ('+lostColor+'≠'+curColor+') → pas d\'INV SMART'
+            };
+          }
+        }
+      }
+    }catch(e){}
+  }
+
   return {
     num, nextNum, p1First, p2First, p2Val, p2Even, gammeNum, gammeLabel, gammeInverted,
     result1, result2, isQuinte, expectedQuinte, quinteDetail, reinvApplied, reinvDetail,
     globalInvApplied, globalInvDetail, beforeGlobal,
+    smartInv,
     finalSuit,
     algoUsed: 'MORGAN', rattrapageForced: false
   };
@@ -1832,7 +1896,7 @@ function renderMorganResult(r){
   document.getElementById('res-suit-emoji').innerHTML='<span style="color:'+(red?'#cc4444':'var(--ivory)')+'">'+(SUIT_EMOJI[r.finalSuit]||r.finalSuit)+'</span>';
   document.getElementById('res-suit-label').textContent=SUIT_NAMES[r.finalSuit]||'';
   document.getElementById('res-side').innerHTML='<span class="side-tag">P1 · MORGAN</span>';
-  upsertHistoryEntry(r.nextNum, r.finalSuit, 'MORGAN', false, false);
+  upsertHistoryEntry(r.nextNum, r.finalSuit, 'MORGAN', false, false, { isQuinte: !!r.isQuinte, smartInv: !!(r.smartInv && r.smartInv.active) });
   const badges=[
     '<div class="badge badge-engine">◆ '+r.gammeLabel+' → '+(SUIT_EMOJI[r.p2First.suit]||'')+'→'+(SUIT_EMOJI[r.result1]||'')+'</div>',
     '<div class="badge badge-transform">◈ QUINTE — '+r.quinteDetail+'</div>',
@@ -1842,8 +1906,13 @@ function renderMorganResult(r){
     r.globalInvApplied
       ? '<div class="badge badge-hyper">🔄 INV GLOBALE — '+r.globalInvDetail+'</div>'
       : '<div class="badge badge-hyper" style="opacity:.55">🔄 INV GLOBALE — '+r.globalInvDetail+'</div>',
+    (r.smartInv && r.smartInv.active)
+      ? '<div class="badge badge-temporal">🧠 INV SMART — '+r.smartInv.detail+'</div>'
+      : (r.smartInv
+        ? '<div class="badge badge-temporal" style="opacity:.55">🧠 INV SMART — '+(r.smartInv.detail||'inactif')+'</div>'
+        : ''),
     '<div class="badge badge-finalinv">✦ FINAL — #N'+r.nextNum+' '+(SUIT_EMOJI[r.finalSuit]||'')+' '+(SUIT_NAMES[r.finalSuit]||'')+' P1</div>'
-  ];
+  ].filter(Boolean);
   document.getElementById('badge-zone').innerHTML=badges.join('');
   document.getElementById('details-body').innerHTML=
 '<div class="det-row"><span class="det-label">Jeu fourni</span><span class="det-val">#N'+r.num+'</span></div>'+
@@ -1859,7 +1928,11 @@ function renderMorganResult(r){
 '<div class="det-row"><span class="det-label">Réinversion</span><span class="det-val hi">'+r.reinvDetail+'</span></div>'+
 '<hr class="det-sep">'+
 '<div class="det-row"><span class="det-label">INV GLOBALE n°</span><span class="det-val hi-pink">'+(r.globalInvDetail||'')+'</span></div>'+
-(r.globalInvApplied ? '<div class="det-row"><span class="det-label">Après INV GLOBALE</span><span class="det-val hi-pink">'+(SUIT_EMOJI[r.beforeGlobal]||'')+' → '+(SUIT_EMOJI[r.finalSuit]||'')+'</span></div>' : '')+
+(r.globalInvApplied ? '<div class="det-row"><span class="det-label">Après INV GLOBALE</span><span class="det-val hi-pink">'+(SUIT_EMOJI[r.beforeGlobal]||'')+' → '+(SUIT_EMOJI[r.smartInv && r.smartInv.active ? r.smartInv.before : r.finalSuit]||'')+'</span></div>' : '')+
+(r.smartInv ? '<hr class="det-sep">'+
+'<div class="det-row"><span class="det-label" style="color:#ffbf80">🧠 INV SMART</span><span class="det-val" style="color:#ffbf80">'+(r.smartInv.active?'ACTIF':'inactif')+'</span></div>'+
+'<div class="det-row"><span class="det-label" style="color:#ffbf80">Détail</span><span class="det-val" style="color:#ffbf80">'+(r.smartInv.detail||'—')+'</span></div>'+
+(r.smartInv.active ? '<div class="det-row"><span class="det-label" style="color:#ffbf80">Après INV SMART</span><span class="det-val" style="color:#ffbf80">'+(SUIT_EMOJI[r.smartInv.before]||'')+' → '+(SUIT_EMOJI[r.smartInv.result]||'')+'</span></div>' : '') : '')+
 '<hr class="det-sep">'+
 '<div class="det-row"><span class="det-label">RÉSULTAT FINAL</span><span class="det-val det-result">#N'+r.nextNum+' — '+(SUIT_EMOJI[r.finalSuit]||'')+' '+(SUIT_NAMES[r.finalSuit]||'')+' P1</span></div>';
   const zone=document.getElementById('result-zone');

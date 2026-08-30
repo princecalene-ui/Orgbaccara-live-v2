@@ -904,7 +904,7 @@ let SYNC_SKIP_RATTRAPAGE = false;
 
 // ── RATTRAPAGE : si un ALGO perd, on le réutilise jusqu'à 3 fois, puis retour au routage normal ──
 const RATTRAPAGE_KEY = 'orgbacc_rattrapage_v1';
-const RATTRAPAGE_MAX = 3; // max 3 rattrapages MORGAN après perte
+const RATTRAPAGE_MAX = 2; // max 2 rattrapages après perte puis retour à zéro
 const ALLINV_MAX = 2;     // max 2 ALL.INV après perte puis retour à zéro
 function emptyRattrapage(){
   return { active:false, algo:null, remaining:0, startedAt:null, lostSuit:null, lostColor:null, lostFormat:null, rattrLevel:0 };
@@ -930,30 +930,6 @@ function saveRattrapage(r){
   try{ localStorage.setItem(RATTRAPAGE_KEY, JSON.stringify(r)); }catch(e){}
 }
 let rattrapage = loadRattrapage();
-
-// ── MODE INTELLIGENT « FORCE QUINTE » ──
-// Si 2 pertes où la QUINTE de la pred était sur P1 (pas la pred) →
-// toutes les preds suivantes sortent directement leur quinte
-// jusqu'à ce qu'une perte en mode force ramène le cours normal.
-const QUINTE_FORCE_KEY = 'morgan_quinte_force_v1';
-const M_QUINTE_PAIR = {'♥️':'♦️','♦️':'♥️','♠️':'♣️','♣️':'♠️'};
-function loadQuinteForce(){
-  try{
-    const raw = localStorage.getItem(QUINTE_FORCE_KEY);
-    if(!raw) return { active:false, biasCount:0, triggeredAt:null };
-    const o = JSON.parse(raw);
-    return {
-      active: !!o.active,
-      biasCount: Math.max(0, parseInt(o.biasCount,10)||0),
-      triggeredAt: o.triggeredAt || null
-    };
-  }catch(e){ return { active:false, biasCount:0, triggeredAt:null }; }
-}
-function saveQuinteForce(s){
-  try{ localStorage.setItem(QUINTE_FORCE_KEY, JSON.stringify(s)); }catch(e){}
-}
-let quinteForce = loadQuinteForce();
-
 
 // Inversion de rattrapage selon couleur/suit du jeu perdu et la pred :
 //  perdu ROUGE + pred ♦️ → ♠️ | perdu ROUGE + pred ♥️ → ♣️
@@ -1384,95 +1360,12 @@ function resolvePendingHistory(gameNum, p1Cards, p2Cards, rawText){
     if(ok === null) continue;
     entry.status = ok ? 'valid' : 'invalid';
     entry.autoResolved = true;
-    if(p1Cards && p1Cards.length) entry.actualP1Count = p1Cards.length;
-    if(p2Cards && p2Cards.length) entry.actualP2Count = p2Cards.length;
     try{
       if(rawText){
         const fmt = detectFormatFromRaw(rawText);
         if(fmt) entry.actualFormat = fmt;
       } else if(p1Cards && p2Cards){
         entry.actualFormat = detectHandFormat(p1Cards, p2Cards);
-      }
-    }catch(e){}
-    // ULTIME : perte + P1 exactement 2 cartes → prochaine pred inversée
-    if(entry.status === 'invalid' && entry.actualP1Count === 2){
-      entry.ultimeNext = true;
-      try{ localStorage.setItem('morgan_ultime_next', String(entry.gameNum + 1)); }catch(e){}
-    }
-    // ── MODE FORCE QUINTE (intelligent) ──
-    try{
-      const sk = entry.suitKey;
-      const isSuit = (sk==='♥️'||sk==='♦️'||sk==='♠️'||sk==='♣️');
-      if(isSuit && p1Cards && p1Cards.length){
-        const actualSuits = new Set(p1Cards.map(c=>c.suit));
-        const q = M_QUINTE_PAIR[sk];
-        if(entry.status === 'invalid'){
-          // Perte : la quinte de la pred était sur P1 ?
-          const quinteHit = q && actualSuits.has(q) && !actualSuits.has(sk);
-          if(quinteForce && quinteForce.active){
-            // En mode force : une perte → retour au cours normal
-            quinteForce = { active:false, biasCount:0, triggeredAt:null };
-            saveQuinteForce(quinteForce);
-            entry.quinteForceExit = true;
-          } else if(quinteHit){
-            quinteForce.biasCount = (quinteForce.biasCount||0) + 1;
-            entry.quinteBias = true;
-            if(quinteForce.biasCount >= 2){
-              quinteForce.active = true;
-              quinteForce.triggeredAt = entry.gameNum;
-              entry.quinteForceOn = true;
-            }
-            saveQuinteForce(quinteForce);
-          }
-        } else if(entry.status === 'valid'){
-          // Victoire en mode force : on reste actif (ça s'arrange en restant sur quinte)
-          // Victoire hors mode : ne reset pas le compteur (besoin de 2 pertes quinte)
-        }
-      }
-    }catch(e){}
-
-    // ── RATTRAPAGE MORGAN (max 3) ──
-    // Perte → démarre/continue rattrapage : lostSuit = suit prédite perdue
-    // (sera utilisée à la place de la 1ʳᵉ carte P1 au prochain calcul)
-    try{
-      const isMorgan = (entry.algoUsed === 'MORGAN' || histModeKey(entry.algoUsed) === 'OPT1');
-      if(isMorgan && (entry.suitKey === '♥️' || entry.suitKey === '♦️' || entry.suitKey === '♠️' || entry.suitKey === '♣️')){
-        if(entry.status === 'valid'){
-          if(rattrapage && rattrapage.active){
-            rattrapage = emptyRattrapage();
-            saveRattrapage(rattrapage);
-            try{ updateRegimeDisplay(); }catch(e){}
-          }
-        } else if(entry.status === 'invalid'){
-          if(!rattrapage || !rattrapage.active){
-            rattrapage = {
-              active: true,
-              algo: 'MORGAN',
-              remaining: RATTRAPAGE_MAX,
-              startedAt: entry.gameNum,
-              lostSuit: entry.suitKey,
-              lostColor: (entry.suitKey==='♥️'||entry.suitKey==='♦️') ? 'rouge' : 'noir',
-              lostFormat: entry.actualFormat || null,
-              rattrLevel: 1
-            };
-          } else {
-            // Rattrapage déjà actif et re-perdu → niveau suivant, lostSuit = pred échouée
-            const nextLevel = (rattrapage.rattrLevel || 1) + 1;
-            if(nextLevel > RATTRAPAGE_MAX){
-              rattrapage = emptyRattrapage();
-            } else {
-              rattrapage.lostSuit = entry.suitKey;
-              rattrapage.lostColor = (entry.suitKey==='♥️'||entry.suitKey==='♦️') ? 'rouge' : 'noir';
-              rattrapage.lostFormat = entry.actualFormat || rattrapage.lostFormat;
-              rattrapage.rattrLevel = nextLevel;
-              rattrapage.remaining = Math.max(0, RATTRAPAGE_MAX - nextLevel + 1);
-              rattrapage.active = true;
-              rattrapage.algo = 'MORGAN';
-            }
-          }
-          saveRattrapage(rattrapage);
-          try{ updateRegimeDisplay(); }catch(e){}
-        }
       }
     }catch(e){}
     lastEntry = entry;
@@ -1822,51 +1715,10 @@ function morganCardVal(v){
   if(v==='10') return 10;
   const n=parseInt(v,10); return isNaN(n)?0:n;
 }
-
-// ULTIME INVERSION : si le jeu précédent (nextNum-1) a été PERDU
-// et que P1 n'avait que 2 cartes → inv ♣️↔♠️ / ♥️↔♦️ sur la pred suivante
-const ULTIME_MAP = {'♣️':'♠️','♠️':'♣️','♥️':'♦️','♦️':'♥️'};
-function shouldApplyUltimeInv(nextNum){
-  try{
-    const list = loadHistory()
-      .filter(e => (e.algoUsed === 'MORGAN' || histModeKey(e.algoUsed) === 'OPT1') && (e.status === 'valid' || e.status === 'invalid'))
-      .sort((a,b) => a.gameNum - b.gameNum);
-    const last = list.filter(e => e.gameNum === nextNum - 1).pop();
-    if(!last || last.status !== 'invalid') return false;
-    if(last.actualP1Count === 2) return true;
-    // fallback format 2-x (P1 2 cartes)
-    const f = last.actualFormat || '';
-    if(f === '2-2' || f === '2-3') return true;
-    // flag explicite
-    if(last.ultimeNext) return true;
-    try{
-      const flagged = localStorage.getItem('morgan_ultime_next');
-      if(flagged && parseInt(flagged,10) === nextNum) return true;
-    }catch(e){}
-  }catch(e){}
-  return false;
-}
-
 function runMorgan(raw){
   const {num,p1,p2}=parseGame(raw);
   if(!p1.length||!p2.length) throw new Error('Cartes P1/P2 introuvables');
-  let p1First=p1[0], p2First=p2[0], nextNum=num+1;
-  // RATTRAPAGE MORGAN : remplacer 1ʳᵉ P1 par la suit prédite perdue (biaise)
-  let rattrMode=false, rattrInfo=null;
-  try{
-    if(typeof rattrapage !== 'undefined' && rattrapage && rattrapage.active && rattrapage.lostSuit){
-      rattrMode = true;
-      const synthVal = (p1First && p1First.val) ? p1First.val : '2'; // valeur neutre/paire → pas de réinv forcée
-      p1First = { val: synthVal, suit: rattrapage.lostSuit };
-      rattrInfo = {
-        level: rattrapage.rattrLevel || 1,
-        remaining: rattrapage.remaining,
-        lostSuit: rattrapage.lostSuit,
-        note: 'RATTR'+ (rattrapage.rattrLevel||1) +' · P1 synthétique = ' + (typeof SUIT_EMOJI!=='undefined' ? (SUIT_EMOJI[rattrapage.lostSuit]||rattrapage.lostSuit) : rattrapage.lostSuit) + ' (pred perdue) à la place de la 1ʳᵉ P1 réelle'
-      };
-    }
-  }catch(e){}
-
+  const p1First=p1[0], p2First=p2[0], nextNum=num+1;
   const p2Val=morganCardVal(p2First.val);
   const p2Even=(p2Val%2===0);
   let gammeNum=p2Even?1:2;
@@ -1966,52 +1818,12 @@ function runMorgan(raw){
     globalInvDetail='n°'+nextNum+' (< 2 chiffres) → pas d\'INV GLOBALE';
   }
 
-  // ── ULTIME INVERSION (après perte + P1 à 2 cartes uniquement)
-  let ultimeApplied=false, ultimeDetail='inactif', beforeUltime=finalSuit;
-  if(shouldApplyUltimeInv(nextNum)){
-    finalSuit = ULTIME_MAP[finalSuit] || finalSuit;
-    ultimeApplied = true;
-    ultimeDetail = 'perte #'+(nextNum-1)+' · P1 à 2 cartes → ULTIME ♣️↔♠️ / ♥️↔♦️ · '+(SUIT_EMOJI[beforeUltime]||'')+'→'+(SUIT_EMOJI[finalSuit]||'');
-    try{ localStorage.removeItem('morgan_ultime_next'); }catch(e){}
-  }
-
-  // ── FORCE QUINTE (mode intelligent)
-  let quinteForceApplied=false, quinteForceDetail='inactif', beforeQuinteForce=finalSuit;
-  try{
-    if(typeof quinteForce !== 'undefined' && quinteForce && quinteForce.active){
-      const q = M_QUINTE_PAIR[finalSuit] || finalSuit;
-      finalSuit = q;
-      quinteForceApplied = true;
-      quinteForceDetail = 'MODE FORCE QUINTE actif (2 pertes où la quinte validait) · '+(SUIT_EMOJI[beforeQuinteForce]||'')+'→'+(SUIT_EMOJI[finalSuit]||'')+' · déclenché @#'+(quinteForce.triggeredAt||'?');
-    } else if(typeof quinteForce !== 'undefined' && quinteForce){
-      quinteForceDetail = 'inactif · biais quinte '+(quinteForce.biasCount||0)+'/2';
-    }
-  }catch(e){}
-
-  // Format + révélation (affichage / suivi)
-  let gameFormat = null;
-  try{ gameFormat = detectFormatFromRaw(raw); }catch(e){}
-  const isRevelation = (p1.length===3 && p2.length===3);
-  if(isRevelation){
-    try{
-      regime.revelationNum = num;
-      regime.revelationParity = (num % 2 === 0) ? 'PAIR' : 'IMPAIR';
-      regime.source = '#N'+num+' (révélation 3-3 · MORGAN)';
-      saveRegime(regime);
-    }catch(e){}
-  }
-
   return {
     num, nextNum, p1First, p2First, p2Val, p2Even, gammeNum, gammeLabel, gammeInverted,
     result1, result2, isQuinte, expectedQuinte, quinteDetail, reinvApplied, reinvDetail,
     globalInvApplied, globalInvDetail, beforeGlobal,
-    ultimeApplied, ultimeDetail, beforeUltime,
-    quinteForceApplied, quinteForceDetail, beforeQuinteForce,
-    gameFormat, isRevelation,
-    rattrMode, rattrInfo,
     finalSuit,
-    algoUsed: 'MORGAN',
-    rattrapageForced: !!rattrMode
+    algoUsed: 'MORGAN', rattrapageForced: false
   };
 }
 function renderMorganResult(r){
@@ -2020,11 +1832,8 @@ function renderMorganResult(r){
   document.getElementById('res-suit-emoji').innerHTML='<span style="color:'+(red?'#cc4444':'var(--ivory)')+'">'+(SUIT_EMOJI[r.finalSuit]||r.finalSuit)+'</span>';
   document.getElementById('res-suit-label').textContent=SUIT_NAMES[r.finalSuit]||'';
   document.getElementById('res-side').innerHTML='<span class="side-tag">P1 · MORGAN</span>';
-  upsertHistoryEntry(r.nextNum, r.finalSuit, 'MORGAN', !!r.rattrMode, false);
+  upsertHistoryEntry(r.nextNum, r.finalSuit, 'MORGAN', false, false);
   const badges=[
-    r.rattrMode && r.rattrInfo
-      ? '<div class="badge badge-temporal" style="border-color:#ffbf80;color:#ffbf80">♻️ RATTRAPAGE '+r.rattrInfo.level+'/'+RATTRAPAGE_MAX+' — '+r.rattrInfo.note+'</div>'
-      : '',
     '<div class="badge badge-engine">◆ '+r.gammeLabel+' → '+(SUIT_EMOJI[r.p2First.suit]||'')+'→'+(SUIT_EMOJI[r.result1]||'')+'</div>',
     '<div class="badge badge-transform">◈ QUINTE — '+r.quinteDetail+'</div>',
     r.reinvApplied
@@ -2033,19 +1842,8 @@ function renderMorganResult(r){
     r.globalInvApplied
       ? '<div class="badge badge-hyper">🔄 INV GLOBALE — '+r.globalInvDetail+'</div>'
       : '<div class="badge badge-hyper" style="opacity:.55">🔄 INV GLOBALE — '+r.globalInvDetail+'</div>',
-    r.ultimeApplied
-      ? '<div class="badge badge-finalinv" style="border-color:#ff6b6b;color:#ff8a8a">⚡ ULTIME INV — '+r.ultimeDetail+'</div>'
-      : '',
-    r.quinteForceApplied
-      ? '<div class="badge badge-transform" style="border-color:#c084fc;color:#e9d5ff">🧠 FORCE QUINTE — '+r.quinteForceDetail+'</div>'
-      : ((typeof quinteForce!=='undefined' && quinteForce && quinteForce.biasCount>0)
-          ? '<div class="badge badge-transform" style="opacity:.7">🧠 Biais quinte '+(quinteForce.biasCount||0)+'/2</div>'
-          : ''),
-    r.isRevelation
-      ? '<div class="badge badge-revelation">🃏 RÉVÉLATION 3-3 · #N'+r.num+' · régime '+(regime.revelationParity||'')+'</div>'
-      : (r.gameFormat ? '<div class="badge badge-parity">📐 FORMAT '+r.gameFormat+'</div>' : ''),
     '<div class="badge badge-finalinv">✦ FINAL — #N'+r.nextNum+' '+(SUIT_EMOJI[r.finalSuit]||'')+' '+(SUIT_NAMES[r.finalSuit]||'')+' P1</div>'
-  ].filter(Boolean);
+  ];
   document.getElementById('badge-zone').innerHTML=badges.join('');
   document.getElementById('details-body').innerHTML=
 '<div class="det-row"><span class="det-label">Jeu fourni</span><span class="det-val">#N'+r.num+'</span></div>'+
@@ -2061,10 +1859,7 @@ function renderMorganResult(r){
 '<div class="det-row"><span class="det-label">Réinversion</span><span class="det-val hi">'+r.reinvDetail+'</span></div>'+
 '<hr class="det-sep">'+
 '<div class="det-row"><span class="det-label">INV GLOBALE n°</span><span class="det-val hi-pink">'+(r.globalInvDetail||'')+'</span></div>'+
-(r.globalInvApplied && !r.ultimeApplied ? '<div class="det-row"><span class="det-label">Après INV GLOBALE</span><span class="det-val hi-pink">'+(SUIT_EMOJI[r.beforeGlobal]||'')+' → '+(SUIT_EMOJI[r.beforeUltime]||r.finalSuit)+'</span></div>' : '')+
-'<div class="det-row"><span class="det-label">ULTIME INV</span><span class="det-val hi-red">'+(r.ultimeDetail||'inactif')+'</span></div>'+
-'<div class="det-row"><span class="det-label">FORCE QUINTE</span><span class="det-val" style="color:#e9d5ff">'+(r.quinteForceDetail||'inactif')+'</span></div>'+
-'<div class="det-row"><span class="det-label">Format / Révélation</span><span class="det-val">'+(r.gameFormat||'?')+(r.isRevelation?' · 🃏 RÉVÉLATION 3-3':'')+'</span></div>'+
+(r.globalInvApplied ? '<div class="det-row"><span class="det-label">Après INV GLOBALE</span><span class="det-val hi-pink">'+(SUIT_EMOJI[r.beforeGlobal]||'')+' → '+(SUIT_EMOJI[r.finalSuit]||'')+'</span></div>' : '')+
 '<hr class="det-sep">'+
 '<div class="det-row"><span class="det-label">RÉSULTAT FINAL</span><span class="det-val det-result">#N'+r.nextNum+' — '+(SUIT_EMOJI[r.finalSuit]||'')+' '+(SUIT_NAMES[r.finalSuit]||'')+' P1</span></div>';
   const zone=document.getElementById('result-zone');

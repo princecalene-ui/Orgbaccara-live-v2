@@ -1818,10 +1818,20 @@ function runMorgan(raw){
     globalInvDetail='n°'+nextNum+' (< 2 chiffres) → pas d\'INV GLOBALE';
   }
 
+  // ── ULTIME INVERSION 1100–1440 : ♦️↔♠️ / ♥️↔♣️ ──
+  let ultimeInvApplied = false, ultimeInvDetail = 'inactif', beforeUltime = finalSuit;
+  if(nextNum >= 1100 && nextNum <= 1440){
+    const MAP_ULTIME = {'♦️':'♠️','♠️':'♦️','♥️':'♣️','♣️':'♥️'};
+    finalSuit = MAP_ULTIME[finalSuit] || finalSuit;
+    ultimeInvApplied = true;
+    ultimeInvDetail = 'n°'+nextNum+' (1100–1440) → ULTIME INV ♦️↔♠️ / ♥️↔♣️ · '+(SUIT_EMOJI[beforeUltime]||'')+'→'+(SUIT_EMOJI[finalSuit]||'');
+  }
+
   return {
     num, nextNum, p1First, p2First, p2Val, p2Even, gammeNum, gammeLabel, gammeInverted,
     result1, result2, isQuinte, expectedQuinte, quinteDetail, reinvApplied, reinvDetail,
     globalInvApplied, globalInvDetail, beforeGlobal,
+    ultimeInvApplied, ultimeInvDetail, beforeUltime,
     finalSuit,
     algoUsed: 'MORGAN', rattrapageForced: false
   };
@@ -1842,9 +1852,13 @@ function renderMorganResult(r){
     r.globalInvApplied
       ? '<div class="badge badge-hyper">🔄 INV GLOBALE — '+r.globalInvDetail+'</div>'
       : '<div class="badge badge-hyper" style="opacity:.55">🔄 INV GLOBALE — '+r.globalInvDetail+'</div>',
+    r.ultimeInvApplied
+      ? '<div class="badge badge-hyper">⚡ ULTIME INV 1100–1440 — '+r.ultimeInvDetail+'</div>'
+      : '',
     '<div class="badge badge-finalinv">✦ FINAL — #N'+r.nextNum+' '+(SUIT_EMOJI[r.finalSuit]||'')+' '+(SUIT_NAMES[r.finalSuit]||'')+' P1</div>'
-  ];
+  ].filter(Boolean);
   document.getElementById('badge-zone').innerHTML=badges.join('');
+  const afterGlobalSuit = r.ultimeInvApplied ? r.beforeUltime : r.finalSuit;
   document.getElementById('details-body').innerHTML=
 '<div class="det-row"><span class="det-label">Jeu fourni</span><span class="det-val">#N'+r.num+'</span></div>'+
 '<div class="det-row"><span class="det-label">Jeu prédit</span><span class="det-val">#N'+r.nextNum+'</span></div>'+
@@ -1859,7 +1873,8 @@ function renderMorganResult(r){
 '<div class="det-row"><span class="det-label">Réinversion</span><span class="det-val hi">'+r.reinvDetail+'</span></div>'+
 '<hr class="det-sep">'+
 '<div class="det-row"><span class="det-label">INV GLOBALE n°</span><span class="det-val hi-pink">'+(r.globalInvDetail||'')+'</span></div>'+
-(r.globalInvApplied ? '<div class="det-row"><span class="det-label">Après INV GLOBALE</span><span class="det-val hi-pink">'+(SUIT_EMOJI[r.beforeGlobal]||'')+' → '+(SUIT_EMOJI[r.finalSuit]||'')+'</span></div>' : '')+
+(r.globalInvApplied ? '<div class="det-row"><span class="det-label">Après INV GLOBALE</span><span class="det-val hi-pink">'+(SUIT_EMOJI[r.beforeGlobal]||'')+' → '+(SUIT_EMOJI[afterGlobalSuit]||'')+'</span></div>' : '')+
+(r.ultimeInvApplied ? '<hr class="det-sep"><div class="det-row"><span class="det-label" style="color:#ff88aa">⚡ ULTIME INV 1100–1440</span><span class="det-val" style="color:#ff88aa">'+r.ultimeInvDetail+'</span></div><div class="det-row"><span class="det-label" style="color:#ff88aa">Après ULTIME</span><span class="det-val" style="color:#ff88aa">'+(SUIT_EMOJI[r.beforeUltime]||'')+' → '+(SUIT_EMOJI[r.finalSuit]||'')+'</span></div>' : '')+
 '<hr class="det-sep">'+
 '<div class="det-row"><span class="det-label">RÉSULTAT FINAL</span><span class="det-val det-result">#N'+r.nextNum+' — '+(SUIT_EMOJI[r.finalSuit]||'')+' '+(SUIT_NAMES[r.finalSuit]||'')+' P1</span></div>';
   const zone=document.getElementById('result-zone');

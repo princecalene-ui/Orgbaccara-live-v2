@@ -904,10 +904,10 @@ let SYNC_SKIP_RATTRAPAGE = false;
 
 // ── RATTRAPAGE SIMPLE (MORGAN) ──
 // Après 2 pertes consécutives normales → force la MÊME enseigne perdue
-// sur le 3e tour, puis sur le 4e si le 3e perd aussi.
-// Si le 3e gagne OU après le 4e (gagné ou perdu) → retour au cours normal.
+// sur le 3e tour uniquement (MAX 1).
+// Si le 3e gagne OU perd → retour au cours normal.
 const RATTRAPAGE_KEY = 'orgbacc_rattrapage_v1';
-const RATTRAPAGE_MAX = 2; // max 2 rattrapages (3e + 4e tour) puis retour à zéro
+const RATTRAPAGE_MAX = 1; // max 1 rattrapage (3e tour seulement) puis retour à zéro
 const ALLINV_MAX = 2;     // max 2 ALL.INV après perte puis retour à zéro
 function emptyRattrapage(){
   return { active:false, algo:null, remaining:0, startedAt:null, lostSuit:null, lostColor:null, lostFormat:null, rattrLevel:0 };
@@ -1105,8 +1105,30 @@ function shouldApplyAllInv(nextNum){
   return false;
 }
 
-// RATTRAPAGE SIMPLE : après 2 pertes consécutives normales → force la même enseigne perdue
-// sur le 3e tour, puis le 4e si besoin. Max 2 rattrapages puis retour normal.
+// RATTRAPAGE ENSEIGNE (MAX 1) — après 2 pertes consécutives :
+//   • Jeu PAIR   → map COULEUR  : ♠️↔♣️ / ♥️↔♦️
+//   • Jeu IMPAIR → map INVERSE  : ♠️↔♥️ / ♣️↔♦️
+// Puis retour normal (gagné ou perdu).
+const RATTR_MAP_PAIR   = {'♠️':'♣️','♣️':'♠️','♥️':'♦️','♦️':'♥️'}; // couleur
+const RATTR_MAP_IMPAIR = {'♠️':'♥️','♥️':'♠️','♣️':'♦️','♦️':'♣️'}; // inverse total
+
+function mapRattrapageSuit(lostSuit, nextNum){
+  if(!lostSuit) return null;
+  const isPair = (nextNum % 2 === 0);
+  const map = isPair ? RATTR_MAP_PAIR : RATTR_MAP_IMPAIR;
+  const result = map[lostSuit] || lostSuit;
+  const label = isPair
+    ? ('PAIR → COULEUR ♠️↔♣️/♥️↔♦️')
+    : ('IMPAIR → INVERSE ♠️↔♥️/♣️↔♦️');
+  return {
+    result,
+    lostSuit,
+    isPair,
+    label,
+    detail: label + ' · ' + (SUIT_EMOJI[lostSuit]||lostSuit) + '→' + (SUIT_EMOJI[result]||result)
+  };
+}
+
 function shouldApplyRattrapage(nextNum){
   if(typeof SYNC_SKIP_RATTRAPAGE !== 'undefined' && SYNC_SKIP_RATTRAPAGE) return null;
   try{
@@ -1127,23 +1149,27 @@ function shouldApplyRattrapage(nextNum){
       if(opt1[i].rattrapage) rattrDone++;
     }
 
-    // Déjà 2 rattrapages perdus → stop, retour normal
+    // Déjà MAX rattrapages perdus → stop, retour normal
     if(rattrDone >= RATTRAPAGE_MAX) return null;
 
-    // Besoin d'au moins 2 pertes consécutives avant de démarrer le 1er rattrapage
-    // (perte1 + perte2 normales → rattrapage sur le 3e)
-    // Ou bien on est déjà en série de rattrapage (rattrDone >= 1)
+    // Besoin d'au moins 2 pertes consécutives avant de démarrer
     if(consecLoss < 2 && rattrDone === 0) return null;
 
-    // La carte à re-prédire = enseigne de la dernière pred perdue
     const lostSuit = last.suitKey || null;
     if(!lostSuit || (lostSuit !== '♠️' && lostSuit !== '♥️' && lostSuit !== '♦️' && lostSuit !== '♣️')) return null;
 
-    const rattrLevel = rattrDone + 1; // 1 = 3e tour, 2 = 4e tour
+    // Map selon parité du jeu prédit (nextNum)
+    const mapped = mapRattrapageSuit(lostSuit, nextNum);
+    if(!mapped) return null;
+
+    const rattrLevel = rattrDone + 1;
     return {
       active: true,
       algo: last.algoUsed || 'MORGAN',
       lostSuit: lostSuit,
+      forcedSuit: mapped.result,
+      mapLabel: mapped.label,
+      mapDetail: mapped.detail,
       lostColor: isRed(lostSuit) ? 'rouge' : 'noir',
       lostFormat: last.actualFormat ? normalizeLostFormat(last.actualFormat) : lookupGameFormat(last.gameNum),
       rattrLevel: rattrLevel,
@@ -1184,7 +1210,7 @@ function updateRegimeDisplay(){
   const p1parity = regime.revelationParity;
   const p2parity = p1parity==='PAIR' ? 'IMPAIR' : 'PAIR';
   let rattrapageHtml = '';
-  // Affiche l'état rattrapage simple (après 2 pertes → force même enseigne)
+  // Affiche l'état rattrapage (PAIR→couleur / IMPAIR→inverse)
   try{
     const opt1 = loadHistory()
       .filter(e => histModeKey(e.algoUsed)==='OPT1' && (e.status==='valid'||e.status==='invalid'))
@@ -1199,18 +1225,19 @@ function updateRegimeDisplay(){
       }
     }
     if(last && last.status==='invalid' && consecLoss >= 2 && rattrDone < RATTRAPAGE_MAX){
-      const suitHint = last.suitKey ? (SUIT_EMOJI[last.suitKey]||last.suitKey) : '?';
-      const nextLevel = rattrDone + 1;
+      const nextGame = last.gameNum + 1;
+      const mapped = (typeof mapRattrapageSuit === 'function') ? mapRattrapageSuit(last.suitKey, nextGame) : null;
+      const mapTxt = mapped ? mapped.detail : (SUIT_EMOJI[last.suitKey]||'?');
       rattrapageHtml = `
     <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #7a6028">
       <span class="regime-label" style="color:#ffbf80">⏱ RATTRAPAGE</span>
-      <span class="regime-val" style="color:#ffbf80">ACTIF n°${nextLevel} · force ${suitHint} (même carte perdante) · après ${consecLoss} pertes · max ${RATTRAPAGE_MAX}</span>
+      <span class="regime-val" style="color:#ffbf80">ACTIF · ${mapTxt} · après ${consecLoss} pertes · max ${RATTRAPAGE_MAX}</span>
     </div>`;
     } else if(last && last.status==='invalid' && consecLoss === 1){
       rattrapageHtml = `
     <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #7a6028">
       <span class="regime-label" style="color:#ffbf80">⏱ RATTRAPAGE</span>
-      <span class="regime-val" style="color:#ffbf80">EN VEILLE · 1 perte · besoin d'une 2e perte pour activer</span>
+      <span class="regime-val" style="color:#ffbf80">EN VEILLE · 1 perte · besoin d'une 2e perte · PAIR=couleur / IMPAIR=inverse</span>
     </div>`;
     } else {
       rattrapageHtml = `
@@ -1844,16 +1871,16 @@ function runMorgan(raw){
     globalInvDetail='n°'+nextNum+' (< 2 chiffres) → pas d\'INV GLOBALE';
   }
 
-  // ── RATTRAPAGE SIMPLE : après 2 pertes → force la même enseigne perdue ──
+  // ── RATTRAPAGE ENSEIGNE (MAX 1) : PAIR→couleur / IMPAIR→inverse ──
   let rattrapageForced = false;
-  let rattrapageSnapshot = { forced:false, lostSuit:null, rattrLevel:0, remainingBefore:0, remainingAfter:0 };
+  let rattrapageSnapshot = { forced:false, lostSuit:null, forcedSuit:null, mapLabel:'', mapDetail:'', rattrLevel:0, remainingBefore:0, remainingAfter:0 };
   let beforeRattr = finalSuit;
   try{
     const rattrInfo = shouldApplyRattrapage(nextNum);
-    if(rattrInfo && rattrInfo.active && rattrInfo.lostSuit){
+    if(rattrInfo && rattrInfo.active && rattrInfo.forcedSuit){
       rattrapageForced = true;
       beforeRattr = finalSuit;
-      finalSuit = rattrInfo.lostSuit; // re-prédire EXACTEMENT la même carte perdante
+      finalSuit = rattrInfo.forcedSuit; // map selon parité du jeu
       rattrapage = {
         active: true,
         algo: 'MORGAN',
@@ -1867,6 +1894,9 @@ function runMorgan(raw){
       rattrapageSnapshot = {
         forced: true,
         lostSuit: rattrInfo.lostSuit,
+        forcedSuit: rattrInfo.forcedSuit,
+        mapLabel: rattrInfo.mapLabel || '',
+        mapDetail: rattrInfo.mapDetail || '',
         rattrLevel: rattrInfo.rattrLevel || 1,
         remainingBefore: rattrInfo.remaining != null ? rattrInfo.remaining : RATTRAPAGE_MAX,
         remainingAfter: Math.max(0, (rattrInfo.remaining != null ? rattrInfo.remaining : RATTRAPAGE_MAX) - 1)
@@ -1907,7 +1937,7 @@ function renderMorganResult(r){
       ? '<div class="badge badge-hyper">🔄 INV GLOBALE — '+r.globalInvDetail+'</div>'
       : '<div class="badge badge-hyper" style="opacity:.55">🔄 INV GLOBALE — '+r.globalInvDetail+'</div>',
     (r.rattrapageForced
-      ? '<div class="badge badge-temporal">⏱ RATTRAPAGE n°'+(r.rattrapageSnapshot&&r.rattrapageSnapshot.rattrLevel||'?')+' — re-pred '+(SUIT_EMOJI[r.finalSuit]||r.finalSuit)+' (même carte perdante) · restant '+(r.rattrapageSnapshot?r.rattrapageSnapshot.remainingAfter:0)+'/'+RATTRAPAGE_MAX+'</div>'
+      ? '<div class="badge badge-temporal">⏱ RATTRAPAGE — '+(r.rattrapageSnapshot&&r.rattrapageSnapshot.mapDetail?r.rattrapageSnapshot.mapDetail:(SUIT_EMOJI[r.finalSuit]||r.finalSuit))+' · restant '+(r.rattrapageSnapshot?r.rattrapageSnapshot.remainingAfter:0)+'/'+RATTRAPAGE_MAX+'</div>'
       : ''),
     '<div class="badge badge-finalinv">✦ FINAL — #N'+r.nextNum+' '+(SUIT_EMOJI[r.finalSuit]||'')+' '+(SUIT_NAMES[r.finalSuit]||'')+' P1'+(r.rattrapageForced?' · ⏱ RATTR':'')+'</div>'
   ].filter(Boolean);
@@ -1928,8 +1958,9 @@ function renderMorganResult(r){
 '<div class="det-row"><span class="det-label">INV GLOBALE n°</span><span class="det-val hi-pink">'+(r.globalInvDetail||'')+'</span></div>'+
 (r.globalInvApplied && !r.rattrapageForced ? '<div class="det-row"><span class="det-label">Après INV GLOBALE</span><span class="det-val hi-pink">'+(SUIT_EMOJI[r.beforeGlobal]||'')+' → '+(SUIT_EMOJI[r.finalSuit]||'')+'</span></div>' : '')+
 (r.rattrapageForced
-  ? '<hr class="det-sep"><div class="det-row"><span class="det-label" style="color:#ffbf80">⏱ RATTRAPAGE</span><span class="det-val" style="color:#ffbf80">ACTIF · n°'+(r.rattrapageSnapshot&&r.rattrapageSnapshot.rattrLevel||'?')+' · force '+(SUIT_EMOJI[r.finalSuit]||'')+' (même carte perdante)</span></div>'+
-    '<div class="det-row"><span class="det-label" style="color:#ffbf80">Avant force</span><span class="det-val" style="color:#ffbf80">'+(SUIT_EMOJI[r.beforeRattr]||r.beforeRattr||'?')+' → '+(SUIT_EMOJI[r.finalSuit]||'')+'</span></div>'+
+  ? '<hr class="det-sep"><div class="det-row"><span class="det-label" style="color:#ffbf80">⏱ RATTRAPAGE</span><span class="det-val" style="color:#ffbf80">ACTIF · '+(r.rattrapageSnapshot&&r.rattrapageSnapshot.mapLabel?r.rattrapageSnapshot.mapLabel:'')+'</span></div>'+
+    '<div class="det-row"><span class="det-label" style="color:#ffbf80">Perdue → Forcée</span><span class="det-val" style="color:#ffbf80">'+(SUIT_EMOJI[(r.rattrapageSnapshot&&r.rattrapageSnapshot.lostSuit)||'']||'?')+' → '+(SUIT_EMOJI[r.finalSuit]||'')+'</span></div>'+
+    '<div class="det-row"><span class="det-label" style="color:#ffbf80">Avant force (moteur)</span><span class="det-val" style="color:#ffbf80">'+(SUIT_EMOJI[r.beforeRattr]||r.beforeRattr||'?')+' → '+(SUIT_EMOJI[r.finalSuit]||'')+'</span></div>'+
     '<div class="det-row"><span class="det-label" style="color:#ffbf80">Restant</span><span class="det-val" style="color:#ffbf80">'+(r.rattrapageSnapshot?r.rattrapageSnapshot.remainingAfter:0)+'/'+RATTRAPAGE_MAX+'</span></div>'
   : '')+
 '<hr class="det-sep">'+

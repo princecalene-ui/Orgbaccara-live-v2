@@ -907,7 +907,7 @@ let SYNC_SKIP_RATTRAPAGE = false;
 // sur le 3e tour uniquement (MAX 1).
 // Si le 3e gagne OU perd → retour au cours normal.
 const RATTRAPAGE_KEY = 'orgbacc_rattrapage_v1';
-const RATTRAPAGE_MAX = 1; // max 1 rattrapage (3e tour seulement) puis retour à zéro
+const RATTRAPAGE_MAX = 1; // max 1 rattrapage (dès la 1ère perte) puis retour à zéro
 const ALLINV_MAX = 2;     // max 2 ALL.INV après perte puis retour à zéro
 function emptyRattrapage(){
   return { active:false, algo:null, remaining:0, startedAt:null, lostSuit:null, lostColor:null, lostFormat:null, rattrLevel:0 };
@@ -1105,7 +1105,7 @@ function shouldApplyAllInv(nextNum){
   return false;
 }
 
-// RATTRAPAGE ENSEIGNE (MAX 1) — après 2 pertes consécutives :
+// RATTRAPAGE ENSEIGNE (MAX 1) — dès la 1ère perte :
 //   • Jeu PAIR   → map COULEUR  : ♠️↔♣️ / ♥️↔♦️
 //   • Jeu IMPAIR → map INVERSE  : ♠️↔♥️ / ♣️↔♦️
 // Puis retour normal (gagné ou perdu).
@@ -1152,8 +1152,8 @@ function shouldApplyRattrapage(nextNum){
     // Déjà MAX rattrapages perdus → stop, retour normal
     if(rattrDone >= RATTRAPAGE_MAX) return null;
 
-    // Besoin d'au moins 2 pertes consécutives avant de démarrer
-    if(consecLoss < 2 && rattrDone === 0) return null;
+    // Dès 1 perte → rattrapage sur le coup suivant
+    if(consecLoss < 1 && rattrDone === 0) return null;
 
     const lostSuit = last.suitKey || null;
     if(!lostSuit || (lostSuit !== '♠️' && lostSuit !== '♥️' && lostSuit !== '♦️' && lostSuit !== '♣️')) return null;
@@ -1224,33 +1224,27 @@ function updateRegimeDisplay(){
         if(opt1[i].rattrapage) rattrDone++;
       }
     }
-    if(last && last.status==='invalid' && consecLoss >= 2 && rattrDone < RATTRAPAGE_MAX){
+    if(last && last.status==='invalid' && consecLoss >= 1 && rattrDone < RATTRAPAGE_MAX){
       const nextGame = last.gameNum + 1;
       const mapped = (typeof mapRattrapageSuit === 'function') ? mapRattrapageSuit(last.suitKey, nextGame) : null;
       const mapTxt = mapped ? mapped.detail : (SUIT_EMOJI[last.suitKey]||'?');
       rattrapageHtml = `
     <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #7a6028">
       <span class="regime-label" style="color:#ffbf80">⏱ RATTRAPAGE</span>
-      <span class="regime-val" style="color:#ffbf80">ACTIF · ${mapTxt} · après ${consecLoss} pertes · max ${RATTRAPAGE_MAX}</span>
-    </div>`;
-    } else if(last && last.status==='invalid' && consecLoss === 1){
-      rattrapageHtml = `
-    <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #7a6028">
-      <span class="regime-label" style="color:#ffbf80">⏱ RATTRAPAGE</span>
-      <span class="regime-val" style="color:#ffbf80">EN VEILLE · 1 perte · besoin d'une 2e perte · PAIR=couleur / IMPAIR=inverse</span>
+      <span class="regime-val" style="color:#ffbf80">ACTIF · ${mapTxt} · après ${consecLoss} perte(s) · max ${RATTRAPAGE_MAX}</span>
     </div>`;
     } else {
       rattrapageHtml = `
     <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #2a1a1a">
       <span class="regime-label">Rattrapage</span>
-      <span class="regime-val" style="color:var(--ivory-dim)">Inactif · s'active après 2 pertes consécutives · max ${RATTRAPAGE_MAX}</span>
+      <span class="regime-val" style="color:var(--ivory-dim)">Inactif · s'active dès 1 perte · PAIR=couleur / IMPAIR=inverse · max ${RATTRAPAGE_MAX}</span>
     </div>`;
     }
   }catch(e){
     rattrapageHtml = `
     <div class="regime-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #2a1a1a">
       <span class="regime-label">Rattrapage</span>
-      <span class="regime-val" style="color:var(--ivory-dim)">Inactif · s'active après 2 pertes consécutives · max ${RATTRAPAGE_MAX}</span>
+      <span class="regime-val" style="color:var(--ivory-dim)">Inactif · s'active dès 1 perte · max ${RATTRAPAGE_MAX}</span>
     </div>`;
   }
   const fmtOn = (typeof fmtInv !== 'undefined' && fmtInv.globalOn);
